@@ -993,9 +993,18 @@
   min-height: 26px;
 }
 
+/* font-size explicit, not inherited -- shadcn's Label component carries its
+   own text-sm (14px) Tailwind class directly on the element, which wins over
+   plain inheritance from .scripture-inspector's 13px. Without this override
+   here, every field label in a -row layout (Background, Radius, Language,
+   Theme, Font, Window chrome, Filename, etc. -- the majority of the
+   Inspector) rendered 2px larger than the exact same "field label" role in
+   a -stack layout (Layout, Direction/Align/Justify, Filename position),
+   which already set this explicitly. Both now match. */
 .scripture-inspector-row label {
   color: var(--muted-foreground);
   cursor: default;
+  font-size: 12px;
 }
 
 /* Label-above-control layout for the flex-property rows (Direction/Align/

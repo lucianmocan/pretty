@@ -789,11 +789,13 @@ export function InspectorPanel({
             />
           </div>
 
-          <Label>Theme</Label>
-          <ThemeSwatchPicker
-            value={node.theme ?? 'dracula'}
-            onChange={(theme) => updateCodeProps(doc, node.id, { theme })}
-          />
+          <div className="scripture-inspector-stack">
+            <Label>Theme</Label>
+            <ThemeSwatchPicker
+              value={node.theme ?? 'dracula'}
+              onChange={(theme) => updateCodeProps(doc, node.id, { theme })}
+            />
+          </div>
           <p className="scripture-inspector-hint">
             Changing language or theme re-highlights the existing code, clearing any manual bold/italic/highlight on it.
           </p>
