@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# scripture: locally saved documents (bridges browser session <-> Playwright export)
+/.data/
