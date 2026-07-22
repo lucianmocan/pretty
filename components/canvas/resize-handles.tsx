@@ -10,6 +10,10 @@ interface ResizeHandlesProps {
   targetRef: React.RefObject<HTMLElement | null>
   onResize: (size: { width: number; height: number }) => void
   onCommit: (size: { width: number; height: number }) => void
+  // Current canvas zoom factor (1 = 100%) -- see the matching comment in
+  // frame-node.tsx's FrameNodeProps for why screen-space measurements need
+  // dividing by this before being treated as content-space size values.
+  zoom: number
 }
 
 /**
@@ -19,7 +23,7 @@ interface ResizeHandlesProps {
  * stored value) and reports live deltas during the drag, committing once on
  * release so resizing doesn't spam the undo stack on every pixel of motion.
  */
-export function ResizeHandles({ targetRef, onResize, onCommit }: ResizeHandlesProps) {
+export function ResizeHandles({ targetRef, onResize, onCommit, zoom }: ResizeHandlesProps) {
   const dragState = useRef<{ startX: number; startY: number; startW: number; startH: number; axis: Axis } | null>(
     null
   )
@@ -30,13 +34,19 @@ export function ResizeHandles({ targetRef, onResize, onCommit }: ResizeHandlesPr
       e.stopPropagation()
       const rect = targetRef.current?.getBoundingClientRect()
       if (!rect) return
-      dragState.current = { startX: e.clientX, startY: e.clientY, startW: rect.width, startH: rect.height, axis }
+      dragState.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        startW: rect.width / zoom,
+        startH: rect.height / zoom,
+        axis,
+      }
 
       const compute = (ev: PointerEvent) => {
         const s = dragState.current
         if (!s) return null
-        const dx = ev.clientX - s.startX
-        const dy = ev.clientY - s.startY
+        const dx = (ev.clientX - s.startX) / zoom
+        const dy = (ev.clientY - s.startY) / zoom
         const width = s.axis === 'y' ? Math.round(s.startW) : Math.max(MIN_SIZE, Math.round(s.startW + dx))
         const height = s.axis === 'x' ? Math.round(s.startH) : Math.max(MIN_SIZE, Math.round(s.startH + dy))
         return { width, height }

@@ -53,9 +53,37 @@ export interface FrameProps {
 export type LayoutNodeKind = 'frame' | 'code' | 'text' | 'image'
 
 // Window chrome around a code block: traffic-light dots, a VS Code-style
-// tab, a plain terminal bar, or none at all. Replaces the old boolean
-// showChrome outright (local-only data, no migration system to preserve).
-export type ChromeStyle = 'mac' | 'vscode-tab' | 'terminal' | 'none'
+// tab, a plain terminal bar, a user-designed custom one, or none at all.
+// Replaces the old boolean showChrome outright (local-only data, no
+// migration system to preserve).
+export type ChromeStyle = 'mac' | 'vscode-tab' | 'terminal' | 'custom' | 'none'
+
+// A small fixed icon set a custom chrome bar can show -- resolved to an
+// actual lucide-react component in components/editor/code-chrome.tsx (the
+// only consumer), never stored as a component reference itself since this
+// whole object round-trips through JSON (the Yjs doc, localStorage).
+export type ChromeIconKey = 'none' | 'file-code' | 'terminal' | 'folder' | 'code' | 'braces'
+
+// A user-designed window chrome bar. Stored WHOLE on the code block that
+// uses it (CodeBlockProps.customChrome below) -- not just a ref to a saved
+// library entry by id -- so the print/export route's fresh, localStorage-
+// less browser context can still render it exactly like the live editor
+// does. lib/presets/custom-chrome-styles.ts's localStorage CRUD is only a
+// reusable "library" a user picks from and copies out of (same pattern as
+// lib/presets/style-presets.ts), not the live source of truth for a block
+// that's already using one.
+export interface CustomChromeStyle {
+  id: string
+  name: string
+  barBackground: string
+  barBorderColor: string
+  textColor: string
+  // null = no traffic-light-style dots row at all.
+  dotColors: [string, string, string] | null
+  icon: ChromeIconKey
+  filenamePosition: 'inline' | 'tab'
+  radius: number
+}
 
 /**
  * Plain, JSON-serializable tree shape -- what you get back from
@@ -95,6 +123,7 @@ export interface LayoutNode {
   fontFamily?: string
   filename?: string
   chromeStyle?: ChromeStyle
+  customChrome?: CustomChromeStyle
   showLineNumbers?: boolean
   startLineNumber?: number
   ligatures?: boolean
@@ -116,6 +145,7 @@ export interface CodeBlockProps {
   fontFamily: string
   filename: string
   chromeStyle: ChromeStyle
+  customChrome?: CustomChromeStyle
   showLineNumbers: boolean
   startLineNumber: number
   ligatures: boolean

@@ -1,11 +1,20 @@
 'use client'
 
 import { useState, type CSSProperties, type ReactNode } from 'react'
-import { FileCode, Terminal } from 'lucide-react'
+import { FileCode, Terminal, Folder, Code, Braces, type LucideIcon } from 'lucide-react'
 import { fontCssVar } from '@/lib/presets'
 import { rangesToSet } from '@/lib/layout/line-ranges'
 import { cn } from '@/lib/utils'
-import type { ChromeStyle } from '@/lib/layout/types'
+import type { ChromeStyle, ChromeIconKey, CustomChromeStyle } from '@/lib/layout/types'
+
+const CUSTOM_CHROME_ICONS: Record<ChromeIconKey, LucideIcon | null> = {
+  none: null,
+  'file-code': FileCode,
+  terminal: Terminal,
+  folder: Folder,
+  code: Code,
+  braces: Braces,
+}
 
 // Matches .scripture-code-editor's fixed font-size in app/globals.css --
 // with an explicit numeric line-height, row height in px is deterministic
@@ -27,13 +36,58 @@ interface CodeChromeProps {
   highlightLines: Array<[number, number]>
   trimRanges: Array<[number, number]>
   diffLines: Record<number, 'add' | 'remove'>
+  // Only meaningful when chromeStyle === 'custom' -- the block's own copy of
+  // a saved custom chrome (see lib/layout/types.ts's comment on
+  // CustomChromeStyle for why it's a full copy, not just an id reference).
+  customChrome?: CustomChromeStyle
   // Only provided by the live editor -- the print route has no interaction,
   // so gutter numbers there just aren't clickable.
   onLineClick?: (lineNumber: number) => void
   children: ReactNode
 }
 
-function ChromeBar({ chromeStyle, filename }: { chromeStyle: ChromeStyle; filename: string }) {
+function ChromeBar({
+  chromeStyle,
+  filename,
+  customChrome,
+}: {
+  chromeStyle: ChromeStyle
+  filename: string
+  customChrome?: CustomChromeStyle
+}) {
+  if (chromeStyle === 'custom' && customChrome) {
+    const Icon = CUSTOM_CHROME_ICONS[customChrome.icon]
+    return (
+      <div
+        className="scripture-chrome-bar"
+        style={{
+          background: customChrome.barBackground,
+          borderBottomColor: customChrome.barBorderColor,
+          color: customChrome.textColor,
+          borderRadius: customChrome.radius,
+        }}
+      >
+        {customChrome.dotColors && (
+          <>
+            <span className="scripture-dot" style={{ background: customChrome.dotColors[0] }} />
+            <span className="scripture-dot" style={{ background: customChrome.dotColors[1] }} />
+            <span className="scripture-dot" style={{ background: customChrome.dotColors[2] }} />
+          </>
+        )}
+        {Icon && <Icon size={13} />}
+        {filename &&
+          (customChrome.filenamePosition === 'tab' ? (
+            <span className="scripture-chrome-tab" style={{ borderBottomColor: customChrome.textColor }}>
+              {filename}
+            </span>
+          ) : (
+            <span className="scripture-filename" style={{ color: customChrome.textColor }}>
+              {filename}
+            </span>
+          ))}
+      </div>
+    )
+  }
   if (chromeStyle === 'mac') {
     return (
       <div className="scripture-chrome-bar scripture-chrome-mac">
@@ -78,6 +132,7 @@ export function CodeChrome({
   fontFamily,
   filename,
   chromeStyle,
+  customChrome,
   showLineNumbers,
   lineCount,
   startLineNumber,
@@ -111,7 +166,7 @@ export function CodeChrome({
 
   return (
     <div className="scripture-code-chrome" style={style}>
-      <ChromeBar chromeStyle={chromeStyle} filename={filename} />
+      <ChromeBar chromeStyle={chromeStyle} filename={filename} customChrome={customChrome} />
       <div className="scripture-code-body">
         {showLineNumbers && (
           <div className="scripture-line-numbers" aria-hidden="true">

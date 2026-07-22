@@ -176,17 +176,65 @@
 --------------------------------------------------------------------------- */
 
 .scripture-canvas-area {
+  position: relative;
   flex: 1;
   min-width: 0;
+  height: 100%;
+  overflow: auto;
   display: flex;
   justify-content: center;
   padding: 56px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border);
   background-color: var(--card);
   background-image: radial-gradient(var(--border) 1px, transparent 1px);
   background-size: 22px 22px;
-  box-shadow: inset 0 1px 0 var(--highlight-top), inset 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* Scaled to `zoom` via a CSS transform on the INNER element -- this outer
+   box is sized to the SCALED pixel dimensions (width/height set inline from
+   a ResizeObserver reading, see app/doc/[docId]/page.tsx) so the scrollable
+   .scripture-canvas-area actually gets bigger scroll bounds as you zoom in,
+   instead of a `transform: scale()` silently leaving the pre-transform,
+   unscaled layout box behind for scrolling purposes. */
+.scripture-canvas-scale-box {
+  display: inline-block;
+  position: relative;
+}
+
+.scripture-canvas-viewport {
+  display: inline-block;
+  transform-origin: top left;
+}
+
+.scripture-zoom-controls {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--popover);
+  box-shadow: var(--shadow-md);
+}
+
+.scripture-zoom-percent {
+  min-width: 44px;
+  padding: 4px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.scripture-zoom-percent:hover {
+  background: var(--accent);
+  color: var(--foreground);
 }
 
 .scripture-canvas-root {
@@ -759,6 +807,20 @@
   border-radius: 50%;
 }
 
+.theme-swatch-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.theme-swatch-add:hover {
+  color: var(--foreground);
+  border-color: var(--ring);
+}
+
 /* ---------------------------------------------------------------------------
    Editor header + Inspector panel -- layout/spacing only; the controls
    inside are real shadcn components (Button/Input/Select/Switch/etc).
@@ -794,10 +856,52 @@
   text-align: center;
 }
 
-.scripture-app-layout {
+/* ---------------------------------------------------------------------------
+   Editor shell (Figma-style) -- app/doc/[docId]/page.tsx only. A parallel
+   shell to .scripture-page above (used by the dashboard), not a redefinition
+   of it: zero page padding, a fixed-height chain down to the canvas/inspector
+   so they can genuinely fill the remaining viewport with no gap between them.
+--------------------------------------------------------------------------- */
+
+.scripture-editor-shell {
   display: flex;
-  gap: 20px;
-  align-items: flex-start;
+  flex-direction: column;
+  height: 100dvh;
+  width: 100%;
+}
+
+.scripture-app-menubar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  height: 44px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+.scripture-home-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s;
+}
+
+.scripture-home-link:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.scripture-workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
   width: 100%;
 }
 
@@ -805,9 +909,10 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  width: 100%;
-  margin-top: -12px;
-  margin-bottom: 20px;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
 }
 
 .scripture-page-tab {
@@ -846,13 +951,23 @@
   background: rgba(255, 255, 255, 0.1);
 }
 
-/* Card (shadcn) supplies the background/border/radius/shadow chrome now --
-   this class only adds the sidebar-specific sizing on top of it. */
+/* Docked flush against .scripture-canvas-area (no gap, Figma-style) --
+   overrides the shadcn Card's own default rounded/all-sides-border/shadow
+   chrome with a plain left divider instead, since a floating rounded card
+   butted directly against the canvas with zero margin reads as a mistake,
+   not a sidebar. Same specificity as Card's utility classes and defined
+   later in this stylesheet, so it wins the cascade tie. */
 .scripture-inspector {
   width: 272px;
   flex-shrink: 0;
   font-size: 13px;
   align-self: stretch;
+  overflow-y: auto;
+  border-radius: 0;
+  border: none;
+  border-left: 1px solid var(--border);
+  box-shadow: none;
+  background: var(--card);
 }
 
 .scripture-inspector-section {
@@ -897,6 +1012,27 @@
   color: var(--muted-foreground);
 }
 
+/* Condensed icon toolbar at the top of the Frame/Canvas Inspector section
+   (Direction/Align/Justify/Gap/Padding) -- Keynote/Pages-style dense
+   grouping instead of a stack of full-width labeled rows, so the panel
+   doesn't feel cluttered. Wraps to a second line rather than overflowing
+   when all the groups don't fit the panel's width at once. */
+.scripture-inspector-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  row-gap: 6px;
+}
+
+.scripture-inspector-toolbar-divider {
+  align-self: stretch;
+  min-height: 20px;
+  width: 1px;
+  margin: 0 2px;
+  background: var(--border);
+}
+
 /* Icon-prefixed numeric field (gap/padding/radius/width/height) -- Figma-
    style property labeling by icon instead of a text label taking up room. */
 .field-with-icon {
@@ -929,6 +1065,66 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* ---------------------------------------------------------------------------
+   Customize dialog (components/customize/customize-dialog.tsx)
+--------------------------------------------------------------------------- */
+
+.scripture-customize-body {
+  display: flex;
+  gap: 16px;
+  min-height: 420px;
+}
+
+.scripture-customize-list {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 4px;
+  width: 150px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.scripture-customize-form {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 10px;
+  width: 260px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.scripture-customize-color-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.scripture-customize-color-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.scripture-customize-preview {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 20px;
+  border-radius: var(--radius-md);
+  overflow: auto;
+  background: #1e1e1e;
+}
+
+.scripture-customize-preview-code {
+  white-space: pre;
 }
 
 /* ---------------------------------------------------------------------------

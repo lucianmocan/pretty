@@ -12,8 +12,9 @@ import { tokensToContent, type ProseMirrorTextNode } from '@/lib/tiptap/shiki-to
 import { BubbleToolbar } from './bubble-toolbar'
 import { CodeChrome } from './code-chrome'
 import { DEFAULT_THEME } from '@/lib/presets'
+import { resolveThemeArg } from '@/lib/presets/custom-syntax-themes'
 import type { PlainToken } from '@/lib/shiki/tokenize'
-import type { ChromeStyle } from '@/lib/layout/types'
+import type { ChromeStyle, CustomChromeStyle } from '@/lib/layout/types'
 import { useEditorRegistry } from './editor-registry'
 
 const RETOKENIZE_DEBOUNCE_MS = 350
@@ -58,6 +59,7 @@ interface BlockEditorProps {
   fontFamily?: string
   filename?: string
   chromeStyle?: ChromeStyle
+  customChrome?: CustomChromeStyle
   showLineNumbers?: boolean
   startLineNumber?: number
   ligatures?: boolean
@@ -89,6 +91,7 @@ export function BlockEditor({
   fontFamily = 'geist-mono',
   filename = '',
   chromeStyle = 'none',
+  customChrome,
   showLineNumbers = false,
   startLineNumber = 1,
   ligatures = true,
@@ -139,7 +142,11 @@ export function BlockEditor({
     if (oldText === newText) return
 
     try {
-      const { lines: tokenizedLines, themeBg } = await tokenizeCode(newText, languageRef.current ?? 'plaintext', themeRef.current)
+      const { lines: tokenizedLines, themeBg } = await tokenizeCode(
+        newText,
+        languageRef.current ?? 'plaintext',
+        resolveThemeArg(themeRef.current)
+      )
 
       const oldLines = oldText.split('\n')
       const newLines = newText.split('\n')
@@ -219,7 +226,7 @@ export function BlockEditor({
           const lang = languageRef.current ?? 'plaintext'
           const themeName = themeRef.current
 
-          tokenizeCode(text, lang, themeName)
+          tokenizeCode(text, lang, resolveThemeArg(themeName))
             .then(({ lines, themeBg }) => {
               isRetokenizingRef.current = true
               replaceWithTokenizedContent(view, lang, lines)
@@ -300,7 +307,7 @@ export function BlockEditor({
     const text = editor.state.doc.textContent
     if (!text) return
 
-    tokenizeCode(text, language ?? 'plaintext', theme)
+    tokenizeCode(text, language ?? 'plaintext', resolveThemeArg(theme))
       .then(({ lines, themeBg }) => {
         isRetokenizingRef.current = true
         replaceWithTokenizedContent(editor.view, language ?? 'plaintext', lines)
@@ -337,6 +344,7 @@ export function BlockEditor({
       fontFamily={fontFamily}
       filename={filename}
       chromeStyle={chromeStyle}
+      customChrome={customChrome}
       showLineNumbers={showLineNumbers}
       lineCount={lineCount ?? 1}
       startLineNumber={startLineNumber}

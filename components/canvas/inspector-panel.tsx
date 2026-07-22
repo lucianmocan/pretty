@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   Rows3,
   Columns3,
@@ -30,11 +30,13 @@ import type {
   FlexJustify,
   ChildLayout,
   ChromeStyle,
+  CustomChromeStyle,
   PageSize,
 } from '@/lib/layout/types'
 import { findNode, findParent, findFirstByKind, collectByKind } from '@/lib/layout/tree-utils'
 import { alignNodes, distributeNodes, type PositionedNode, type AlignEdge } from '@/lib/layout/align-distribute'
 import { listStylePresets, saveStylePreset, deleteStylePreset, type StylePreset } from '@/lib/presets/style-presets'
+import { listCustomChromeStyles, subscribeToCustomChromeStyles } from '@/lib/presets/custom-chrome-styles'
 import { getYDoc } from '@/lib/yjs/doc-store'
 import {
   addBlock,
@@ -52,7 +54,7 @@ import {
   ROOT_ID,
   type GutterClickMode,
 } from '@/lib/yjs/layout-store'
-import { LANGUAGES, FONT_OPTIONS } from '@/lib/presets'
+import { FONT_OPTIONS, DEFAULT_LANGUAGE } from '@/lib/presets'
 import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
@@ -69,6 +71,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ThemeSwatchPicker } from '@/components/ui/theme-swatch-picker'
+import { LanguagePicker } from '@/components/ui/language-picker'
 import { IconField } from '@/components/ui/icon-field'
 import { RadiusIcon } from '@/components/ui/radius-icon'
 
@@ -92,6 +95,7 @@ const CHROME_STYLE_OPTIONS: Array<{ value: ChromeStyle; label: string }> = [
   { value: 'mac', label: 'Mac window' },
   { value: 'vscode-tab', label: 'VS Code tab' },
   { value: 'terminal', label: 'Terminal' },
+  { value: 'custom', label: 'Custom' },
 ]
 
 const PAGE_SIZE_OPTIONS: Array<{ value: PageSize; label: string }> = [
@@ -112,11 +116,24 @@ function toHexColor(value: string | null | undefined): string {
   return '#282a36'
 }
 
-function IconTab({ value, label, children }: { value: string; label: string; children: ReactNode }) {
+function IconTab({
+  value,
+  label,
+  children,
+  compact,
+}: {
+  value: string
+  label: string
+  children: ReactNode
+  // Full-width stretched (flex-1) is right for a standalone full-row toggle
+  // group; the condensed top toolbar packs several groups side by side, so
+  // its items need to stay their own natural (icon) width instead.
+  compact?: boolean
+}) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <ToggleGroupItem value={value} className="flex-1" aria-label={label}>
+        <ToggleGroupItem value={value} className={compact ? undefined : 'flex-1'} aria-label={label}>
           {children}
         </ToggleGroupItem>
       </TooltipTrigger>
@@ -297,6 +314,44 @@ function MultiSelectPanel({
   )
 }
 
+/** Code-block-only: pick from the saved library of custom window chrome
+ * styles (lib/presets/custom-chrome-styles.ts) -- selecting one COPIES its
+ * whole config onto this block's CodeBlockProps.customChrome (see that
+ * type's comment in lib/layout/types.ts for why it's a copy, not a live
+ * reference: the print/export route's fresh browser context has no
+ * localStorage access, so the full config has to travel with the document). */
+function CustomChromeSection({ docId, node }: { docId: string; node: LayoutNode }) {
+  const { doc } = getYDoc(docId)
+  const [styles, setStyles] = useState<CustomChromeStyle[]>(() => listCustomChromeStyles())
+
+  useEffect(() => subscribeToCustomChromeStyles(() => setStyles(listCustomChromeStyles())), [])
+
+  return (
+    <div className="scripture-inspector-stack">
+      <Label>Custom chrome</Label>
+      {styles.length === 0 ? (
+        <p className="scripture-inspector-hint">
+          No custom chrome styles saved yet -- design one from the Customize window.
+        </p>
+      ) : (
+        <div className="scripture-inspector-actions">
+          {styles.map((style) => (
+            <Button
+              key={style.id}
+              variant={node.customChrome?.id === style.id ? 'secondary' : 'outline'}
+              size="sm"
+              className="justify-start"
+              onClick={() => updateCodeProps(doc, node.id, { customChrome: style })}
+            >
+              {style.name}
+            </Button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Root-frame-only: save the whole document's current look (root FrameProps
  * + one representative code block's CodeBlockProps) as a reusable preset,
  * or bulk-apply a saved one across the root and every code block in the
@@ -429,6 +484,98 @@ export function InspectorPanel({
           <div className="scripture-inspector-section">
             <h3>{node.id === ROOT_ID ? 'Canvas' : 'Frame'}</h3>
 
+            {/* Condensed icon toolbar (Keynote/Pages-style) -- Direction/
+                Align/Justify/Gap/Padding all in one dense row, grouped by
+                thin dividers, ahead of the Layout toggle below. Only
+                meaningful in flex mode: canvas-mode children are freely
+                positioned, not flowed, so these don't apply there. */}
+            {!isCanvasFrame && (
+              <div className="scripture-inspector-toolbar">
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  size="sm"
+                  value={node.direction ?? 'column'}
+                  onValueChange={(v) => v && updateFrameProps(doc, node.id, { direction: v as FlexDirection })}
+                >
+                  <IconTab value="column" label="Column" compact>
+                    <Rows3 />
+                  </IconTab>
+                  <IconTab value="row" label="Row" compact>
+                    <Columns3 />
+                  </IconTab>
+                </ToggleGroup>
+
+                <div className="scripture-inspector-toolbar-divider" />
+
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  size="sm"
+                  value={node.align ?? 'flex-start'}
+                  onValueChange={(v) => v && updateFrameProps(doc, node.id, { align: v as FlexAlign })}
+                >
+                  <IconTab value="flex-start" label="Align start" compact>
+                    <AlignStartVertical />
+                  </IconTab>
+                  <IconTab value="center" label="Align center" compact>
+                    <AlignCenterVertical />
+                  </IconTab>
+                  <IconTab value="flex-end" label="Align end" compact>
+                    <AlignEndVertical />
+                  </IconTab>
+                  <IconTab value="stretch" label="Stretch" compact>
+                    <StretchHorizontal />
+                  </IconTab>
+                </ToggleGroup>
+
+                <div className="scripture-inspector-toolbar-divider" />
+
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  size="sm"
+                  value={node.justify ?? 'flex-start'}
+                  onValueChange={(v) => v && updateFrameProps(doc, node.id, { justify: v as FlexJustify })}
+                >
+                  <IconTab value="flex-start" label="Justify start" compact>
+                    <AlignHorizontalJustifyStart />
+                  </IconTab>
+                  <IconTab value="center" label="Justify center" compact>
+                    <AlignHorizontalJustifyCenter />
+                  </IconTab>
+                  <IconTab value="flex-end" label="Justify end" compact>
+                    <AlignHorizontalJustifyEnd />
+                  </IconTab>
+                  <IconTab value="space-between" label="Space between" compact>
+                    <AlignHorizontalSpaceBetween />
+                  </IconTab>
+                  <IconTab value="space-around" label="Space around" compact>
+                    <AlignHorizontalSpaceAround />
+                  </IconTab>
+                </ToggleGroup>
+
+                <div className="scripture-inspector-toolbar-divider" />
+
+                <div className="w-16">
+                  <IconField
+                    icon={<ArrowLeftRight size={14} />}
+                    title="Gap"
+                    value={node.gap ?? 0}
+                    onChange={(gap) => updateFrameProps(doc, node.id, { gap })}
+                  />
+                </div>
+                <div className="w-16">
+                  <IconField
+                    icon={<RulerDimensionLine size={14} />}
+                    title="Padding"
+                    value={node.padding ?? 0}
+                    onChange={(padding) => updateFrameProps(doc, node.id, { padding })}
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="scripture-inspector-stack">
               <Label>Layout</Label>
               <ToggleGroup
@@ -449,94 +596,6 @@ export function InspectorPanel({
                 Canvas mode lets children be freely dragged and positioned instead of flowing in a row/column.
               </p>
             </div>
-
-            {!isCanvasFrame && (
-              <>
-                <div className="scripture-inspector-stack">
-                  <Label>Direction</Label>
-                  <ToggleGroup
-                    type="single"
-                    variant="outline"
-                    className="w-full"
-                    value={node.direction ?? 'column'}
-                    onValueChange={(v) => v && updateFrameProps(doc, node.id, { direction: v as FlexDirection })}
-                  >
-                    <IconTab value="column" label="Column">
-                      <Rows3 />
-                    </IconTab>
-                    <IconTab value="row" label="Row">
-                      <Columns3 />
-                    </IconTab>
-                  </ToggleGroup>
-                </div>
-
-                <div className="scripture-inspector-stack">
-                  <Label>Align</Label>
-                  <ToggleGroup
-                    type="single"
-                    variant="outline"
-                    className="w-full"
-                    value={node.align ?? 'flex-start'}
-                    onValueChange={(v) => v && updateFrameProps(doc, node.id, { align: v as FlexAlign })}
-                  >
-                    <IconTab value="flex-start" label="Start">
-                      <AlignStartVertical />
-                    </IconTab>
-                    <IconTab value="center" label="Center">
-                      <AlignCenterVertical />
-                    </IconTab>
-                    <IconTab value="flex-end" label="End">
-                      <AlignEndVertical />
-                    </IconTab>
-                    <IconTab value="stretch" label="Stretch">
-                      <StretchHorizontal />
-                    </IconTab>
-                  </ToggleGroup>
-                </div>
-
-                <div className="scripture-inspector-stack">
-                  <Label>Justify</Label>
-                  <ToggleGroup
-                    type="single"
-                    variant="outline"
-                    className="w-full"
-                    value={node.justify ?? 'flex-start'}
-                    onValueChange={(v) => v && updateFrameProps(doc, node.id, { justify: v as FlexJustify })}
-                  >
-                    <IconTab value="flex-start" label="Start">
-                      <AlignHorizontalJustifyStart />
-                    </IconTab>
-                    <IconTab value="center" label="Center">
-                      <AlignHorizontalJustifyCenter />
-                    </IconTab>
-                    <IconTab value="flex-end" label="End">
-                      <AlignHorizontalJustifyEnd />
-                    </IconTab>
-                    <IconTab value="space-between" label="Space between">
-                      <AlignHorizontalSpaceBetween />
-                    </IconTab>
-                    <IconTab value="space-around" label="Space around">
-                      <AlignHorizontalSpaceAround />
-                    </IconTab>
-                  </ToggleGroup>
-                </div>
-
-                <div className="scripture-inspector-row">
-                  <IconField
-                    icon={<ArrowLeftRight size={14} />}
-                    title="Gap"
-                    value={node.gap ?? 0}
-                    onChange={(gap) => updateFrameProps(doc, node.id, { gap })}
-                  />
-                  <IconField
-                    icon={<RulerDimensionLine size={14} />}
-                    title="Padding"
-                    value={node.padding ?? 0}
-                    onChange={(padding) => updateFrameProps(doc, node.id, { padding })}
-                  />
-                </div>
-              </>
-            )}
           </div>
 
           <Separator />
@@ -724,18 +783,10 @@ export function InspectorPanel({
 
           <div className="scripture-inspector-row">
             <Label>Language</Label>
-            <Select value={node.language} onValueChange={(v) => updateCodeProps(doc, node.id, { language: v })}>
-              <SelectTrigger className="w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {LANGUAGES.map((lang) => (
-                  <SelectItem key={lang} value={lang}>
-                    {lang}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <LanguagePicker
+              value={node.language ?? DEFAULT_LANGUAGE}
+              onChange={(v) => updateCodeProps(doc, node.id, { language: v })}
+            />
           </div>
 
           <Label>Theme</Label>
@@ -787,6 +838,8 @@ export function InspectorPanel({
               </SelectContent>
             </Select>
           </div>
+
+          {node.chromeStyle === 'custom' && <CustomChromeSection docId={docId} node={node} />}
 
           <div className="scripture-inspector-row">
             <Label>Filename</Label>

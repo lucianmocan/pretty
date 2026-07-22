@@ -32,6 +32,14 @@ interface FrameNodeProps {
   // ephemeral UI state (not persisted), set via the Inspector.
   gutterClickMode: GutterClickMode
   onGutterClick: (blockId: string, lineNumber: number) => void
+  // Current canvas zoom factor (1 = 100%). node.x/y/width/height are always
+  // stored in true, unscaled content units, but getBoundingClientRect() and
+  // pointer client coordinates reflect the CSS `transform: scale(zoom)`
+  // applied upstream on .scripture-canvas-viewport -- every drag/resize
+  // computation here must divide screen-space measurements by zoom to
+  // recover content-space values before comparing against or writing back
+  // to stored positions/sizes.
+  zoom: number
 }
 
 function classNames(...parts: Array<string | false | undefined>) {
@@ -121,6 +129,7 @@ export function FrameNode({
   parentChildLayout,
   gutterClickMode,
   onGutterClick,
+  zoom,
 }: FrameNodeProps) {
   const isRoot = node.id === ROOT_ID
   const isSelected = selectedIds.includes(node.id)
@@ -154,6 +163,7 @@ export function FrameNode({
         setLiveSize(null)
         onResizeNode(node.id, size)
       }}
+      zoom={zoom}
     />
   )
 
@@ -166,8 +176,8 @@ export function FrameNode({
 
     const parentRect = parentEl.getBoundingClientRect()
     setDragParentRect(parentRect)
-    const startWidth = el.getBoundingClientRect().width
-    const startHeight = el.getBoundingClientRect().height
+    const startWidth = el.getBoundingClientRect().width / zoom
+    const startHeight = el.getBoundingClientRect().height / zoom
     const startX = node.x ?? 0
     const startY = node.y ?? 0
     const startClientX = e.clientX
@@ -178,12 +188,17 @@ export function FrameNode({
     )
     const siblings = siblingEls.map((sib) => {
       const r = sib.getBoundingClientRect()
-      return { x: r.left - parentRect.left, y: r.top - parentRect.top, width: r.width, height: r.height }
+      return {
+        x: (r.left - parentRect.left) / zoom,
+        y: (r.top - parentRect.top) / zoom,
+        width: r.width / zoom,
+        height: r.height / zoom,
+      }
     })
 
     const compute = (ev: PointerEvent) => {
-      const dx = ev.clientX - startClientX
-      const dy = ev.clientY - startClientY
+      const dx = (ev.clientX - startClientX) / zoom
+      const dy = (ev.clientY - startClientY) / zoom
       return snapPosition({ x: startX + dx, y: startY + dy, width: startWidth, height: startHeight }, siblings)
     }
 
@@ -224,7 +239,10 @@ export function FrameNode({
           key={`gx-${i}`}
           className="scripture-canvas-guide scripture-canvas-guide-v"
           style={{
-            left: dragParentRect.left + gx,
+            // dragParentRect is a raw screen-space rect; gx/gy are
+            // content-space (unscaled), so they need re-scaling by zoom
+            // before being combined with it.
+            left: dragParentRect.left + gx * zoom,
             top: dragParentRect.top,
             height: dragParentRect.height,
           }}
@@ -235,7 +253,7 @@ export function FrameNode({
           key={`gy-${i}`}
           className="scripture-canvas-guide scripture-canvas-guide-h"
           style={{
-            top: dragParentRect.top + gy,
+            top: dragParentRect.top + gy * zoom,
             left: dragParentRect.left,
             width: dragParentRect.width,
           }}
@@ -306,6 +324,7 @@ export function FrameNode({
             parentChildLayout={childLayout}
             gutterClickMode={gutterClickMode}
             onGutterClick={onGutterClick}
+            zoom={zoom}
           />
         ))}
         {(node.callouts ?? []).map((callout) => (
@@ -355,6 +374,7 @@ export function FrameNode({
           fontFamily={node.fontFamily}
           filename={node.filename}
           chromeStyle={node.chromeStyle}
+          customChrome={node.customChrome}
           showLineNumbers={node.showLineNumbers}
           startLineNumber={node.startLineNumber}
           ligatures={node.ligatures}

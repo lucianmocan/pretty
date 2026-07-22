@@ -1,6 +1,6 @@
 'use server'
 
-import { getSingletonHighlighter, type BundledLanguage, type BundledTheme } from 'shiki'
+import { getSingletonHighlighter, type BundledLanguage, type BundledTheme, type ThemeRegistrationRaw } from 'shiki'
 
 export interface PlainToken {
   content: string
@@ -25,21 +25,28 @@ function decodeFontStyle(fontStyle: number | undefined) {
 export async function tokenizeCode(
   code: string,
   lang: string,
-  theme: string
+  // Either a bundled theme name, or (for user-defined custom themes, which
+  // live in this browser's localStorage that a server action can't reach) a
+  // full theme object built client-side by lib/shiki/custom-theme.ts's
+  // buildShikiTheme() and passed in whole -- getSingletonHighlighter accepts
+  // both in the same `themes` array.
+  theme: string | ThemeRegistrationRaw
 ): Promise<TokenizeResult> {
+  const themeName = typeof theme === 'string' ? theme : (theme.name as string)
+
   // Cached across calls in this server process -- only loads a lang/theme's
   // grammar/wasm once, and never ships to the client bundle since this file
   // is server-only ('use server').
   const highlighter = await getSingletonHighlighter({
     langs: [lang as BundledLanguage],
-    themes: [theme as BundledTheme],
+    themes: [typeof theme === 'string' ? (theme as BundledTheme) : theme],
   })
 
   const tokenLines = highlighter.codeToTokensBase(code, {
     lang: lang as BundledLanguage,
-    theme: theme as BundledTheme,
+    theme: themeName as BundledTheme,
   })
-  const resolvedTheme = highlighter.getTheme(theme as BundledTheme)
+  const resolvedTheme = highlighter.getTheme(themeName as BundledTheme)
 
   const lines = tokenLines.map((line) =>
     line.map((token) => {

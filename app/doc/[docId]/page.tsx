@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { ArrowLeft, Plus, X } from 'lucide-react'
+import { Plus, X } from 'lucide-react'
 import { FrameNode } from '@/components/canvas/frame-node'
 import { CanvasRoot } from '@/components/canvas/canvas-root'
 import { InspectorPanel } from '@/components/canvas/inspector-panel'
+import { ZoomControls } from '@/components/canvas/zoom-controls'
 import { useLayoutTree } from '@/lib/use-layout-tree'
 import { getYDoc, encodeDocState } from '@/lib/yjs/doc-store'
 import {
@@ -27,11 +27,19 @@ import {
   addPage,
   removePage,
 } from '@/lib/documents/manifest'
-import { PageToolbar } from '@/components/layout/page-toolbar'
+import { AppMenubar } from '@/components/layout/app-menubar'
 import { EditorRegistryProvider } from '@/components/editor/editor-registry'
 import { SearchReplacePanel } from '@/components/editor/search-replace-panel'
+import { CustomizeDialog } from '@/components/customize/customize-dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+
+const ZOOM_MIN = 0.1
+const ZOOM_MAX = 4
+const ZOOM_STEP = 1.2
+
+function clampZoom(z: number) {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z))
+}
 
 export default function DocumentEditorPage() {
   const { docId } = useParams<{ docId: string }>()
@@ -45,6 +53,15 @@ export default function DocumentEditorPage() {
   const [docName, setDocName] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [gutterClickMode, setGutterClickMode] = useState<GutterClickMode>('highlight')
+  const [zoom, setZoom] = useState(1)
+  const [customizeOpen, setCustomizeOpen] = useState(false)
+  // The natural (unscaled) content size of .scripture-canvas-viewport --
+  // used to size .scripture-canvas-scale-box to the SCALED dimensions, so
+  // the scrollable canvas area's scroll bounds actually grow/shrink with
+  // zoom (a `transform: scale()` alone doesn't affect layout/scroll size).
+  const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const canvasAreaRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const meta = getDocumentMeta(docId)
@@ -85,6 +102,38 @@ export default function DocumentEditorPage() {
   useEffect(() => {
     if (tree && selectedIds.length === 0) setSelectedIds([ROOT_ID])
   }, [tree, selectedIds])
+
+  // Track the canvas content's natural (unscaled) size -- read from the
+  // inner .scripture-canvas-viewport, which is never itself transformed by
+  // its own scale, so offsetWidth/offsetHeight are always true content
+  // units regardless of the current zoom.
+  useEffect(() => {
+    const el = viewportRef.current
+    if (!el) return
+    const observer = new ResizeObserver(() => {
+      setNaturalSize({ width: el.offsetWidth, height: el.offsetHeight })
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [activePageId, tree])
+
+  // React's JSX onWheel prop attaches wheel listeners as passive (the DOM's
+  // own recommended default, for scroll-perf reasons) -- calling
+  // preventDefault() from inside one is silently ignored, which would let
+  // Ctrl/Cmd+scroll ALSO trigger the browser's native page-zoom alongside
+  // our own canvas zoom. A manually-attached, explicitly non-passive
+  // listener is the only way to actually suppress that.
+  useEffect(() => {
+    const el = canvasAreaRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      setZoom((z) => clampZoom(e.deltaY > 0 ? z / ZOOM_STEP : z * ZOOM_STEP))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [activePageId, tree])
 
   // Switching pages: the new page's tree hasn't loaded yet, so clear
   // selection now -- the effect above re-selects ROOT_ID once it has.
@@ -154,6 +203,16 @@ export default function DocumentEditorPage() {
     cycleGutterLine(getYDoc(activePageId).doc, blockId, lineNumber, gutterClickMode)
   }
 
+  function handleZoomIn() {
+    setZoom((z) => clampZoom(z * ZOOM_STEP))
+  }
+  function handleZoomOut() {
+    setZoom((z) => clampZoom(z / ZOOM_STEP))
+  }
+  function handleZoomReset() {
+    setZoom(1)
+  }
+
   async function handleExport(format: 'pdf' | 'png') {
     setExporting(true)
     setExportError(null)
@@ -197,99 +256,111 @@ export default function DocumentEditorPage() {
   if (notFound) return null
 
   return (
-    <div className="scripture-page">
-      <main className="flex flex-col items-center w-full max-w-[1100px]">
-        <EditorRegistryProvider>
-          <PageToolbar>
-            <Link
-              href="/"
-              className="flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+    <div className="scripture-editor-shell">
+      <EditorRegistryProvider>
+        <AppMenubar
+          docName={docName ?? ''}
+          onRename={handleRename}
+          onAddPage={handleAddPage}
+          onExportPdf={() => handleExport('pdf')}
+          onExportPng={() => handleExport('png')}
+          exporting={exporting}
+          onZoomIn={handleZoomIn}
+          onZoomOut={handleZoomOut}
+          onZoomReset={handleZoomReset}
+          onOpenCustomize={() => setCustomizeOpen(true)}
+        >
+          <SearchReplacePanel />
+          {exporting && <span className="text-xs text-muted-foreground">Exporting…</span>}
+          {exportError && <span className="scripture-error-text">{exportError}</span>}
+        </AppMenubar>
+
+        <CustomizeDialog open={customizeOpen} onOpenChange={setCustomizeOpen} />
+
+        {pageIds.length > 0 && (
+          <div className="scripture-page-tabs">
+            {pageIds.map((pageId, index) => (
+              <button
+                key={pageId}
+                type="button"
+                className={pageId === activePageId ? 'scripture-page-tab is-active' : 'scripture-page-tab'}
+                onClick={() => handleSwitchPage(pageId)}
+              >
+                Page {index + 1}
+                {pageIds.length > 1 && (
+                  <span
+                    className="scripture-page-tab-remove"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleRemovePage(pageId)
+                    }}
+                    aria-label={`Remove page ${index + 1}`}
+                  >
+                    <X size={12} />
+                  </span>
+                )}
+              </button>
+            ))}
+            <Button variant="ghost" size="icon-xs" onClick={handleAddPage} aria-label="Add page">
+              <Plus />
+            </Button>
+          </div>
+        )}
+
+        {tree ? (
+          <div className="scripture-workspace" key={activePageId}>
+            <div
+              ref={canvasAreaRef}
+              className="scripture-canvas-area"
+              onClick={() => setSelectedIds([ROOT_ID])}
             >
-              <ArrowLeft size={15} />
-              Documents
-            </Link>
-            <Input
-              className="max-w-56 border-transparent bg-transparent text-base font-medium shadow-none focus-visible:border-input"
-              value={docName ?? ''}
-              onChange={(e) => handleRename(e.target.value)}
-              placeholder="Untitled"
-            />
-            <div className="ml-auto flex items-center gap-2">
-              <SearchReplacePanel />
-              <Button variant="outline" onClick={() => handleExport('png')} disabled={exporting}>
-                PNG
-              </Button>
-              <Button onClick={() => handleExport('pdf')} disabled={exporting}>
-                {exporting ? 'Exporting…' : 'Export PDF'}
-              </Button>
-            </div>
-            {exportError && <span className="scripture-error-text">{exportError}</span>}
-          </PageToolbar>
-
-          {pageIds.length > 0 && (
-            <div className="scripture-page-tabs">
-              {pageIds.map((pageId, index) => (
-                <button
-                  key={pageId}
-                  type="button"
-                  className={pageId === activePageId ? 'scripture-page-tab is-active' : 'scripture-page-tab'}
-                  onClick={() => handleSwitchPage(pageId)}
+              <div
+                className="scripture-canvas-scale-box"
+                style={
+                  naturalSize
+                    ? { width: naturalSize.width * zoom, height: naturalSize.height * zoom }
+                    : undefined
+                }
+              >
+                <div
+                  ref={viewportRef}
+                  className="scripture-canvas-viewport"
+                  style={{ transform: `scale(${zoom})` }}
                 >
-                  Page {index + 1}
-                  {pageIds.length > 1 && (
-                    <span
-                      className="scripture-page-tab-remove"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleRemovePage(pageId)
-                      }}
-                      aria-label={`Remove page ${index + 1}`}
-                    >
-                      <X size={12} />
-                    </span>
-                  )}
-                </button>
-              ))}
-              <Button variant="ghost" size="icon-xs" onClick={handleAddPage} aria-label="Add page">
-                <Plus />
-              </Button>
-            </div>
-          )}
-
-          {tree ? (
-            <div className="scripture-app-layout" key={activePageId}>
-              <div className="scripture-canvas-area" onClick={() => setSelectedIds([ROOT_ID])}>
-                <CanvasRoot>
-                  <FrameNode
-                    node={tree}
-                    docId={activePageId as string}
-                    selectedIds={selectedIds}
-                    onSelect={handleSelect}
-                    onMove={handleMove}
-                    onRemove={handleRemove}
-                    onReorder={handleReorder}
-                    onResizeNode={handleResizeNode}
-                    onRepositionNode={handleRepositionNode}
-                    parentChildLayout="flex"
-                    gutterClickMode={gutterClickMode}
-                    onGutterClick={handleGutterClick}
-                  />
-                </CanvasRoot>
+                  <CanvasRoot>
+                    <FrameNode
+                      node={tree}
+                      docId={activePageId as string}
+                      selectedIds={selectedIds}
+                      onSelect={handleSelect}
+                      onMove={handleMove}
+                      onRemove={handleRemove}
+                      onReorder={handleReorder}
+                      onResizeNode={handleResizeNode}
+                      onRepositionNode={handleRepositionNode}
+                      parentChildLayout="flex"
+                      gutterClickMode={gutterClickMode}
+                      onGutterClick={handleGutterClick}
+                      zoom={zoom}
+                    />
+                  </CanvasRoot>
+                </div>
               </div>
-              <InspectorPanel
-                docId={activePageId as string}
-                tree={tree}
-                selectedIds={selectedIds}
-                onSelectionChange={setSelectedIds}
-                gutterClickMode={gutterClickMode}
-                onGutterClickModeChange={setGutterClickMode}
-              />
+              <ZoomControls zoom={zoom} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onReset={handleZoomReset} />
             </div>
-          ) : (
-            <div className="scripture-editor-loading">Loading…</div>
-          )}
-        </EditorRegistryProvider>
-      </main>
+            <InspectorPanel
+              docId={activePageId as string}
+              tree={tree}
+              selectedIds={selectedIds}
+              onSelectionChange={setSelectedIds}
+              gutterClickMode={gutterClickMode}
+              onGutterClickModeChange={setGutterClickMode}
+            />
+          </div>
+        ) : (
+          <div className="scripture-editor-loading">Loading…</div>
+        )}
+      </EditorRegistryProvider>
     </div>
   )
 }

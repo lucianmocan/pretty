@@ -99,6 +99,7 @@ function renderNode(node: LayoutNode, ydoc: Y.Doc, parentChildLayout: ChildLayou
         fontFamily={node.fontFamily ?? 'geist-mono'}
         filename={node.filename ?? ''}
         chromeStyle={node.chromeStyle ?? 'none'}
+        customChrome={node.customChrome}
         showLineNumbers={node.showLineNumbers ?? false}
         lineCount={lineCount}
         startLineNumber={node.startLineNumber ?? 1}
