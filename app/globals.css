@@ -164,6 +164,13 @@
   flex: 1;
   width: 100%;
   padding: 40px 24px 96px;
+  /* Same dot-grid as .scripture-canvas-area -- a flat, empty background
+     behind a short document list on a wide viewport reads as blank/unstyled;
+     this ties the dashboard visually to the editor's own canvas instead of
+     leaving the surrounding space looking like an unfinished void. */
+  background-color: var(--card);
+  background-image: radial-gradient(var(--border) 1px, transparent 1px);
+  background-size: 22px 22px;
 }
 
 .scripture-error-text {
@@ -976,21 +983,35 @@
    inside are real shadcn components (Button/Input/Select/Switch/etc).
 --------------------------------------------------------------------------- */
 
-/* Shared by every page's PageToolbar (components/layout/page-toolbar.tsx) --
-   width is constrained by the parent <main class="max-w-[1100px]">, not here,
-   so there's exactly one place per page that owns the content width. */
+/* The dashboard's PageToolbar (components/layout/page-toolbar.tsx) -- a
+   flush, full-bleed header bar sitting at the very top of the viewport,
+   matching .scripture-app-menubar's own treatment exactly (same height,
+   same bottom-border-only styling, no rounded corners/margin/shadow) so the
+   two routes read as one consistent product instead of the dashboard
+   inventing its own "floating rounded card" header look. Lives OUTSIDE
+   .scripture-page now (see scripture-dashboard-shell), so it's never
+   constrained by that content area's own max-width/padding. */
 .scripture-toolbar {
   display: flex;
   align-items: center;
   gap: 14px;
   flex-wrap: wrap;
   width: 100%;
-  margin-bottom: 24px;
-  padding: 10px 14px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
+  height: 44px;
+  flex-shrink: 0;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
   background: var(--card);
-  box-shadow: var(--shadow-card);
+}
+
+/* Full-height flex column wrapping the whole dashboard route -- the flush
+   .scripture-toolbar header, then .scripture-page as the remaining
+   scrollable content area below it. Same shape as .scripture-editor-shell. */
+.scripture-dashboard-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  width: 100%;
 }
 
 .scripture-search-panel {
@@ -1318,6 +1339,77 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 14px;
+}
+
+/* Wraps the Pinned cards grid and the All-documents list below it -- each
+   gets its own optional heading. */
+.scripture-doc-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.scripture-doc-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+  margin: 0;
+}
+
+/* The main "All documents" list -- a single bordered, full-width block
+   instead of a sparse card grid. A grid with only a handful of items
+   leaves most of its row empty (cards only take up as much width as they
+   need); a full-width list row always fills the available space, so the
+   page reads as populated even with just one or two documents. */
+.scripture-doc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--card);
+}
+
+.scripture-doc-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  transition: background 0.12s;
+}
+
+.scripture-doc-list-item + .scripture-doc-list-item {
+  border-top: 1px solid var(--border);
+}
+
+.scripture-doc-list-item:hover {
+  background: var(--accent);
+}
+
+.scripture-doc-list-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scripture-doc-list-name:hover {
+  text-decoration: underline;
+}
+
+.scripture-doc-list-time {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  flex-shrink: 0;
 }
 
 .scripture-template-card {

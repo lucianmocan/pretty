@@ -12,6 +12,11 @@ export interface DocumentMeta {
   // migration needed for documents saved before multi-page existed --
   // getPageIds() below defaults a missing/empty array to [id]).
   pageIds: string[]
+  // Shown as a card in the dashboard's "Pinned" section instead of the
+  // plain list below it. Optional/undefined (not a plain boolean default)
+  // so documents saved before this existed don't need a migration --
+  // every read site already treats a missing value as "not pinned".
+  pinned?: boolean
 }
 
 /**
@@ -70,6 +75,14 @@ export function renameDocument(id: string, name: string) {
   const doc = docs.find((d) => d.id === id)
   if (!doc) return
   doc.name = name
+  writeAll(docs)
+}
+
+export function togglePin(id: string) {
+  const docs = readAll()
+  const doc = docs.find((d) => d.id === id)
+  if (!doc) return
+  doc.pinned = !doc.pinned
   writeAll(docs)
 }
 
