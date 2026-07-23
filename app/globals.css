@@ -1171,26 +1171,31 @@
   color: var(--muted-foreground);
 }
 
-/* Condensed icon toolbar at the top of the Frame/Canvas Inspector section
-   (Direction/Align/Justify/Gap/Padding) -- Keynote/Pages-style dense
-   grouping instead of a stack of full-width labeled rows, so the panel
-   doesn't feel cluttered. Wraps to a second line rather than overflowing
-   when all the groups don't fit the panel's width at once. */
-.scripture-inspector-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  row-gap: 6px;
+/* Normalizes shadcn primitives' own default text-sm (14px) down to match
+   the Inspector's established 11px header / 12px field-label scale.
+   Without this, Button/Input/Select/Toggle text (Save/Duplicate/Delete,
+   filename and numeric field values, Font/Page-size selections, the Flex/
+   Free-form and Inline/Tab toggle labels, etc.) all render noticeably
+   bigger than the section headers right above them -- each of those
+   primitives sets its own explicit font-size directly (Tailwind's text-sm
+   utility), so plain inheritance from .scripture-inspector's 13px base
+   never reaches them. The [data-slot="..."] attribute selectors match
+   shadcn's own stable hooks (see each component's data-slot prop) and are
+   specific enough (.scripture-inspector + one attribute = two "class-
+   weight" selectors) to beat text-sm's single-class specificity regardless
+   of which rule loads later in the built CSS. Portaled overlay content
+   (Select's dropdown list, Command's popover) is deliberately left alone --
+   it's transient, never visible alongside the headers being compared
+   against. */
+.scripture-inspector [data-slot='button'],
+.scripture-inspector [data-slot='input'],
+.scripture-inspector [data-slot='toggle'],
+.scripture-inspector [data-slot='toggle-group-item'],
+.scripture-inspector [data-slot='select-trigger'],
+.scripture-inspector [data-slot='select-value'] {
+  font-size: 12px;
 }
 
-.scripture-inspector-toolbar-divider {
-  align-self: stretch;
-  min-height: 20px;
-  width: 1px;
-  margin: 0 2px;
-  background: var(--border);
-}
 
 /* Icon-prefixed numeric field (gap/padding/radius/width/height) -- Figma-
    style property labeling by icon instead of a text label taking up room. */

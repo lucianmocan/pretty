@@ -362,12 +362,12 @@ function ChromeStyleEditor() {
             <div className="scripture-inspector-row">
               <Label>Icon</Label>
               <Select value={draft.icon} onValueChange={(v) => setDraft({ ...draft, icon: v as ChromeIconKey })}>
-                <SelectTrigger className="w-36">
+                <SelectTrigger className="w-36" size="sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {ICON_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
+                    <SelectItem key={opt.value} value={opt.value} className="text-xs">
                       {opt.label}
                     </SelectItem>
                   ))}
@@ -380,6 +380,7 @@ function ChromeStyleEditor() {
               <ToggleGroup
                 type="single"
                 variant="outline"
+                size="sm"
                 className="w-full"
                 value={draft.filenamePosition}
                 onValueChange={(v) => v && setDraft({ ...draft, filenamePosition: v as 'inline' | 'tab' })}

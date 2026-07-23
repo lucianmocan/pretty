@@ -270,6 +270,7 @@ function MultiSelectPanel({
               <div className="scripture-inspector-actions">
                 <Button
                   variant="outline"
+                  size="sm"
                   disabled={positioned.length < 3}
                   onClick={() => applyPatch(distributeNodes(positioned, 'horizontal'))}
                 >
@@ -277,6 +278,7 @@ function MultiSelectPanel({
                 </Button>
                 <Button
                   variant="outline"
+                  size="sm"
                   disabled={positioned.length < 3}
                   onClick={() => applyPatch(distributeNodes(positioned, 'vertical'))}
                 >
@@ -288,7 +290,7 @@ function MultiSelectPanel({
             <Separator />
             <div className="scripture-inspector-section">
               <h3>Group</h3>
-              <Button variant="outline" onClick={handleGroup}>
+              <Button variant="outline" size="sm" onClick={handleGroup}>
                 <Group /> Group selection
               </Button>
             </div>
@@ -297,7 +299,7 @@ function MultiSelectPanel({
 
         <Separator />
         <div className="scripture-inspector-section">
-          <Button variant="destructive" onClick={handleDeleteAll}>
+          <Button variant="destructive" size="sm" onClick={handleDeleteAll}>
             Delete {selectedIds.length} blocks
           </Button>
         </div>
@@ -381,7 +383,7 @@ function StylePresetsSection({ docId, tree, node }: { docId: string; tree: Layou
           </Button>
         </div>
       ) : (
-        <Button variant="outline" onClick={handleSaveClick}>
+        <Button variant="outline" size="sm" onClick={handleSaveClick}>
           Save current look as preset
         </Button>
       )}
@@ -440,103 +442,17 @@ export function InspectorPanel({
           <div className="scripture-inspector-section">
             <h3>{node.id === ROOT_ID ? 'Canvas' : 'Frame'}</h3>
 
-            {/* Condensed icon toolbar (Keynote/Pages-style) -- Direction/
-                Align/Justify/Gap/Padding all in one dense row, grouped by
-                thin dividers, ahead of the Layout toggle below. Only
-                meaningful in flex mode: canvas-mode children are freely
-                positioned, not flowed, so these don't apply there. */}
-            {!isCanvasFrame && (
-              <div className="scripture-inspector-toolbar">
-                <ToggleGroup
-                  type="single"
-                  variant="outline"
-                  size="sm"
-                  value={node.direction ?? 'column'}
-                  onValueChange={(v) => v && updateFrameProps(doc, node.id, { direction: v as FlexDirection })}
-                >
-                  <IconTab value="column" label="Column" compact>
-                    <Rows3 />
-                  </IconTab>
-                  <IconTab value="row" label="Row" compact>
-                    <Columns3 />
-                  </IconTab>
-                </ToggleGroup>
-
-                <div className="scripture-inspector-toolbar-divider" />
-
-                <ToggleGroup
-                  type="single"
-                  variant="outline"
-                  size="sm"
-                  value={node.align ?? 'flex-start'}
-                  onValueChange={(v) => v && updateFrameProps(doc, node.id, { align: v as FlexAlign })}
-                >
-                  <IconTab value="flex-start" label="Align start" compact>
-                    <AlignStartVertical />
-                  </IconTab>
-                  <IconTab value="center" label="Align center" compact>
-                    <AlignCenterVertical />
-                  </IconTab>
-                  <IconTab value="flex-end" label="Align end" compact>
-                    <AlignEndVertical />
-                  </IconTab>
-                  <IconTab value="stretch" label="Stretch" compact>
-                    <StretchHorizontal />
-                  </IconTab>
-                </ToggleGroup>
-
-                <div className="scripture-inspector-toolbar-divider" />
-
-                <ToggleGroup
-                  type="single"
-                  variant="outline"
-                  size="sm"
-                  value={node.justify ?? 'flex-start'}
-                  onValueChange={(v) => v && updateFrameProps(doc, node.id, { justify: v as FlexJustify })}
-                >
-                  <IconTab value="flex-start" label="Justify start" compact>
-                    <AlignHorizontalJustifyStart />
-                  </IconTab>
-                  <IconTab value="center" label="Justify center" compact>
-                    <AlignHorizontalJustifyCenter />
-                  </IconTab>
-                  <IconTab value="flex-end" label="Justify end" compact>
-                    <AlignHorizontalJustifyEnd />
-                  </IconTab>
-                  <IconTab value="space-between" label="Space between" compact>
-                    <AlignHorizontalSpaceBetween />
-                  </IconTab>
-                  <IconTab value="space-around" label="Space around" compact>
-                    <AlignHorizontalSpaceAround />
-                  </IconTab>
-                </ToggleGroup>
-
-                <div className="scripture-inspector-toolbar-divider" />
-
-                <div className="w-16">
-                  <IconField
-                    icon={<ArrowLeftRight size={14} />}
-                    title="Gap"
-                    value={node.gap ?? 0}
-                    onChange={(gap) => updateFrameProps(doc, node.id, { gap })}
-                  />
-                </div>
-                <div className="w-16">
-                  <IconField
-                    icon={<RulerDimensionLine size={14} />}
-                    title="Padding"
-                    value={node.padding ?? 0}
-                    onChange={(padding) => updateFrameProps(doc, node.id, { padding })}
-                  />
-                </div>
-              </div>
-            )}
-
+            {/* Layout mode comes FIRST -- it's the one decision that
+                determines whether anything below even applies (canvas-mode
+                children are freely positioned, not flowed, so none of the
+                flex controls matter there). Everything else follows this,
+                not the other way around. */}
             <div className="scripture-inspector-stack">
               <Label>Layout</Label>
               <ToggleGroup
                 type="single"
                 variant="outline"
+                size="sm"
                 className="w-full"
                 value={childLayout}
                 onValueChange={(v) => v && updateFrameProps(doc, node.id, { childLayout: v as ChildLayout })}
@@ -552,6 +468,110 @@ export function InspectorPanel({
                 Free-form mode lets children be freely dragged and positioned instead of flowing in a row/column.
               </p>
             </div>
+
+            {!isCanvasFrame && (
+              <>
+                <Separator />
+
+                {/* Direction/Align/Justify each get their own labeled stack
+                    (label above a compact icon row) instead of one dense,
+                    unlabeled toolbar -- matches the same label-above-control
+                    layout "Layout" above already uses, and the existing
+                    .scripture-inspector-stack styling was built with exactly
+                    this in mind (see its CSS comment: a full-width segmented
+                    control, especially Justify's 5 options, needs more room
+                    than an inline label+control row can spare). */}
+                <div className="scripture-inspector-stack">
+                  <Label>Direction</Label>
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    size="sm"
+                    value={node.direction ?? 'column'}
+                    onValueChange={(v) => v && updateFrameProps(doc, node.id, { direction: v as FlexDirection })}
+                  >
+                    <IconTab value="column" label="Column" compact>
+                      <Rows3 />
+                    </IconTab>
+                    <IconTab value="row" label="Row" compact>
+                      <Columns3 />
+                    </IconTab>
+                  </ToggleGroup>
+                </div>
+
+                <div className="scripture-inspector-stack">
+                  <Label>Align</Label>
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    size="sm"
+                    value={node.align ?? 'flex-start'}
+                    onValueChange={(v) => v && updateFrameProps(doc, node.id, { align: v as FlexAlign })}
+                  >
+                    <IconTab value="flex-start" label="Align start" compact>
+                      <AlignStartVertical />
+                    </IconTab>
+                    <IconTab value="center" label="Align center" compact>
+                      <AlignCenterVertical />
+                    </IconTab>
+                    <IconTab value="flex-end" label="Align end" compact>
+                      <AlignEndVertical />
+                    </IconTab>
+                    <IconTab value="stretch" label="Stretch" compact>
+                      <StretchHorizontal />
+                    </IconTab>
+                  </ToggleGroup>
+                </div>
+
+                <div className="scripture-inspector-stack">
+                  <Label>Justify</Label>
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    size="sm"
+                    value={node.justify ?? 'flex-start'}
+                    onValueChange={(v) => v && updateFrameProps(doc, node.id, { justify: v as FlexJustify })}
+                  >
+                    <IconTab value="flex-start" label="Justify start" compact>
+                      <AlignHorizontalJustifyStart />
+                    </IconTab>
+                    <IconTab value="center" label="Justify center" compact>
+                      <AlignHorizontalJustifyCenter />
+                    </IconTab>
+                    <IconTab value="flex-end" label="Justify end" compact>
+                      <AlignHorizontalJustifyEnd />
+                    </IconTab>
+                    <IconTab value="space-between" label="Space between" compact>
+                      <AlignHorizontalSpaceBetween />
+                    </IconTab>
+                    <IconTab value="space-around" label="Space around" compact>
+                      <AlignHorizontalSpaceAround />
+                    </IconTab>
+                  </ToggleGroup>
+                </div>
+
+                <div className="scripture-inspector-row">
+                  <Label>Gap</Label>
+                  <div className="w-20">
+                    <IconField
+                      icon={<ArrowLeftRight size={14} />}
+                      value={node.gap ?? 0}
+                      onChange={(gap) => updateFrameProps(doc, node.id, { gap })}
+                    />
+                  </div>
+                </div>
+                <div className="scripture-inspector-row">
+                  <Label>Padding</Label>
+                  <div className="w-20">
+                    <IconField
+                      icon={<RulerDimensionLine size={14} />}
+                      value={node.padding ?? 0}
+                      onChange={(padding) => updateFrameProps(doc, node.id, { padding })}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           <Separator />
@@ -565,7 +585,7 @@ export function InspectorPanel({
                 <Button
                   type="button"
                   variant={backgroundAuto ? 'secondary' : 'outline'}
-                  size="xs"
+                  size="sm"
                   disabled={backgroundAuto}
                   onClick={() => setBackgroundAuto(doc, node.id, true)}
                 >
@@ -615,12 +635,12 @@ export function InspectorPanel({
                       if (v !== 'content') updateNodeSize(doc, node.id, { width: null, height: null })
                     }}
                   >
-                    <SelectTrigger className="w-36">
+                    <SelectTrigger className="w-36" size="sm">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       {PAGE_SIZE_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
+                        <SelectItem key={opt.value} value={opt.value} className="text-xs">
                           {opt.label}
                         </SelectItem>
                       ))}
@@ -679,7 +699,7 @@ export function InspectorPanel({
                     // live on FrameProps.callouts, not lib/layout/tree-utils's
                     // findNode), so selecting one would resolve to nothing
                     // and blank the Inspector.
-                    <Button variant="outline" onClick={() => addCallout(doc, node.id)}>
+                    <Button variant="outline" size="sm" onClick={() => addCallout(doc, node.id)}>
                       <MessageSquarePlus /> + Callout
                     </Button>
                   )}
@@ -790,12 +810,12 @@ export function InspectorPanel({
           <div className="scripture-inspector-row">
             <Label>Font</Label>
             <Select value={node.fontFamily} onValueChange={(v) => updateCodeProps(doc, node.id, { fontFamily: v })}>
-              <SelectTrigger className="w-36">
+              <SelectTrigger className="w-36" size="sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {FONT_OPTIONS.map((f) => (
-                  <SelectItem key={f.key} value={f.key}>
+                  <SelectItem key={f.key} value={f.key} className="text-xs">
                     {f.label}
                   </SelectItem>
                 ))}
@@ -889,6 +909,7 @@ export function InspectorPanel({
                 <ToggleGroup
                   type="single"
                   variant="outline"
+                  size="sm"
                   className="w-full"
                   value={gutterClickMode}
                   onValueChange={(v) => v && onGutterClickModeChange(v as GutterClickMode)}

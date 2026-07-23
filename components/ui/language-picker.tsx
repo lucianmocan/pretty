@@ -27,6 +27,7 @@ export function LanguagePicker({ value, onChange }: LanguagePickerProps) {
           type="button"
           variant="outline"
           role="combobox"
+          size="sm"
           aria-expanded={open}
           className="w-36 justify-between font-normal"
         >
@@ -35,8 +36,14 @@ export function LanguagePicker({ value, onChange }: LanguagePickerProps) {
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-56 p-0">
+        {/* text-xs on the input/items -- PopoverContent renders through a
+            portal (see components/ui/popover.tsx), outside the Inspector's
+            own DOM subtree, so the .scripture-inspector-scoped font-size
+            normalization (app/globals.css) can't reach it; Command's own
+            defaults are text-sm (14px), noticeably bigger than the rest of
+            the Inspector's 12px scale. */}
         <Command>
-          <CommandInput placeholder="Search languages…" />
+          <CommandInput placeholder="Search languages…" className="text-xs" />
           <CommandList>
             <CommandEmpty>No language found.</CommandEmpty>
             <CommandGroup>
@@ -45,6 +52,7 @@ export function LanguagePicker({ value, onChange }: LanguagePickerProps) {
                   key={lang.id}
                   value={`${lang.name} ${lang.id} ${(lang.aliases ?? []).join(' ')}`}
                   data-checked={lang.id === value}
+                  className="text-xs"
                   onSelect={() => {
                     onChange(lang.id)
                     setOpen(false)
