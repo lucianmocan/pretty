@@ -1,9 +1,8 @@
 'use client'
 
-import { MousePointer2, Hand, FileCode, Type, ImagePlus, Frame as FrameIcon } from 'lucide-react'
+import { FileCode, Type, ImagePlus, Frame as FrameIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { findNode, findParent } from '@/lib/layout/tree-utils'
 import { addBlock, addFrame, ROOT_ID } from '@/lib/yjs/layout-store'
 import { getYDoc } from '@/lib/yjs/doc-store'
@@ -15,8 +14,6 @@ interface CanvasToolbarProps {
   selectedIds: string[]
   onSelectionChange: (ids: string[]) => void
   onSetEditing: (id: string | null) => void
-  tool: 'select' | 'hand'
-  onToolChange: (tool: 'select' | 'hand') => void
 }
 
 /** Resolves which frame a new block should land in: the currently selected
@@ -50,20 +47,17 @@ function ToolbarButton({
   )
 }
 
-/** Figma-style bottom-center floating toolbar -- tool mode (Select/Hand) plus
- * block-creation actions, replacing the Inspector's old "Add to this frame"
- * section. Code/text blocks auto-enter edit mode on creation (matching the
- * "new block is immediately typable" UX the auto-select behavior always
- * aimed for); image/frame have no text content to edit, so they're just
- * selected. */
+/** Figma-style bottom-center floating toolbar -- block-creation actions,
+ * replacing the Inspector's old "Add to this frame" section. Code/text
+ * blocks auto-enter edit mode on creation (matching the "new block is
+ * immediately typable" UX the auto-select behavior always aimed for);
+ * image/frame have no text content to edit, so they're just selected. */
 export function CanvasToolbar({
   docId,
   tree,
   selectedIds,
   onSelectionChange,
   onSetEditing,
-  tool,
-  onToolChange,
 }: CanvasToolbarProps) {
   const { doc } = getYDoc(docId)
 
@@ -86,33 +80,6 @@ export function CanvasToolbar({
     // this, every toolbar click (tool switch, add-block) would bubble up and
     // immediately undo whatever selection/editing state the click just set.
     <div className="scripture-canvas-toolbar" onClick={(e) => e.stopPropagation()}>
-      <ToggleGroup
-        type="single"
-        variant="outline"
-        size="sm"
-        value={tool}
-        onValueChange={(v) => v && onToolChange(v as 'select' | 'hand')}
-      >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <ToggleGroupItem value="select" aria-label="Select tool">
-              <MousePointer2 />
-            </ToggleGroupItem>
-          </TooltipTrigger>
-          <TooltipContent>Select (V)</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <ToggleGroupItem value="hand" aria-label="Hand tool">
-              <Hand />
-            </ToggleGroupItem>
-          </TooltipTrigger>
-          <TooltipContent>Pan (H)</TooltipContent>
-        </Tooltip>
-      </ToggleGroup>
-
-      <div className="scripture-canvas-toolbar-divider" />
-
       <ToolbarButton label="Add code block" onClick={() => handleAddBlock('code')}>
         <FileCode />
       </ToolbarButton>

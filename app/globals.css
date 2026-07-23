@@ -182,19 +182,17 @@
   height: 100%;
   overflow: auto;
   display: flex;
-  justify-content: center;
+  /* `safe` -- once zoomed in enough that the card exceeds the viewport,
+     plain `center` alignment on an overflow:auto flex container is a known
+     quirk: it can push the start edge into unreachable negative scroll
+     territory. `safe` falls back to start-alignment only in that overflow
+     case, keeping the whole card scrollable into view either way. */
+  justify-content: safe center;
+  align-items: safe center;
   padding: 56px;
   background-color: var(--card);
   background-image: radial-gradient(var(--border) 1px, transparent 1px);
   background-size: 22px 22px;
-}
-
-.scripture-canvas-area.tool-hand {
-  cursor: grab;
-}
-
-.scripture-canvas-area.tool-hand.is-panning {
-  cursor: grabbing;
 }
 
 /* Scaled to `zoom` via a CSS transform on the INNER element -- this outer
@@ -245,9 +243,16 @@
   color: var(--foreground);
 }
 
+.scripture-zoom-controls-divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: var(--border);
+}
+
 /* Figma-style bottom-center floating toolbar (components/canvas/canvas-
-   toolbar.tsx) -- tool mode (Select/Hand) plus block-creation actions,
-   replacing the Inspector's old "Add to this frame" section. */
+   toolbar.tsx) -- block-creation actions, replacing the Inspector's old
+   "Add to this frame" section. */
 .scripture-canvas-toolbar {
   position: absolute;
   left: 50%;
@@ -262,13 +267,6 @@
   border: 1px solid var(--border);
   background: var(--popover);
   box-shadow: var(--shadow-md);
-}
-
-.scripture-canvas-toolbar-divider {
-  width: 1px;
-  height: 20px;
-  margin: 0 4px;
-  background: var(--border);
 }
 
 .scripture-canvas-root {
@@ -551,13 +549,24 @@
   box-shadow: 0 0 0 2px var(--ring) !important;
 }
 
-/* Resize handles -- shown on the selected frame/block. See
-   components/canvas/resize-handles.tsx. The clickable box (.resize-handle
-   itself) is deliberately much bigger than the visible bar/dot (rendered as
-   a centered ::after pseudo-element) -- a hit target that's only as big as
-   its visual indicator (the previous 6-9px handles) is genuinely hard to
-   grab; this keeps the visual footprint similar while making the real
-   clickable area far more forgiving, with a hover state for affordance. */
+/* Resize handles -- shown on the selected frame/block, Figma-style. See
+   components/canvas/resize-handles.tsx. No separate handle chrome (no more
+   dot/bar squares, no hover highlight either) -- the entire border is
+   grabbable on every edge, matching how most direct-manipulation design
+   tools let you resize by dragging anywhere along an edge. Discoverability
+   comes from the cursor change alone: the hit area (below) is deliberately
+   generous, but purely invisible -- it must never read as the selection's
+   own border growing/moving. The four corners are only ever rendered
+   alongside n/w -- e/s/se are the only handles a flex-mode node or the root
+   gets, see resize-handles.tsx's clampToParent doc for why.
+
+   Every handle sits FULLY INSIDE the box (0, never a negative/overhanging
+   offset) -- a resized node gets an explicit height, which makes
+   sizeStyle() add `overflow: auto` (lib/layout/frame-style.ts), and that
+   clips away any child positioned outside the box's own edges. A handle
+   that straddled the border (half in, half out) would silently lose its
+   outer half to that clip the moment the node had ever been resized once
+   before -- unclickable with no visual sign why. */
 
 .resize-handle {
   position: absolute;
@@ -570,75 +579,91 @@
   background: transparent;
 }
 
-.resize-handle::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  background: var(--primary);
-  border: 1px solid var(--background);
-  transition: background 0.1s, width 0.1s, height 0.1s;
-}
-
-.resize-handle:hover::after {
-  background: var(--ring);
-}
+/* The 14px/18px sizes below are the DESIRED on-screen size at 100% zoom --
+   resize-handles.tsx applies an inline `transform: scale(1/zoom)` on top of
+   these so that size stays constant at every zoom level (these handles live
+   inside the zoomed canvas viewport, so without this a fixed CSS size would
+   scale WITH the content -- at this app's ~2-3x auto-fit-on-load default,
+   that turned a "14px" strip into 30-40+ screen px, swallowing most of a
+   modestly-sized block and stealing clicks meant for dragging its body).
+   transform-origin here keeps each handle flush against its real edge/
+   corner as it counter-scales, instead of shrinking toward its own center
+   and drifting away from that edge. */
 
 .resize-handle-e {
-  top: 50%;
-  right: -10px;
-  width: 20px;
-  height: 40px;
-  margin-top: -20px;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 14px;
   cursor: ew-resize;
+  transform-origin: right center;
 }
 
-.resize-handle-e::after {
-  width: 6px;
-  height: 28px;
-  border-radius: 3px;
-}
-
-.resize-handle-e:hover::after {
-  width: 8px;
+.resize-handle-w {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 14px;
+  cursor: ew-resize;
+  transform-origin: left center;
 }
 
 .resize-handle-s {
-  left: 50%;
-  bottom: -10px;
-  width: 40px;
-  height: 20px;
-  margin-left: -20px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 14px;
   cursor: ns-resize;
+  transform-origin: center bottom;
 }
 
-.resize-handle-s::after {
-  width: 28px;
-  height: 6px;
-  border-radius: 3px;
+.resize-handle-n {
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 14px;
+  cursor: ns-resize;
+  transform-origin: center top;
 }
 
-.resize-handle-s:hover::after {
-  height: 8px;
-}
-
+/* Each corner gets its own small hit area, rendered last in the DOM (per
+   corner, after both of its contributing edges) so it wins pointer hit-
+   testing over the full-length edge strips underneath -- otherwise there'd
+   be no way to resize both axes at once from a corner. */
 .resize-handle-se {
-  right: -10px;
-  bottom: -10px;
-  width: 22px;
-  height: 22px;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
   cursor: nwse-resize;
+  transform-origin: right bottom;
 }
 
-.resize-handle-se::after {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+.resize-handle-sw {
+  left: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nesw-resize;
+  transform-origin: left bottom;
 }
 
-.resize-handle-se:hover::after {
-  width: 13px;
-  height: 13px;
+.resize-handle-ne {
+  right: 0;
+  top: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nesw-resize;
+  transform-origin: right top;
+}
+
+.resize-handle-nw {
+  left: 0;
+  top: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  transform-origin: left top;
 }
 
 /* Canvas-mode positioning: smart-guide lines shown for the duration of a
@@ -754,7 +779,6 @@
   border-radius: var(--radius-sm);
   background: var(--popover);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-md);
   opacity: 0;
   /* Invisible (opacity: 0) elements still capture clicks unless explicitly
      excluded -- without this, this floating overlay silently swallows clicks

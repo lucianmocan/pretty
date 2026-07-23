@@ -587,11 +587,11 @@ export function InspectorPanel({
                   Flex
                 </ToggleGroupItem>
                 <ToggleGroupItem value="canvas" className="flex-1">
-                  Canvas
+                  Free-form
                 </ToggleGroupItem>
               </ToggleGroup>
               <p className="scripture-inspector-hint">
-                Canvas mode lets children be freely dragged and positioned instead of flowing in a row/column.
+                Free-form mode lets children be freely dragged and positioned instead of flowing in a row/column.
               </p>
             </div>
           </div>
@@ -644,7 +644,18 @@ export function InspectorPanel({
                   <Label>Page size</Label>
                   <Select
                     value={node.pageSize ?? 'content'}
-                    onValueChange={(v) => updateFrameProps(doc, node.id, { pageSize: v as PageSize })}
+                    onValueChange={(v) => {
+                      updateFrameProps(doc, node.id, { pageSize: v as PageSize })
+                      // A manual width/height override only ever does anything at
+                      // export time while Content-sized -- the fixed formats force
+                      // their own paper width regardless (see
+                      // app/api/export/route.ts), so leaving an old override in
+                      // place here would silently make the on-screen card the
+                      // wrong size with no way left to fix it (the Size section
+                      // and resize handles are hidden for any non-Content page
+                      // size, see below).
+                      if (v !== 'content') updateNodeSize(doc, node.id, { width: null, height: null })
+                    }}
                   >
                     <SelectTrigger className="w-36">
                       <SelectValue />
@@ -682,9 +693,17 @@ export function InspectorPanel({
             </>
           )}
 
-          <Separator />
-
-          <SizeSection node={node} docId={docId} />
+          {/* For the root frame, manual width/height only ever affects the
+              export when Page size is Content-sized -- the fixed formats
+              force their own paper width/height regardless (see
+              app/api/export/route.ts), so showing resize controls that do
+              nothing there would just be confusing dead UI. */}
+          {(node.id !== ROOT_ID || (node.pageSize ?? 'content') === 'content') && (
+            <>
+              <Separator />
+              <SizeSection node={node} docId={docId} />
+            </>
+          )}
 
           {/* Code/Text/Image/Frame creation moved to the bottom canvas
               toolbar (components/canvas/canvas-toolbar.tsx) -- Figma-style,

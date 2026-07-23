@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { GripVertical, ChevronUp, ChevronDown, Trash2 } from 'lucide-react'
 import type { ChildLayout, LayoutNode } from '@/lib/layout/types'
-import { frameStyle, sizeStyle } from '@/lib/layout/frame-style'
+import { frameOuterStyle, frameInnerStyle, outerBoxStyle, contentOverflowStyle } from '@/lib/layout/frame-style'
 import { snapPosition } from '@/lib/layout/canvas-snap'
 import { BlockEditor } from '@/components/editor/block-editor'
 import { getYDoc } from '@/lib/yjs/doc-store'
@@ -129,8 +129,14 @@ function NodeControls({
  * Recursive interactive renderer for the layout tree -- selection + hover
  * controls + drag-and-drop reordering + resize handles + canvas-mode
  * positioning all live here. The print route walks the same tree shape
- * separately (it has no interactivity), but both call the shared
- * frameStyle()/sizeStyle() for the actual styling so they can't diverge.
+ * separately (it has no interactivity) using the unified frameStyle()/
+ * sizeStyle() on a single div; this component instead splits that into an
+ * outer position-hosting box (frameOuterStyle/outerBoxStyle) and an inner
+ * content wrapper that owns flex layout + scroll/clip
+ * (frameInnerStyle/contentOverflowStyle) -- see those functions' doc
+ * comments in lib/layout/frame-style.ts for why. Both derive from the same
+ * underlying CSS values either way, so the two structures still can't
+ * visually diverge.
  */
 export function FrameNode({
   node,
@@ -195,13 +201,28 @@ export function FrameNode({
         }
       : undefined
 
-  const resizeHandles = isOnlySelected && (
+  // The root frame's manual width/height only ever affects the export while
+  // Page size is Content-sized -- the fixed formats (A4/Letter/Custom) force
+  // their own paper dimensions regardless (see app/api/export/route.ts), so
+  // dragging the root otherwise would visibly resize the on-screen card for
+  // no actual effect. Matches the Size section's own gating in
+  // inspector-panel.tsx.
+  const rootResizeDisabled = isRoot && (node.pageSize ?? 'content') !== 'content'
+  const resizeHandles = isOnlySelected && !rootResizeDisabled && (
     <ResizeHandles
       targetRef={elementRef}
-      onResize={setLiveSize}
-      onCommit={(size) => {
+      onResize={(size, position) => {
+        setLiveSize(size)
+        if (position) setLivePosition(position)
+      }}
+      onCommit={(size, position) => {
         setLiveSize(null)
+        setLivePosition(null)
         onResizeNode(node.id, size)
+        // Only populated for a w/n-inclusive drag on a canvas-mode node --
+        // see ResizeHandles' clampToParent doc for why that's the only case
+        // a left/top-edge drag has an x/y to actually shift.
+        if (position) onRepositionNode(node.id, position)
       }}
       zoom={zoom}
       clampToParent={isCanvasChild}
@@ -374,7 +395,7 @@ export function FrameNode({
           isSelected && 'scripture-selected',
           isDragOver && 'is-drag-over'
         )}
-        style={{ ...frameStyle(node), ...canvasPositionStyle, ...sizeOverride }}
+        style={{ ...frameOuterStyle(node), ...canvasPositionStyle, ...sizeOverride }}
         onClick={(e) => {
           e.stopPropagation()
           onSelect(node.id, e.shiftKey)
@@ -385,29 +406,35 @@ export function FrameNode({
         {!isRoot && !livePosition && !liveSize && (
           <NodeControls id={node.id} onMove={onMove} onRemove={onRemove} gripHandlers={gripHandlers} showGrip={showGrip} />
         )}
-        {children.length === 0 && (
-          <div className="scripture-empty-frame">Empty frame. Select it and add a block.</div>
-        )}
-        {children.map((child) => (
-          <FrameNode
-            key={child.id}
-            node={child}
-            docId={docId}
-            selectedIds={selectedIds}
-            onSelect={onSelect}
-            onMove={onMove}
-            onRemove={onRemove}
-            onReorder={onReorder}
-            onResizeNode={onResizeNode}
-            onRepositionNode={onRepositionNode}
-            parentChildLayout={childLayout}
-            gutterClickMode={gutterClickMode}
-            onGutterClick={onGutterClick}
-            zoom={zoom}
-            editingId={editingId}
-            onSetEditing={onSetEditing}
-          />
-        ))}
+        {/* Flex layout + scroll/clip live on this INNER wrapper, not the
+            outer box above -- see frameInnerStyle's doc comment for why:
+            NodeControls/resizeHandles/callouts below must never be clipped
+            by this frame's own overflow once it has an explicit height. */}
+        <div className="scripture-frame-content" style={frameInnerStyle(node)}>
+          {children.length === 0 && (
+            <div className="scripture-empty-frame">Empty frame. Select it and add a block.</div>
+          )}
+          {children.map((child) => (
+            <FrameNode
+              key={child.id}
+              node={child}
+              docId={docId}
+              selectedIds={selectedIds}
+              onSelect={onSelect}
+              onMove={onMove}
+              onRemove={onRemove}
+              onReorder={onReorder}
+              onResizeNode={onResizeNode}
+              onRepositionNode={onRepositionNode}
+              parentChildLayout={childLayout}
+              gutterClickMode={gutterClickMode}
+              onGutterClick={onGutterClick}
+              zoom={zoom}
+              editingId={editingId}
+              onSetEditing={onSetEditing}
+            />
+          ))}
+        </div>
         {(node.callouts ?? []).map((callout) => (
           <Callout
             key={callout.id}
@@ -429,7 +456,7 @@ export function FrameNode({
       ref={elementRef}
       data-node-id={node.id}
       className={classNames('scripture-leaf', isSelected && 'scripture-selected', isDragOver && 'is-drag-over')}
-      style={{ ...sizeStyle(node), ...canvasPositionStyle, ...sizeOverride }}
+      style={{ ...outerBoxStyle(node), ...canvasPositionStyle, ...sizeOverride }}
       onClick={(e) => {
         e.stopPropagation()
         onSelect(node.id, e.shiftKey)
@@ -441,36 +468,42 @@ export function FrameNode({
       {!livePosition && !liveSize && (
         <NodeControls id={node.id} onMove={onMove} onRemove={onRemove} gripHandlers={gripHandlers} showGrip={showGrip} />
       )}
-      {node.kind === 'image' ? (
-        <ImageBlock
-          src={node.src ?? ''}
-          alt={node.alt ?? ''}
-          onUploaded={(url) => updateImageProps(getYDoc(docId).doc, node.id, { src: url })}
-        />
-      ) : (
-        <BlockEditor
-          docId={docId}
-          blockId={node.id}
-          kind={node.kind}
-          editable={isEditing}
-          language={node.language}
-          theme={node.theme}
-          fontFamily={node.fontFamily}
-          filename={node.filename}
-          chromeStyle={node.chromeStyle}
-          customChrome={node.customChrome}
-          showLineNumbers={node.showLineNumbers}
-          startLineNumber={node.startLineNumber}
-          ligatures={node.ligatures}
-          lineHeight={node.lineHeight}
-          letterSpacing={node.letterSpacing}
-          highlightLines={node.highlightLines}
-          trimRanges={node.trimRanges}
-          diffLines={node.diffLines}
-          onLineClick={(lineNumber) => onGutterClick(node.id, lineNumber)}
-          onEmptyBlur={() => onRemove(node.id)}
-        />
-      )}
+      {/* Scroll/clip lives on this INNER wrapper, not the outer box above --
+          see contentOverflowStyle's doc comment: NodeControls/resizeHandles
+          below must never be clipped by this block's own overflow once it
+          has an explicit height. */}
+      <div className="scripture-leaf-content" style={contentOverflowStyle(node)}>
+        {node.kind === 'image' ? (
+          <ImageBlock
+            src={node.src ?? ''}
+            alt={node.alt ?? ''}
+            onUploaded={(url) => updateImageProps(getYDoc(docId).doc, node.id, { src: url })}
+          />
+        ) : (
+          <BlockEditor
+            docId={docId}
+            blockId={node.id}
+            kind={node.kind}
+            editable={isEditing}
+            language={node.language}
+            theme={node.theme}
+            fontFamily={node.fontFamily}
+            filename={node.filename}
+            chromeStyle={node.chromeStyle}
+            customChrome={node.customChrome}
+            showLineNumbers={node.showLineNumbers}
+            startLineNumber={node.startLineNumber}
+            ligatures={node.ligatures}
+            lineHeight={node.lineHeight}
+            letterSpacing={node.letterSpacing}
+            highlightLines={node.highlightLines}
+            trimRanges={node.trimRanges}
+            diffLines={node.diffLines}
+            onLineClick={(lineNumber) => onGutterClick(node.id, lineNumber)}
+            onEmptyBlur={() => onRemove(node.id)}
+          />
+        )}
+      </div>
       {resizeHandles}
       {guideOverlay}
     </div>

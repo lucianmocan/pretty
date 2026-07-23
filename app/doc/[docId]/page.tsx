@@ -63,11 +63,6 @@ export default function DocumentEditorPage() {
   const [gutterClickMode, setGutterClickMode] = useState<GutterClickMode>('highlight')
   const [zoom, setZoom] = useState(1)
   const [customizeOpen, setCustomizeOpen] = useState(false)
-  // Figma-style tool mode -- 'select' is the default (click selects/drags
-  // individual blocks); 'hand' pans the canvas by dragging anywhere on it,
-  // including directly over blocks, without selecting/moving/editing them.
-  const [tool, setTool] = useState<'select' | 'hand'>('select')
-  const [isPanning, setIsPanning] = useState(false)
   // The natural (unscaled) content size of .scripture-canvas-viewport --
   // used to size .scripture-canvas-scale-box to the SCALED dimensions, so
   // the scrollable canvas area's scroll bounds actually grow/shrink with
@@ -75,6 +70,11 @@ export default function DocumentEditorPage() {
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const canvasAreaRef = useRef<HTMLDivElement>(null)
+  // Whether this page has already been auto-fit once -- without this guard,
+  // the auto-fit effect below (keyed on naturalSize) would refight the
+  // user's own manual zoom every time naturalSize changes (e.g. after
+  // adding/resizing a block), not just on first load. Reset per page switch.
+  const autoFitDoneRef = useRef(false)
 
   useEffect(() => {
     const meta = getDocumentMeta(docId)
@@ -147,75 +147,6 @@ export default function DocumentEditorPage() {
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [activePageId, tree])
-
-  // Hand tool: drag anywhere on the canvas (including directly over blocks)
-  // to pan, without selecting/moving/editing whatever's underneath. A native
-  // CAPTURE-phase listener on the canvas area itself, not React's (bubbling)
-  // onPointerDown -- capture fires on the way DOWN to the target, before any
-  // block's own bubbling-phase pointerdown/click handlers ever run, and
-  // stopPropagation() here keeps the event from ever reaching them at all.
-  // This is what lets the hand tool override every block's own interaction
-  // without threading tool-mode awareness through the whole FrameNode tree.
-  useEffect(() => {
-    const el = canvasAreaRef.current
-    if (!el) return
-    // The bottom toolbar and zoom controls are persistent floating UI that
-    // lives inside .scripture-canvas-area -- always interactive regardless
-    // of tool mode, or switching OFF the hand tool via its own toolbar
-    // button would be impossible (its own click would get swallowed too).
-    const isFloatingChrome = (target: EventTarget | null) =>
-      target instanceof Element && !!target.closest('.scripture-canvas-toolbar, .scripture-zoom-controls')
-
-    const onPointerDownCapture = (e: PointerEvent) => {
-      if (tool !== 'hand' || isFloatingChrome(e.target)) return
-      e.stopPropagation()
-      e.preventDefault()
-      const startScrollLeft = el.scrollLeft
-      const startScrollTop = el.scrollTop
-      const startClientX = e.clientX
-      const startClientY = e.clientY
-      setIsPanning(true)
-
-      const onMove = (ev: PointerEvent) => {
-        el.scrollLeft = startScrollLeft - (ev.clientX - startClientX)
-        el.scrollTop = startScrollTop - (ev.clientY - startClientY)
-      }
-      const onUp = () => {
-        window.removeEventListener('pointermove', onMove)
-        window.removeEventListener('pointerup', onUp)
-        setIsPanning(false)
-      }
-      window.addEventListener('pointermove', onMove)
-      window.addEventListener('pointerup', onUp)
-    }
-    // 'click' is a SEPARATE event from 'pointerdown' -- it fires on release
-    // as long as mousedown/mouseup landed on the same element, regardless of
-    // how far the pointer moved in between (unlike a "drag", it has no
-    // movement threshold of its own). Stopping pointerdown's propagation
-    // does nothing to suppress it: at high zoom especially, a real pan drag
-    // can easily start and end within the same (now large, on-screen) block,
-    // so without also intercepting 'click' (and 'dblclick', same reasoning)
-    // here, panning over a block would still select/edit it via its own
-    // bubbling-phase onClick/onDoubleClick once the drag completes.
-    const stopIfHandTool = (e: Event) => {
-      if (tool === 'hand' && !isFloatingChrome(e.target)) e.stopPropagation()
-    }
-    el.addEventListener('pointerdown', onPointerDownCapture, { capture: true })
-    el.addEventListener('click', stopIfHandTool, { capture: true })
-    el.addEventListener('dblclick', stopIfHandTool, { capture: true })
-    return () => {
-      el.removeEventListener('pointerdown', onPointerDownCapture, { capture: true })
-      el.removeEventListener('click', stopIfHandTool, { capture: true })
-      el.removeEventListener('dblclick', stopIfHandTool, { capture: true })
-    }
-    // activePageId/tree, not just tool -- .scripture-workspace is keyed by
-    // activePageId (remounts entirely on page switch), so canvasAreaRef
-    // points at a NEW DOM node afterward. Without depending on these too,
-    // this effect wouldn't rerun on a page switch (tool didn't change), and
-    // its listeners would stay attached to the OLD, now-detached element --
-    // silently breaking panning/click-suppression on the new page until the
-    // user manually toggles the tool off and back on.
-  }, [tool, activePageId, tree])
 
   // Delete/Backspace removes the current selection -- the Figma-style
   // direct-manipulation model has no floating Delete button to fall back on
@@ -333,6 +264,45 @@ export default function DocumentEditorPage() {
     setZoom(1)
   }
 
+  // Fits the card to the available canvas area (leaving room for its own
+  // CSS padding, so the fitted card doesn't touch the very edge) and
+  // centers the scroll position on it. A flat 100% can look tiny on a large
+  // or high-DPI screen for an otherwise modest-sized card -- fitting scales
+  // to the actual viewport instead of a fixed percentage.
+  function handleRecenter() {
+    const area = canvasAreaRef.current
+    if (!area || !naturalSize || naturalSize.width === 0 || naturalSize.height === 0) return
+    const CANVAS_PADDING = 56 // matches .scripture-canvas-area's own CSS padding
+    const availableWidth = area.clientWidth - CANVAS_PADDING * 2
+    const availableHeight = area.clientHeight - CANVAS_PADDING * 2
+    if (availableWidth <= 0 || availableHeight <= 0) return
+    setZoom(clampZoom(Math.min(availableWidth / naturalSize.width, availableHeight / naturalSize.height)))
+    // Scroll centering needs the NEW zoom's layout to have actually
+    // committed first (scrollWidth/Height below depend on it) -- a
+    // requestAnimationFrame callback runs after React's render/commit but
+    // before the next paint, so by then the DOM reflects the new zoom.
+    requestAnimationFrame(() => {
+      const el = canvasAreaRef.current
+      if (!el) return
+      el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2
+      el.scrollTop = (el.scrollHeight - el.clientHeight) / 2
+    })
+  }
+
+  // Auto-fit once per page, the first time its natural size becomes known --
+  // replaces a flat, possibly-tiny-looking 100% default with a size that
+  // actually fills the available canvas area on load.
+  useEffect(() => {
+    autoFitDoneRef.current = false
+  }, [activePageId])
+
+  useEffect(() => {
+    if (autoFitDoneRef.current || !naturalSize) return
+    autoFitDoneRef.current = true
+    handleRecenter()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [naturalSize])
+
   async function handleExport(format: 'pdf' | 'png') {
     setExporting(true)
     setExportError(null)
@@ -388,6 +358,7 @@ export default function DocumentEditorPage() {
           onZoomIn={handleZoomIn}
           onZoomOut={handleZoomOut}
           onZoomReset={handleZoomReset}
+          onRecenter={handleRecenter}
           onOpenCustomize={() => setCustomizeOpen(true)}
         >
           <SearchReplacePanel />
@@ -431,13 +402,7 @@ export default function DocumentEditorPage() {
           <div className="scripture-workspace" key={activePageId}>
             <div
               ref={canvasAreaRef}
-              className={[
-                'scripture-canvas-area',
-                tool === 'hand' && 'tool-hand',
-                isPanning && 'is-panning',
-              ]
-                .filter(Boolean)
-                .join(' ')}
+              className="scripture-canvas-area"
               onClick={() => handleSelectionChange([ROOT_ID])}
             >
               <div
@@ -474,15 +439,19 @@ export default function DocumentEditorPage() {
                   </CanvasRoot>
                 </div>
               </div>
-              <ZoomControls zoom={zoom} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onReset={handleZoomReset} />
+              <ZoomControls
+                zoom={zoom}
+                onZoomIn={handleZoomIn}
+                onZoomOut={handleZoomOut}
+                onReset={handleZoomReset}
+                onRecenter={handleRecenter}
+              />
               <CanvasToolbar
                 docId={activePageId as string}
                 tree={tree}
                 selectedIds={selectedIds}
                 onSelectionChange={handleSelectionChange}
                 onSetEditing={setEditingId}
-                tool={tool}
-                onToolChange={setTool}
               />
             </div>
             <InspectorPanel

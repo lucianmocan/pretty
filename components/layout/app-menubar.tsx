@@ -23,6 +23,7 @@ interface AppMenubarProps {
   onZoomIn: () => void
   onZoomOut: () => void
   onZoomReset: () => void
+  onRecenter: () => void
   onOpenCustomize: () => void
   /** Right-aligned slot for route-specific controls (e.g. search/replace). */
   children?: ReactNode
@@ -38,6 +39,7 @@ export function AppMenubar({
   onZoomIn,
   onZoomOut,
   onZoomReset,
+  onRecenter,
   onOpenCustomize,
   children,
 }: AppMenubarProps) {
@@ -66,6 +68,7 @@ export function AppMenubar({
             <MenubarItem onClick={onZoomOut}>Zoom out</MenubarItem>
             <MenubarSeparator />
             <MenubarItem onClick={onZoomReset}>Zoom to 100%</MenubarItem>
+            <MenubarItem onClick={onRecenter}>Recenter</MenubarItem>
           </MenubarContent>
         </MenubarMenu>
 
