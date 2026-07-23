@@ -4,6 +4,21 @@ import { PDFDocument } from 'pdf-lib'
 
 export const runtime = 'nodejs'
 
+// Standard paper sizes in CSS px at 96 DPI (1mm = 96/25.4px). Used instead of
+// Playwright's `format: 'A4'/'Letter'` shorthand, which forces BOTH fixed
+// dimensions -- if a page's content is taller than that, Chromium silently
+// paginates it across multiple physical PDF pages, and the `pageRanges: '1'`
+// below (needed to keep one exported page per doc page) then discards
+// everything past the first, with no error and no indication anything was
+// lost. Using explicit width/height with a content-driven MINIMUM height
+// instead keeps the standard paper WIDTH while guaranteeing every page is
+// tall enough to fit its content in one physical page, every time.
+const MM_TO_PX = 96 / 25.4
+const PAGE_FORMATS_PX: Record<'a4' | 'letter', { width: number; height: number }> = {
+  a4: { width: 210 * MM_TO_PX, height: 297 * MM_TO_PX },
+  letter: { width: 215.9 * MM_TO_PX, height: 279.4 * MM_TO_PX },
+}
+
 /**
  * Navigates to one page's /print/[pageId] route (rendered via Tiptap's
  * static renderer -- never a live editor) and waits for it to fully settle.
@@ -11,20 +26,30 @@ export const runtime = 'nodejs'
  */
 async function preparePrintPage(browser: Browser, origin: string, pageId: string): Promise<Page> {
   const page = await browser.newPage()
-  const printUrl = new URL(`/print/${pageId}`, origin).toString()
-  const response = await page.goto(printUrl, { waitUntil: 'networkidle' })
-  if (response?.status() === 404) {
-    await page.close()
-    throw new Error(`Page ${pageId} not found`)
-  }
+  // Everything below can throw (navigation timeout/error, page.evaluate
+  // failing) -- the caller's own try/finally only starts once this function
+  // RETURNS a page, so without this try/catch, throwing here instead of
+  // returning would leak this page handle for the rest of the export
+  // request's lifetime (only closed once, eventually, when the whole
+  // browser itself closes in the outer route handler's finally).
+  try {
+    const printUrl = new URL(`/print/${pageId}`, origin).toString()
+    const response = await page.goto(printUrl, { waitUntil: 'networkidle' })
+    if (response?.status() === 404) {
+      throw new Error(`Page ${pageId} not found`)
+    }
 
-  // Fonts can still be mid-swap right after `fonts.ready` resolves; a
-  // double rAF wait lets one more paint settle before we measure/print.
-  await page.evaluate(() => document.fonts.ready)
-  await page.evaluate(
-    () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-  )
-  return page
+    // Fonts can still be mid-swap right after `fonts.ready` resolves; a
+    // double rAF wait lets one more paint settle before we measure/print.
+    await page.evaluate(() => document.fonts.ready)
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    )
+    return page
+  } catch (err) {
+    await page.close()
+    throw err
+  }
 }
 
 /**
@@ -57,13 +82,14 @@ async function renderPagePdf(browser: Browser, origin: string, pageId: string): 
       preferCSSPageSize: false,
     }
 
-    let sizeOptions: { format?: string; width?: string; height?: string }
-    if (pageSize === 'a4') {
-      sizeOptions = { format: 'A4' }
-    } else if (pageSize === 'letter') {
-      sizeOptions = { format: 'Letter' }
+    let sizeOptions: { width: string; height: string }
+    if (pageSize === 'a4' || pageSize === 'letter') {
+      const paper = PAGE_FORMATS_PX[pageSize]
+      sizeOptions = { width: `${paper.width}px`, height: `${Math.max(paper.height, height)}px` }
     } else if (pageSize === 'custom' && customWidthMm && customHeightMm) {
-      sizeOptions = { width: `${customWidthMm}mm`, height: `${customHeightMm}mm` }
+      const customWidth = Number(customWidthMm) * MM_TO_PX
+      const customHeight = Number(customHeightMm) * MM_TO_PX
+      sizeOptions = { width: `${customWidth}px`, height: `${Math.max(customHeight, height)}px` }
     } else {
       sizeOptions = { width: `${width}px`, height: `${height}px` }
     }

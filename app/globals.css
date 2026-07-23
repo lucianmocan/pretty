@@ -189,6 +189,14 @@
   background-size: 22px 22px;
 }
 
+.scripture-canvas-area.tool-hand {
+  cursor: grab;
+}
+
+.scripture-canvas-area.tool-hand.is-panning {
+  cursor: grabbing;
+}
+
 /* Scaled to `zoom` via a CSS transform on the INNER element -- this outer
    box is sized to the SCALED pixel dimensions (width/height set inline from
    a ResizeObserver reading, see app/doc/[docId]/page.tsx) so the scrollable
@@ -237,6 +245,32 @@
   color: var(--foreground);
 }
 
+/* Figma-style bottom-center floating toolbar (components/canvas/canvas-
+   toolbar.tsx) -- tool mode (Select/Hand) plus block-creation actions,
+   replacing the Inspector's old "Add to this frame" section. */
+.scripture-canvas-toolbar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  transform: translateX(-50%);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--popover);
+  box-shadow: var(--shadow-md);
+}
+
+.scripture-canvas-toolbar-divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
 .scripture-canvas-root {
   display: inline-block;
   padding: 32px;
@@ -253,6 +287,21 @@
 .scripture-card {
   box-shadow: var(--shadow-lg);
   min-width: 360px;
+}
+
+/* Canvas-mode children are absolutely positioned (out of normal flow), so a
+   frame in canvas mode has nothing left in-flow to size itself around --
+   without this, it collapses to near-zero (just .scripture-card's 360px
+   floor and whatever padding), even though children are freely positioned
+   well beyond that. A real minimum size gives canvas mode an actual
+   "artboard" to arrange things on and to clamp dragging against (see
+   snapPosition's containerSize param in lib/layout/canvas-snap.ts) --
+   without it, that clamp would trap every drag inside a near-zero box.
+   Only a floor: an explicit width/height override (resize handles, the
+   Inspector's Size fields) still wins via sizeStyle()'s inline styles. */
+.scripture-frame-canvas {
+  min-width: 640px;
+  min-height: 400px;
 }
 
 .scripture-code-editor {
@@ -512,7 +561,12 @@
 
 .resize-handle {
   position: absolute;
-  z-index: 11;
+  /* Higher than .scripture-zoom-controls (30, the floating zoom widget) and
+     .scripture-canvas-guide (20) -- a resize handle is always genuinely
+     interactive whenever it's rendered at all (gated by isOnlySelected in
+     resize-handles.tsx), so it must never end up covered by the canvas's
+     own floating chrome sitting in the same stacking context. */
+  z-index: 40;
   background: transparent;
 }
 
@@ -712,11 +766,22 @@
   z-index: 10;
 }
 
+/* z-index bumped only while actually interactive (hovered), not at rest --
+   in canvas mode, closely-positioned sibling blocks' floating controls
+   clusters can geometrically overlap (both sit outside their own block's
+   box, at top:-30px), so hovering near that overlap can put BOTH siblings
+   into :hover simultaneously; without this, the tie always resolved in
+   favor of whichever block is LATER in the DOM regardless of which one the
+   pointer is actually over. It also needs to beat .scripture-zoom-controls
+   (30, the floating zoom widget) and .scripture-canvas-guide (20) -- a
+   block's own hover controls/tooltip must never render underneath the
+   canvas's own floating chrome. */
 .scripture-frame:hover > .scripture-node-controls,
 .scripture-leaf:hover > .scripture-node-controls {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
+  z-index: 40;
 }
 
 .scripture-editor-loading {

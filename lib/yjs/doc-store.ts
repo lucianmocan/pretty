@@ -4,6 +4,18 @@ import { ySyncPluginKey } from '@tiptap/y-tiptap'
 
 export const LAYOUT_MAP = 'layout'
 
+// Explicit transaction origin for every layout-tree mutation (see
+// lib/yjs/layout-store.ts) -- passed as doc.transact()'s second argument so
+// the shared UndoManager below can track it specifically. Deliberately NOT
+// tracking the default `null` origin: y-indexeddb's own initial-load
+// transaction (see node_modules/y-indexeddb/src/y-indexeddb.js, the
+// `Y.transact(idbPersistence.doc, () => { ...applyUpdate... })` call that
+// replays persisted history on startup) also uses `null`, since it never
+// passes an origin either. Tracking `null` broadly would let the very first
+// Cmd+Z after opening a document undo that whole initial load instead of a
+// real edit -- a dedicated origin avoids that entirely.
+export const LAYOUT_MUTATION_ORIGIN = Symbol('scripture-layout-mutation')
+
 /** Each block's Tiptap content lives in its own fragment, keyed by block id. */
 export function blockFragmentName(blockId: string): string {
   return `block:${blockId}`
@@ -51,7 +63,7 @@ export function getUndoManager(id: string): Y.UndoManager {
   const entry = getYDoc(id)
   if (!entry.undoManager) {
     entry.undoManager = new Y.UndoManager(entry.doc, {
-      trackedOrigins: new Set([ySyncPluginKey]),
+      trackedOrigins: new Set([ySyncPluginKey, LAYOUT_MUTATION_ORIGIN]),
     })
   }
   return entry.undoManager

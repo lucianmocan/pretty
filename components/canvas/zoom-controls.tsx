@@ -14,7 +14,11 @@ interface ZoomControlsProps {
  * doubles as a reset-to-100% button. */
 export function ZoomControls({ zoom, onZoomIn, onZoomOut, onReset }: ZoomControlsProps) {
   return (
-    <div className="scripture-zoom-controls">
+    // stopPropagation -- this sits inside .scripture-canvas-area, whose own
+    // onClick resets selection to root on any click that reaches it. Without
+    // this, clicking a zoom button would bubble up and immediately clear
+    // whatever was selected.
+    <div className="scripture-zoom-controls" onClick={(e) => e.stopPropagation()}>
       <Button variant="ghost" size="icon-xs" onClick={onZoomOut} aria-label="Zoom out">
         <Minus />
       </Button>

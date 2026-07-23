@@ -39,7 +39,17 @@ export function ImageBlock({ src, alt, onUploaded }: ImageBlockProps) {
 
   if (!src) {
     return (
-      <div className="scripture-image-empty" onClick={(e) => e.stopPropagation()}>
+      // onPointerDown stopPropagation too, not just onClick -- in canvas
+      // mode, the parent leaf's whole body has its own onPointerDown wired
+      // to start a move-drag (see frame-node.tsx's beginMoveDrag), which
+      // calls preventDefault() and silently suppresses the click event this
+      // button needs to open the file picker. Without stopping it here
+      // first, "Upload image" does nothing at all inside a canvas-mode frame.
+      <div
+        className="scripture-image-empty"
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
         <input
           ref={inputRef}
           type="file"
@@ -47,6 +57,11 @@ export function ImageBlock({ src, alt, onUploaded }: ImageBlockProps) {
           className="hidden"
           onChange={(e) => {
             const file = e.target.files?.[0]
+            // Reset immediately, not just on failure -- otherwise re-picking
+            // the SAME file (e.g. to retry after a failed upload) fires no
+            // change event at all, since the input's value string didn't
+            // change, and the button silently appears to do nothing.
+            e.target.value = ''
             if (file) handleFile(file)
           }}
         />

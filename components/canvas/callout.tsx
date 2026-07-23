@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import type { CalloutAnnotation } from '@/lib/layout/types'
 import { Button } from '@/components/ui/button'
@@ -27,6 +27,16 @@ export function Callout({ callout, onChange, onRemove }: CalloutProps) {
   const [live, setLive] = useState<{ dx: number; dy: number } | null>(null)
   const dx = live?.dx ?? callout.dx
   const dy = live?.dy ?? callout.dy
+  // Holds the currently active drag's own cleanup, if any -- deleting this
+  // callout's owning frame (or the callout itself) mid-drag unmounts this
+  // component; without this, the window-level pointermove/pointerup
+  // listeners would keep firing forever, later calling onChange for a
+  // frame/callout that may no longer exist.
+  const activeCleanupRef = useRef<(() => void) | null>(null)
+
+  useEffect(() => {
+    return () => activeCleanupRef.current?.()
+  }, [])
 
   function beginDrag(e: React.PointerEvent) {
     e.stopPropagation()
@@ -43,13 +53,18 @@ export function Callout({ callout, onChange, onRemove }: CalloutProps) {
       if (next) setLive(next)
     }
     const onUp = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
+      cleanup()
       const next = compute(ev)
       dragState.current = null
       setLive(null)
       if (next) onChange(next)
     }
+    function cleanup() {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      activeCleanupRef.current = null
+    }
+    activeCleanupRef.current = cleanup
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
   }

@@ -25,7 +25,7 @@ import {
   deleteCustomChromeStyle,
 } from '@/lib/presets/custom-chrome-styles'
 import type { CustomChromeStyle, ChromeIconKey } from '@/lib/layout/types'
-import { tokenizeCode, type PlainToken } from '@/lib/shiki/tokenize'
+import { tokenizePreviewCode, type PlainToken } from '@/lib/shiki/tokenize'
 import { CodeChrome } from '@/components/editor/code-chrome'
 
 // Hits comment/keyword/string/number/function/variable/type-ish tokens so
@@ -122,7 +122,7 @@ function SyntaxThemeEditor() {
     if (!draft) return
     let cancelled = false
     const timer = setTimeout(() => {
-      tokenizeCode(SAMPLE_CODE, 'python', buildShikiTheme(draft))
+      tokenizePreviewCode(SAMPLE_CODE, 'python', buildShikiTheme(draft))
         .then((result) => {
           if (!cancelled) setPreview(result.lines)
         })
@@ -267,7 +267,7 @@ function ChromeStyleEditor() {
   // the preview's code area; only the CodeChrome wrapper re-renders as
   // chrome fields change, no re-tokenizing needed for that.
   useEffect(() => {
-    tokenizeCode(SAMPLE_CODE, 'python', 'dracula')
+    tokenizePreviewCode(SAMPLE_CODE, 'python', 'dracula')
       .then((result) => setPreviewLines(result.lines))
       .catch((err) => console.error('Failed to tokenize chrome preview sample', err))
   }, [])
@@ -492,7 +492,18 @@ export function CustomizeDialog({ open, onOpenChange }: CustomizeDialogProps) {
 
         <Separator />
 
-        {tab === 'syntax' ? <SyntaxThemeEditor /> : <ChromeStyleEditor />}
+        {/* Both stay MOUNTED always, just hidden -- conditionally rendering
+            only the active one would unmount+reset the other's in-progress
+            draft (each manages its own useState internally) the moment you
+            switch tabs, silently discarding any unsaved edits with no
+            warning. Toggling display instead preserves both editors' state
+            for as long as the dialog itself stays open. */}
+        <div style={{ display: tab === 'syntax' ? 'contents' : 'none' }}>
+          <SyntaxThemeEditor />
+        </div>
+        <div style={{ display: tab === 'chrome' ? 'contents' : 'none' }}>
+          <ChromeStyleEditor />
+        </div>
       </DialogContent>
     </Dialog>
   )

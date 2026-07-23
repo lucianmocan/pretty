@@ -7,6 +7,7 @@ import { FrameNode } from '@/components/canvas/frame-node'
 import { CanvasRoot } from '@/components/canvas/canvas-root'
 import { InspectorPanel } from '@/components/canvas/inspector-panel'
 import { ZoomControls } from '@/components/canvas/zoom-controls'
+import { CanvasToolbar } from '@/components/canvas/canvas-toolbar'
 import { useLayoutTree } from '@/lib/use-layout-tree'
 import { getYDoc, encodeDocState } from '@/lib/yjs/doc-store'
 import {
@@ -48,6 +49,13 @@ export default function DocumentEditorPage() {
   const [activePageId, setActivePageId] = useState<string | null>(null)
   const tree = useLayoutTree(activePageId)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  // Figma-style selection model, canvas-mode blocks only (flex-mode blocks
+  // stay always-editable, as before -- there's no competing "drag the whole
+  // block by clicking it" gesture there to disambiguate from). A single
+  // click selects without focusing the editor (editable:false); this tracks
+  // which ONE block (if any) is actually in text-edit mode, entered via
+  // double-click. null means "nothing is being text-edited right now".
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
   const [docName, setDocName] = useState<string | null>(null)
@@ -55,6 +63,11 @@ export default function DocumentEditorPage() {
   const [gutterClickMode, setGutterClickMode] = useState<GutterClickMode>('highlight')
   const [zoom, setZoom] = useState(1)
   const [customizeOpen, setCustomizeOpen] = useState(false)
+  // Figma-style tool mode -- 'select' is the default (click selects/drags
+  // individual blocks); 'hand' pans the canvas by dragging anywhere on it,
+  // including directly over blocks, without selecting/moving/editing them.
+  const [tool, setTool] = useState<'select' | 'hand'>('select')
+  const [isPanning, setIsPanning] = useState(false)
   // The natural (unscaled) content size of .scripture-canvas-viewport --
   // used to size .scripture-canvas-scale-box to the SCALED dimensions, so
   // the scrollable canvas area's scroll bounds actually grow/shrink with
@@ -135,11 +148,103 @@ export default function DocumentEditorPage() {
     return () => el.removeEventListener('wheel', onWheel)
   }, [activePageId, tree])
 
+  // Hand tool: drag anywhere on the canvas (including directly over blocks)
+  // to pan, without selecting/moving/editing whatever's underneath. A native
+  // CAPTURE-phase listener on the canvas area itself, not React's (bubbling)
+  // onPointerDown -- capture fires on the way DOWN to the target, before any
+  // block's own bubbling-phase pointerdown/click handlers ever run, and
+  // stopPropagation() here keeps the event from ever reaching them at all.
+  // This is what lets the hand tool override every block's own interaction
+  // without threading tool-mode awareness through the whole FrameNode tree.
+  useEffect(() => {
+    const el = canvasAreaRef.current
+    if (!el) return
+    // The bottom toolbar and zoom controls are persistent floating UI that
+    // lives inside .scripture-canvas-area -- always interactive regardless
+    // of tool mode, or switching OFF the hand tool via its own toolbar
+    // button would be impossible (its own click would get swallowed too).
+    const isFloatingChrome = (target: EventTarget | null) =>
+      target instanceof Element && !!target.closest('.scripture-canvas-toolbar, .scripture-zoom-controls')
+
+    const onPointerDownCapture = (e: PointerEvent) => {
+      if (tool !== 'hand' || isFloatingChrome(e.target)) return
+      e.stopPropagation()
+      e.preventDefault()
+      const startScrollLeft = el.scrollLeft
+      const startScrollTop = el.scrollTop
+      const startClientX = e.clientX
+      const startClientY = e.clientY
+      setIsPanning(true)
+
+      const onMove = (ev: PointerEvent) => {
+        el.scrollLeft = startScrollLeft - (ev.clientX - startClientX)
+        el.scrollTop = startScrollTop - (ev.clientY - startClientY)
+      }
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        setIsPanning(false)
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    }
+    // 'click' is a SEPARATE event from 'pointerdown' -- it fires on release
+    // as long as mousedown/mouseup landed on the same element, regardless of
+    // how far the pointer moved in between (unlike a "drag", it has no
+    // movement threshold of its own). Stopping pointerdown's propagation
+    // does nothing to suppress it: at high zoom especially, a real pan drag
+    // can easily start and end within the same (now large, on-screen) block,
+    // so without also intercepting 'click' (and 'dblclick', same reasoning)
+    // here, panning over a block would still select/edit it via its own
+    // bubbling-phase onClick/onDoubleClick once the drag completes.
+    const stopIfHandTool = (e: Event) => {
+      if (tool === 'hand' && !isFloatingChrome(e.target)) e.stopPropagation()
+    }
+    el.addEventListener('pointerdown', onPointerDownCapture, { capture: true })
+    el.addEventListener('click', stopIfHandTool, { capture: true })
+    el.addEventListener('dblclick', stopIfHandTool, { capture: true })
+    return () => {
+      el.removeEventListener('pointerdown', onPointerDownCapture, { capture: true })
+      el.removeEventListener('click', stopIfHandTool, { capture: true })
+      el.removeEventListener('dblclick', stopIfHandTool, { capture: true })
+    }
+    // activePageId/tree, not just tool -- .scripture-workspace is keyed by
+    // activePageId (remounts entirely on page switch), so canvasAreaRef
+    // points at a NEW DOM node afterward. Without depending on these too,
+    // this effect wouldn't rerun on a page switch (tool didn't change), and
+    // its listeners would stay attached to the OLD, now-detached element --
+    // silently breaking panning/click-suppression on the new page until the
+    // user manually toggles the tool off and back on.
+  }, [tool, activePageId, tree])
+
+  // Delete/Backspace removes the current selection -- the Figma-style
+  // direct-manipulation model has no floating Delete button to fall back on
+  // for canvas-mode blocks anymore. Guarded on the active element NOT being
+  // a real text input/contenteditable, so this never fires while the user
+  // is genuinely typing (in a code/text block mid-edit, the Inspector's
+  // Filename field, the search/replace box, etc) -- only when a block is
+  // merely *selected*.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return
+      const active = document.activeElement
+      const tag = active?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || active?.getAttribute('contenteditable') === 'true') return
+      if (selectedIds.length === 0 || selectedIds.includes(ROOT_ID)) return
+      e.preventDefault()
+      for (const id of selectedIds) handleRemove(id)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIds, activePageId])
+
   // Switching pages: the new page's tree hasn't loaded yet, so clear
   // selection now -- the effect above re-selects ROOT_ID once it has.
   function handleSwitchPage(pageId: string) {
     setActivePageId(pageId)
     setSelectedIds([])
+    setEditingId(null)
   }
 
   function handleAddPage() {
@@ -162,11 +267,26 @@ export default function DocumentEditorPage() {
     renameDocument(docId, name || 'Untitled')
   }
 
+  // Selecting anything other than the block currently being text-edited
+  // exits edit mode -- matches "click elsewhere -> back to selected, not
+  // editing" from the Figma-style model. Funneled through both this and
+  // handleSelectionChange below so every selection-changing path (canvas
+  // clicks, the Inspector's group/ungroup/add-block actions) stays consistent.
+  function exitEditingUnless(nextIds: string[]) {
+    setEditingId((prev) => (prev && nextIds.length === 1 && nextIds[0] === prev ? prev : null))
+  }
+
   function handleSelect(id: string, additive: boolean) {
     setSelectedIds((prev) => {
-      if (!additive) return [id]
-      return prev.includes(id) ? prev.filter((existing) => existing !== id) : [...prev, id]
+      const next = additive ? (prev.includes(id) ? prev.filter((existing) => existing !== id) : [...prev, id]) : [id]
+      exitEditingUnless(next)
+      return next
     })
+  }
+
+  function handleSelectionChange(ids: string[]) {
+    setSelectedIds(ids)
+    exitEditingUnless(ids)
   }
 
   function handleMove(id: string, direction: 'up' | 'down') {
@@ -311,8 +431,14 @@ export default function DocumentEditorPage() {
           <div className="scripture-workspace" key={activePageId}>
             <div
               ref={canvasAreaRef}
-              className="scripture-canvas-area"
-              onClick={() => setSelectedIds([ROOT_ID])}
+              className={[
+                'scripture-canvas-area',
+                tool === 'hand' && 'tool-hand',
+                isPanning && 'is-panning',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              onClick={() => handleSelectionChange([ROOT_ID])}
             >
               <div
                 className="scripture-canvas-scale-box"
@@ -342,17 +468,28 @@ export default function DocumentEditorPage() {
                       gutterClickMode={gutterClickMode}
                       onGutterClick={handleGutterClick}
                       zoom={zoom}
+                      editingId={editingId}
+                      onSetEditing={setEditingId}
                     />
                   </CanvasRoot>
                 </div>
               </div>
               <ZoomControls zoom={zoom} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onReset={handleZoomReset} />
+              <CanvasToolbar
+                docId={activePageId as string}
+                tree={tree}
+                selectedIds={selectedIds}
+                onSelectionChange={handleSelectionChange}
+                onSetEditing={setEditingId}
+                tool={tool}
+                onToolChange={setTool}
+              />
             </div>
             <InspectorPanel
               docId={activePageId as string}
               tree={tree}
               selectedIds={selectedIds}
-              onSelectionChange={setSelectedIds}
+              onSelectionChange={handleSelectionChange}
               gutterClickMode={gutterClickMode}
               onGutterClickModeChange={setGutterClickMode}
             />

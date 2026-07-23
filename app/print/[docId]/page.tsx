@@ -59,7 +59,9 @@ function renderNode(node: LayoutNode, ydoc: Y.Doc, parentChildLayout: ChildLayou
     return (
       <div
         key={node.id}
-        className={isRoot ? 'scripture-card' : undefined}
+        className={[isRoot && 'scripture-card', childLayout === 'canvas' && 'scripture-frame-canvas']
+          .filter(Boolean)
+          .join(' ')}
         style={{ ...frameStyle(node), ...canvasPositionStyle(node, isRoot, parentChildLayout) }}
       >
         {(node.children ?? []).map((child) => renderNode(child, ydoc, childLayout))}
@@ -122,7 +124,16 @@ export default async function PrintPage({ params }: PrintPageProps) {
   if (!bytes) notFound()
 
   const ydoc = new Y.Doc()
-  Y.applyUpdate(ydoc, bytes)
+  try {
+    Y.applyUpdate(ydoc, bytes)
+  } catch (err) {
+    // Corrupted/undecodable bytes (e.g. disk corruption, manual tampering --
+    // writeDocumentBytes' atomic rename already rules out a torn read from a
+    // concurrent save) should read as "not found", not an uncaught 500 with
+    // a stack trace leaking into the response.
+    console.error(`Failed to decode document ${docId}`, err)
+    notFound()
+  }
 
   const tree = toPlainTree(ydoc)
   if (!tree) notFound()

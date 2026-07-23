@@ -18,7 +18,6 @@ import {
   MoveHorizontal,
   MoveVertical,
   MessageSquarePlus,
-  ImagePlus,
   Group,
   Ungroup,
   Trash2,
@@ -38,9 +37,8 @@ import { alignNodes, distributeNodes, type PositionedNode, type AlignEdge } from
 import { listStylePresets, saveStylePreset, deleteStylePreset, type StylePreset } from '@/lib/presets/style-presets'
 import { listCustomChromeStyles, subscribeToCustomChromeStyles } from '@/lib/presets/custom-chrome-styles'
 import { getYDoc } from '@/lib/yjs/doc-store'
+import { deleteUploadedImage } from '@/lib/images/client'
 import {
-  addBlock,
-  addFrame,
   updateFrameProps,
   updateCodeProps,
   updateImageProps,
@@ -688,39 +686,35 @@ export function InspectorPanel({
 
           <SizeSection node={node} docId={docId} />
 
-          <Separator />
-
-          <div className="scripture-inspector-section">
-            <h3>Add to this frame</h3>
-            <div className="scripture-inspector-actions">
-              <Button variant="outline" onClick={() => onSelectionChange([addBlock(doc, node.id, 'code')])}>
-                + Code block
-              </Button>
-              <Button variant="outline" onClick={() => onSelectionChange([addBlock(doc, node.id, 'text')])}>
-                + Text block
-              </Button>
-              <Button variant="outline" onClick={() => onSelectionChange([addBlock(doc, node.id, 'image')])}>
-                <ImagePlus /> + Image block
-              </Button>
-              <Button variant="outline" onClick={() => onSelectionChange([addFrame(doc, node.id)])}>
-                + Nested frame
-              </Button>
-              {isCanvasFrame && (
-                // Not auto-selected -- callouts aren't tree nodes (they live
-                // on FrameProps.callouts, not lib/layout/tree-utils's
-                // findNode), so selecting one would resolve to nothing and
-                // blank the Inspector.
-                <Button variant="outline" onClick={() => addCallout(doc, node.id)}>
-                  <MessageSquarePlus /> + Callout
-                </Button>
-              )}
-            </div>
-            {canUngroup && (
-              <Button variant="ghost" size="sm" onClick={() => ungroupNode(doc, node.id)}>
-                <Ungroup /> Ungroup
-              </Button>
-            )}
-          </div>
+          {/* Code/Text/Image/Frame creation moved to the bottom canvas
+              toolbar (components/canvas/canvas-toolbar.tsx) -- Figma-style,
+              not tucked in the sidebar. Callout and Ungroup stay here: they're
+              frame-specific actions, not part of that toolbar's general
+              block-creation set. */}
+          {(isCanvasFrame || canUngroup) && (
+            <>
+              <Separator />
+              <div className="scripture-inspector-section">
+                <h3>Frame actions</h3>
+                <div className="scripture-inspector-actions">
+                  {isCanvasFrame && (
+                    // Not auto-selected -- callouts aren't tree nodes (they
+                    // live on FrameProps.callouts, not lib/layout/tree-utils's
+                    // findNode), so selecting one would resolve to nothing
+                    // and blank the Inspector.
+                    <Button variant="outline" onClick={() => addCallout(doc, node.id)}>
+                      <MessageSquarePlus /> + Callout
+                    </Button>
+                  )}
+                  {canUngroup && (
+                    <Button variant="ghost" size="sm" onClick={() => ungroupNode(doc, node.id)}>
+                      <Ungroup /> Ungroup
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
 
           {node.id === ROOT_ID && (
             <>
@@ -749,7 +743,16 @@ export function InspectorPanel({
               />
             </div>
             {node.src && (
-              <Button variant="ghost" size="sm" onClick={() => updateImageProps(doc, node.id, { src: '' })}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  // Nothing ever called DELETE on an uploaded image before --
+                  // every "replace" left the old file behind permanently.
+                  deleteUploadedImage(node.src)
+                  updateImageProps(doc, node.id, { src: '' })
+                }}
+              >
                 Replace image
               </Button>
             )}

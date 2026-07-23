@@ -13,12 +13,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const { id } = await params
   const result = await readImageBytes(id)
   if (!result) return new Response('Not found', { status: 404 })
-  return new Response(new Uint8Array(result.bytes), {
-    headers: {
-      'Content-Type': CONTENT_TYPES[result.ext] ?? 'application/octet-stream',
-      'Cache-Control': 'public, max-age=31536000, immutable',
-    },
-  })
+  const headers: Record<string, string> = {
+    'Content-Type': CONTENT_TYPES[result.ext] ?? 'application/octet-stream',
+    'Cache-Control': 'public, max-age=31536000, immutable',
+  }
+  // An SVG with an embedded <script> executes if this URL is opened
+  // directly (not via <img>, which never runs scripts regardless) -- this
+  // has no effect on normal <img>-embedded rendering (an <img> load never
+  // executes scripts in the first place), only on direct navigation.
+  if (result.ext === 'svg') headers['Content-Security-Policy'] = "script-src 'none'"
+  return new Response(new Uint8Array(result.bytes), { headers })
 }
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {

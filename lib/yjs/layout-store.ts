@@ -1,5 +1,5 @@
 import * as Y from 'yjs'
-import { LAYOUT_MAP } from './doc-store'
+import { LAYOUT_MAP, LAYOUT_MUTATION_ORIGIN } from './doc-store'
 import {
   DEFAULT_FRAME_PROPS,
   DEFAULT_ROOT_FRAME_PROPS,
@@ -28,7 +28,7 @@ export function ensureRootFrame(doc: Y.Doc): Y.Map<unknown> {
       root.set('kind', 'frame')
       setFrameFields(root, DEFAULT_ROOT_FRAME_PROPS)
       root.set('children', new Y.Array())
-    })
+    }, LAYOUT_MUTATION_ORIGIN)
   }
   return root
 }
@@ -51,7 +51,7 @@ export function seedRootFrame(doc: Y.Doc, template: { rootProps?: Partial<FrameP
       const children = root.get('children') as Y.Array<Y.Map<unknown>>
       children.push(template.children.map(buildYNode))
     }
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
 }
 
 /** Read-only: the print route must never seed data into a doc it only reads. */
@@ -86,6 +86,13 @@ function setCodeFields(map: Y.Map<unknown>, props: CodeBlockProps) {
   map.set('fontFamily', props.fontFamily)
   map.set('filename', props.filename)
   map.set('chromeStyle', props.chromeStyle)
+  // ?? null, not left unset -- buildYNode calls this to RECONSTRUCT a node
+  // (moveNode/moveNodeBeforeSibling/groupNodes/ungroupNode all delete +
+  // recreate rather than mutate in place, since a Yjs shared type can only
+  // ever be integrated into a doc once). Without setting this explicitly,
+  // any block carrying a customChrome silently lost it on every reorder/
+  // group/ungroup, since the field was never enumerated here at all.
+  map.set('customChrome', props.customChrome ?? null)
   map.set('showLineNumbers', props.showLineNumbers)
   map.set('startLineNumber', props.startLineNumber)
   map.set('ligatures', props.ligatures)
@@ -171,6 +178,7 @@ function buildYNode(plain: LayoutNode): Y.Map<unknown> {
       fontFamily: plain.fontFamily ?? DEFAULT_CODE_BLOCK_PROPS.fontFamily,
       filename: plain.filename ?? DEFAULT_CODE_BLOCK_PROPS.filename,
       chromeStyle: plain.chromeStyle ?? DEFAULT_CODE_BLOCK_PROPS.chromeStyle,
+      customChrome: plain.customChrome,
       showLineNumbers: plain.showLineNumbers ?? DEFAULT_CODE_BLOCK_PROPS.showLineNumbers,
       startLineNumber: plain.startLineNumber ?? DEFAULT_CODE_BLOCK_PROPS.startLineNumber,
       ligatures: plain.ligatures ?? DEFAULT_CODE_BLOCK_PROPS.ligatures,
@@ -224,9 +232,15 @@ function createFrameMap(): { map: Y.Map<unknown>; id: string } {
 }
 
 /** Small cascading offset so newly-canvas-positioned nodes don't all stack
- * exactly on top of each other -- same idea as pasting in Figma/Illustrator. */
-function cascadeOffset(index: number): number {
-  return 24 + (index % 8) * 16
+ * exactly on top of each other -- same idea as pasting in Figma/Illustrator.
+ * A grid, not a single wrapping counter: x cycles every 8 (col), y grows
+ * once per full row and never wraps, so no two indices ever land on the
+ * exact same (x, y) -- unlike a single `24 + (index % 8) * 16` used
+ * identically for both axes, which put index 8 exactly on top of index 0. */
+function cascadeOffset(index: number): { x: number; y: number } {
+  const col = index % 8
+  const row = Math.floor(index / 8)
+  return { x: 24 + col * 16, y: 24 + row * 16 }
 }
 
 export function addBlock(
@@ -242,12 +256,12 @@ export function addBlock(
   doc.transact(() => {
     const children = parent.get('children') as Y.Array<Y.Map<unknown>>
     if (parent.get('childLayout') === 'canvas') {
-      const offset = cascadeOffset(children.length)
-      leaf.set('x', offset)
-      leaf.set('y', offset)
+      const { x, y } = cascadeOffset(children.length)
+      leaf.set('x', x)
+      leaf.set('y', y)
     }
     children.push([leaf])
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
   return id
 }
 
@@ -259,12 +273,12 @@ export function addFrame(doc: Y.Doc, parentId: string): string {
   doc.transact(() => {
     const children = parent.get('children') as Y.Array<Y.Map<unknown>>
     if (parent.get('childLayout') === 'canvas') {
-      const offset = cascadeOffset(children.length)
-      frame.set('x', offset)
-      frame.set('y', offset)
+      const { x, y } = cascadeOffset(children.length)
+      frame.set('x', x)
+      frame.set('y', y)
     }
     children.push([frame])
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
   return id
 }
 
@@ -275,7 +289,7 @@ export function removeNode(doc: Y.Doc, id: string) {
   if (!info) return
   doc.transact(() => {
     info.children.delete(info.index, 1)
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
 }
 
 export function moveNode(doc: Y.Doc, id: string, direction: 'up' | 'down') {
@@ -290,7 +304,7 @@ export function moveNode(doc: Y.Doc, id: string, direction: 'up' | 'down') {
     const plain = children.get(index).toJSON() as LayoutNode
     children.delete(index, 1)
     children.insert(newIndex, [buildYNode(plain)])
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
 }
 
 /**
@@ -314,7 +328,7 @@ export function moveNodeBeforeSibling(doc: Y.Doc, draggedId: string, targetId: s
     children.delete(index, 1)
     if (insertAt > index) insertAt -= 1
     children.insert(insertAt, [buildYNode(plain)])
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
 }
 
 export function updateFrameProps(doc: Y.Doc, id: string, patch: Partial<FrameProps>) {
@@ -338,14 +352,14 @@ export function updateFrameProps(doc: Y.Doc, id: string, patch: Partial<FramePro
       if (children) {
         children.toArray().forEach((child, index) => {
           if (child.get('x') == null || child.get('y') == null) {
-            const offset = cascadeOffset(index)
-            child.set('x', offset)
-            child.set('y', offset)
+            const { x, y } = cascadeOffset(index)
+            child.set('x', x)
+            child.set('y', y)
           }
         })
       }
     }
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
 }
 
 export function updateCodeProps(doc: Y.Doc, id: string, patch: Partial<CodeBlockProps>) {
@@ -356,7 +370,7 @@ export function updateCodeProps(doc: Y.Doc, id: string, patch: Partial<CodeBlock
     for (const [key, value] of Object.entries(patch)) {
       node.set(key, value)
     }
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
 }
 
 export type GutterClickMode = 'highlight' | 'diff' | 'trim'
@@ -385,7 +399,7 @@ export function cycleGutterLine(doc: Y.Doc, blockId: string, lineNumber: number,
       else delete next[lineNumber]
       node.set('diffLines', next)
     }
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
 }
 
 export function updateImageProps(doc: Y.Doc, id: string, patch: Partial<ImageBlockProps>) {
@@ -396,7 +410,7 @@ export function updateImageProps(doc: Y.Doc, id: string, patch: Partial<ImageBlo
     for (const [key, value] of Object.entries(patch)) {
       node.set(key, value)
     }
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
 }
 
 /** Called on every paste/theme change -- updates the root's background to
@@ -406,7 +420,7 @@ export function updateImageProps(doc: Y.Doc, id: string, patch: Partial<ImageBlo
 export function setRootBackgroundIfAuto(doc: Y.Doc, color: string) {
   const root = ensureRootFrame(doc)
   if (root.get('backgroundAuto') !== false) {
-    doc.transact(() => root.set('background', color))
+    doc.transact(() => root.set('background', color), LAYOUT_MUTATION_ORIGIN)
   }
 }
 
@@ -417,7 +431,7 @@ export function setBackgroundAuto(doc: Y.Doc, id: string, auto: boolean) {
   const root = ensureRootFrame(doc)
   const node = findNodeMap(root, id)
   if (!node || node.get('kind') !== 'frame') return
-  doc.transact(() => node.set('backgroundAuto', auto))
+  doc.transact(() => node.set('backgroundAuto', auto), LAYOUT_MUTATION_ORIGIN)
 }
 
 /** Explicit size override via resize handles -- works on any node kind.
@@ -429,7 +443,7 @@ export function updateNodeSize(doc: Y.Doc, id: string, size: { width?: number | 
   doc.transact(() => {
     if ('width' in size) node.set('width', size.width ?? null)
     if ('height' in size) node.set('height', size.height ?? null)
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
 }
 
 /** Explicit position, only meaningful while the node's parent frame has
@@ -441,7 +455,7 @@ export function updateNodePosition(doc: Y.Doc, id: string, position: { x: number
   doc.transact(() => {
     node.set('x', position.x)
     node.set('y', position.y)
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
 }
 
 /**
@@ -452,7 +466,14 @@ export function updateNodePosition(doc: Y.Doc, id: string, position: { x: number
  * a canvas-mode parent (siblings without x/y have nothing to preserve).
  * No-ops if fewer than 2 ids resolve to siblings under the same parent.
  */
-export function groupNodes(doc: Y.Doc, ids: string[]): string | null {
+export function groupNodes(doc: Y.Doc, rawIds: string[]): string | null {
+  // Deduped defensively -- a duplicate id would otherwise resolve to the
+  // SAME index twice in sortedIndices below, and the second delete(index, 1)
+  // would remove whatever unrelated sibling shifted into that slot after
+  // the first delete, silently dropping a node that was never selected.
+  // Not reachable through the shipped UI today (callers dedupe selectedIds
+  // already), but a real latent gap for any future caller that doesn't.
+  const ids = [...new Set(rawIds)]
   if (ids.length < 2) return null
   const root = ensureRootFrame(doc)
   const infos = ids.map((id) => findParentInfo(root, id)).filter((i): i is ParentInfo => i !== null)
@@ -484,7 +505,7 @@ export function groupNodes(doc: Y.Doc, ids: string[]): string | null {
     const sortedIndices = infos.map((i) => i.index).sort((a, b) => b - a)
     for (const index of sortedIndices) children.delete(index, 1)
     children.push([groupMap])
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
   return groupId
 }
 
@@ -509,7 +530,7 @@ export function ungroupNode(doc: Y.Doc, groupId: string) {
   doc.transact(() => {
     info.children.delete(info.index, 1)
     info.children.insert(info.index, restoredChildren.map(buildYNode))
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
 }
 
 // Callouts are stored as a plain JSON array value on the owning frame (see
@@ -529,7 +550,7 @@ export function addCallout(doc: Y.Doc, frameId: string): string | null {
   doc.transact(() => {
     const existing = (node.get('callouts') as CalloutAnnotation[] | undefined) ?? []
     node.set('callouts', [...existing, callout])
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
   return id
 }
 
@@ -543,7 +564,7 @@ export function updateCallout(doc: Y.Doc, frameId: string, calloutId: string, pa
       'callouts',
       existing.map((c) => (c.id === calloutId ? { ...c, ...patch } : c))
     )
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
 }
 
 export function removeCallout(doc: Y.Doc, frameId: string, calloutId: string) {
@@ -556,5 +577,5 @@ export function removeCallout(doc: Y.Doc, frameId: string, calloutId: string) {
       'callouts',
       existing.filter((c) => c.id !== calloutId)
     )
-  })
+  }, LAYOUT_MUTATION_ORIGIN)
 }

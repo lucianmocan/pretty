@@ -9,9 +9,12 @@ import {
   createDocument,
   renameDocument,
   deleteDocumentMeta,
+  getPageIds,
 } from '@/lib/documents/manifest'
 import { deleteYDoc, getYDoc } from '@/lib/yjs/doc-store'
-import { seedRootFrame } from '@/lib/yjs/layout-store'
+import { seedRootFrame, toPlainTree } from '@/lib/yjs/layout-store'
+import { collectByKind } from '@/lib/layout/tree-utils'
+import { deleteUploadedImage } from '@/lib/images/client'
 import { TEMPLATES, type Template } from '@/lib/templates'
 import { PageToolbar } from '@/components/layout/page-toolbar'
 import { Button } from '@/components/ui/button'
@@ -89,10 +92,31 @@ export default function DocumentsDashboard() {
     const id = pendingDeleteId
     if (!id) return
     setPendingDeleteId(null)
+    // Read every page id BEFORE deleting the manifest entry -- that entry is
+    // the only place pageIds lives; deleting it first (as this used to) means
+    // every page after the first is never looked up again and leaks forever,
+    // both in IndexedDB and the server-side .data/documents files.
+    const pageIds = getPageIds(id)
     deleteDocumentMeta(id)
     setDocs(listDocuments())
-    await deleteYDoc(id)
-    fetch(`/api/documents/${id}`, { method: 'DELETE' }).catch(() => {})
+    await Promise.all(
+      pageIds.map(async (pageId) => {
+        // Read the tree BEFORE deleteYDoc wipes its IndexedDB state -- any
+        // image block it contains references an uploaded file that nothing
+        // else will ever clean up otherwise (no other code path calls
+        // DELETE /api/images/{id} at all).
+        const { doc, synced } = getYDoc(pageId)
+        await synced
+        const tree = toPlainTree(doc)
+        if (tree) {
+          for (const imageNode of collectByKind(tree, 'image')) {
+            deleteUploadedImage(imageNode.src)
+          }
+        }
+        await deleteYDoc(pageId)
+        await fetch(`/api/documents/${pageId}`, { method: 'DELETE' }).catch(() => {})
+      })
+    )
   }
 
   return (

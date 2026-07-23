@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, unlink } from 'fs/promises'
+import { mkdir, readFile, writeFile, unlink, rename } from 'fs/promises'
 import path from 'path'
 
 const DOCS_DIR = path.join(process.cwd(), '.data', 'documents')
@@ -13,7 +13,18 @@ function docPath(id: string) {
 
 export async function writeDocumentBytes(id: string, bytes: Uint8Array) {
   await mkdir(DOCS_DIR, { recursive: true })
-  await writeFile(docPath(id), bytes)
+  const finalPath = docPath(id)
+  // Write to a temp file then rename, not a direct write -- writeFile
+  // truncates before writing, so a concurrent read (e.g. an export request
+  // hitting the print route while a save is in flight) could otherwise
+  // observe a partially-written, undecodable buffer. rename() within the
+  // same directory is atomic on POSIX filesystems: a reader always sees
+  // either the complete old file or the complete new one, never a partial
+  // write. crypto.randomUUID() keeps concurrent writes to the SAME id from
+  // colliding on the same temp filename.
+  const tmpPath = path.join(DOCS_DIR, `${id}.bin.tmp-${crypto.randomUUID()}`)
+  await writeFile(tmpPath, bytes)
+  await rename(tmpPath, finalPath)
 }
 
 export async function readDocumentBytes(id: string): Promise<Uint8Array | null> {
@@ -21,7 +32,13 @@ export async function readDocumentBytes(id: string): Promise<Uint8Array | null> 
     const buf = await readFile(docPath(id))
     return new Uint8Array(buf)
   } catch (err) {
+    // Both a missing file AND a malformed id (docPath's own validation
+    // throwing a plain Error, not a filesystem error) mean "no such
+    // document" to every caller -- without treating them the same, a
+    // malformed id previously surfaced as an uncaught 500 instead of the
+    // clean 404 every caller already expects from a null return.
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+    if (err instanceof Error && err.message === 'Invalid document id') return null
     throw err
   }
 }

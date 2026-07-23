@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { GripVertical, ChevronUp, ChevronDown, Trash2 } from 'lucide-react'
 import type { ChildLayout, LayoutNode } from '@/lib/layout/types'
 import { frameStyle, sizeStyle } from '@/lib/layout/frame-style'
@@ -40,6 +40,13 @@ interface FrameNodeProps {
   // recover content-space values before comparing against or writing back
   // to stored positions/sizes.
   zoom: number
+  // Figma-style selection model (canvas-mode blocks only): which ONE block,
+  // if any, is actually in text-edit mode right now (entered via double-
+  // click). A block that's merely *selected* isn't -- its editor renders
+  // non-editable, freeing up plain click+drag to mean "move this" instead
+  // of "place a text cursor".
+  editingId: string | null
+  onSetEditing: (id: string | null) => void
 }
 
 function classNames(...parts: Array<string | false | undefined>) {
@@ -65,22 +72,31 @@ function NodeControls({
   onMove,
   onRemove,
   gripHandlers,
+  showGrip,
 }: {
   id: string
   onMove: (id: string, direction: 'up' | 'down') => void
   onRemove: (id: string) => void
   gripHandlers: GripHandlers
+  // false for canvas-mode nodes -- dragging works directly on the block
+  // itself there (see beginMoveDrag wired to the block's own onPointerDown),
+  // so a separate grip handle would be redundant chrome. Still shown for
+  // flex-mode nodes, where the grip is what starts native drag-and-drop
+  // reordering (a different interaction, not a position drag).
+  showGrip: boolean
 }) {
   return (
     <div className="scripture-node-controls" onClick={(e) => e.stopPropagation()}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon-xs" aria-label="Drag to move" {...gripHandlers}>
-            <GripVertical />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Drag to move</TooltipContent>
-      </Tooltip>
+      {showGrip && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-xs" aria-label="Drag to move" {...gripHandlers}>
+              <GripVertical />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Drag to move</TooltipContent>
+        </Tooltip>
+      )}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="ghost" size="icon-xs" onClick={() => onMove(id, 'up')} aria-label="Move up">
@@ -130,9 +146,23 @@ export function FrameNode({
   gutterClickMode,
   onGutterClick,
   zoom,
+  editingId,
+  onSetEditing,
 }: FrameNodeProps) {
   const isRoot = node.id === ROOT_ID
   const isSelected = selectedIds.includes(node.id)
+  const isCanvasChild = parentChildLayout === 'canvas'
+  // Only textual canvas-mode blocks need the selected-vs-editing split --
+  // flex-mode blocks have no competing "drag the block by clicking it"
+  // gesture (dragging there is still grip-initiated, native drag-and-drop
+  // reordering), so they stay exactly as always-editable as before; image
+  // blocks have no text content to edit in the first place, just a click-
+  // to-upload/replace action, so they're always draggable-by-body in canvas
+  // mode with no editing gate at all.
+  const isTextual = node.kind === 'code' || node.kind === 'text'
+  const needsEditGate = isTextual && isCanvasChild
+  const isEditing = !needsEditGate || editingId === node.id
+  const canDragViaBody = isCanvasChild && !(needsEditGate && isEditing)
   const isOnlySelected = isSelected && selectedIds.length === 1
   const [isDragOver, setIsDragOver] = useState(false)
   // Optimistic preview during a resize/move drag -- committed to Yjs only on
@@ -143,6 +173,16 @@ export function FrameNode({
   const [guides, setGuides] = useState<{ x: number[]; y: number[] } | null>(null)
   const [dragParentRect, setDragParentRect] = useState<DOMRect | null>(null)
   const elementRef = useRef<HTMLDivElement>(null)
+  // Holds the currently active move-drag's own cleanup, if any -- an unmount
+  // mid-drag (deleting this node, e.g. via Delete/Backspace, or switching
+  // pages while still holding it) would otherwise leave the window-level
+  // pointermove/pointerup listeners attached forever, later calling
+  // onRepositionNode against a stale node id/closure.
+  const activeDragCleanupRef = useRef<(() => void) | null>(null)
+
+  useEffect(() => {
+    return () => activeDragCleanupRef.current?.()
+  }, [])
 
   const sizeOverride = liveSize ? { width: `${liveSize.width}px`, height: `${liveSize.height}px` } : undefined
 
@@ -164,6 +204,7 @@ export function FrameNode({
         onResizeNode(node.id, size)
       }}
       zoom={zoom}
+      clampToParent={isCanvasChild}
     />
   )
 
@@ -173,6 +214,14 @@ export function FrameNode({
     const el = elementRef.current
     const parentEl = el?.parentElement
     if (!el || !parentEl) return
+
+    // Dragging now starts directly from the block itself (no floating grip
+    // to click first), so make sure it's actually selected as this drag
+    // begins -- matches Figma: click-dragging an unselected shape selects
+    // AND moves it in one motion. Skipped if already selected (whether
+    // alone or part of a multi-selection) so starting a drag on one member
+    // of an existing multi-select doesn't collapse the rest of it.
+    if (!isSelected) onSelect(node.id, e.shiftKey)
 
     const parentRect = parentEl.getBoundingClientRect()
     setDragParentRect(parentRect)
@@ -196,10 +245,24 @@ export function FrameNode({
       }
     })
 
+    // Absolute positioning in canvas mode is relative to the parent's
+    // PADDING box (per the CSS spec for absolutely-positioned descendants),
+    // which is exactly what parentRect measures -- so this is already the
+    // container's own available x/y space, no extra padding/margin to
+    // subtract. Clamping to it (see snapPosition's containerSize param) is
+    // what keeps a dragged block -- and the floating NodeControls/tooltip
+    // cluster that renders outside its own top edge -- from ever crossing
+    // into negative territory the scrollable canvas area can't scroll back to.
+    const containerSize = { width: parentRect.width / zoom, height: parentRect.height / zoom }
+
     const compute = (ev: PointerEvent) => {
       const dx = (ev.clientX - startClientX) / zoom
       const dy = (ev.clientY - startClientY) / zoom
-      return snapPosition({ x: startX + dx, y: startY + dy, width: startWidth, height: startHeight }, siblings)
+      return snapPosition(
+        { x: startX + dx, y: startY + dy, width: startWidth, height: startHeight },
+        siblings,
+        containerSize
+      )
     }
 
     const onMovePointer = (ev: PointerEvent) => {
@@ -208,21 +271,28 @@ export function FrameNode({
       setGuides(snapped.guides)
     }
     const onUpPointer = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', onMovePointer)
-      window.removeEventListener('pointerup', onUpPointer)
+      cleanup()
       const snapped = compute(ev)
       setLivePosition(null)
       setGuides(null)
       setDragParentRect(null)
       onRepositionNode(node.id, { x: snapped.x, y: snapped.y })
     }
+    function cleanup() {
+      window.removeEventListener('pointermove', onMovePointer)
+      window.removeEventListener('pointerup', onUpPointer)
+      activeDragCleanupRef.current = null
+    }
+    activeDragCleanupRef.current = cleanup
     window.addEventListener('pointermove', onMovePointer)
     window.addEventListener('pointerup', onUpPointer)
   }
 
+  // Canvas mode no longer uses the grip at all -- see showGrip below --
+  // dragging is wired directly to the block's own onPointerDown instead.
   const gripHandlers: GripHandlers =
     parentChildLayout === 'canvas'
-      ? { onPointerDown: beginMoveDrag }
+      ? {}
       : {
           draggable: true,
           onDragStart: (e: React.DragEvent) => {
@@ -231,6 +301,13 @@ export function FrameNode({
             e.dataTransfer.effectAllowed = 'move'
           },
         }
+  const showGrip = parentChildLayout !== 'canvas'
+
+  function handleDoubleClick(e: React.MouseEvent) {
+    e.stopPropagation()
+    onSelect(node.id, false)
+    onSetEditing(node.id)
+  }
 
   const guideOverlay = guides && dragParentRect && (
     <>
@@ -293,6 +370,7 @@ export function FrameNode({
         className={classNames(
           'scripture-frame',
           isRoot && 'scripture-card',
+          childLayout === 'canvas' && 'scripture-frame-canvas',
           isSelected && 'scripture-selected',
           isDragOver && 'is-drag-over'
         )}
@@ -301,10 +379,11 @@ export function FrameNode({
           e.stopPropagation()
           onSelect(node.id, e.shiftKey)
         }}
+        onPointerDown={!isRoot && parentChildLayout === 'canvas' ? beginMoveDrag : undefined}
         {...dragTargetHandlers}
       >
         {!isRoot && !livePosition && !liveSize && (
-          <NodeControls id={node.id} onMove={onMove} onRemove={onRemove} gripHandlers={gripHandlers} />
+          <NodeControls id={node.id} onMove={onMove} onRemove={onRemove} gripHandlers={gripHandlers} showGrip={showGrip} />
         )}
         {children.length === 0 && (
           <div className="scripture-empty-frame">Empty frame. Select it and add a block.</div>
@@ -325,6 +404,8 @@ export function FrameNode({
             gutterClickMode={gutterClickMode}
             onGutterClick={onGutterClick}
             zoom={zoom}
+            editingId={editingId}
+            onSetEditing={onSetEditing}
           />
         ))}
         {(node.callouts ?? []).map((callout) => (
@@ -353,10 +434,12 @@ export function FrameNode({
         e.stopPropagation()
         onSelect(node.id, e.shiftKey)
       }}
+      onDoubleClick={needsEditGate ? handleDoubleClick : undefined}
+      onPointerDown={canDragViaBody ? beginMoveDrag : undefined}
       {...dragTargetHandlers}
     >
       {!livePosition && !liveSize && (
-        <NodeControls id={node.id} onMove={onMove} onRemove={onRemove} gripHandlers={gripHandlers} />
+        <NodeControls id={node.id} onMove={onMove} onRemove={onRemove} gripHandlers={gripHandlers} showGrip={showGrip} />
       )}
       {node.kind === 'image' ? (
         <ImageBlock
@@ -369,6 +452,7 @@ export function FrameNode({
           docId={docId}
           blockId={node.id}
           kind={node.kind}
+          editable={isEditing}
           language={node.language}
           theme={node.theme}
           fontFamily={node.fontFamily}

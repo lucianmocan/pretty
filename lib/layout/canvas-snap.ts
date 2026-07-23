@@ -21,8 +21,19 @@ export interface SnapResult {
  * edges/centers if within a small threshold (a sibling alignment match wins
  * over plain grid snapping) -- the same "smart guides" technique design
  * tools use, scoped down to axis-aligned edge/center comparisons only.
+ *
+ * When `containerSize` is given, the result is also clamped so the box's
+ * edges never leave [0, containerSize] on either axis -- the exact border
+ * of the canvas container, no extra inset. Without this, a block (and the
+ * floating NodeControls/tooltip cluster that renders outside its own top
+ * edge) could be dragged to a negative x/y -- content positioned there
+ * renders above/left of the scrollable canvas area's own scroll bounds
+ * (which are only ever sized to cover non-negative content), so scrollTop/
+ * scrollLeft can never reach back to 0 or below to reveal it again. That's
+ * functionally indistinguishable from the block just disappearing, even
+ * though nothing is technically clipped by an overflow:hidden rule.
  */
-export function snapPosition(dragged: Box, siblings: Box[]): SnapResult {
+export function snapPosition(dragged: Box, siblings: Box[], containerSize?: { width: number; height: number }): SnapResult {
   let x = Math.round(dragged.x / GRID_SIZE) * GRID_SIZE
   let y = Math.round(dragged.y / GRID_SIZE) * GRID_SIZE
   const guideX: number[] = []
@@ -51,6 +62,15 @@ export function snapPosition(dragged: Box, siblings: Box[]): SnapResult {
         }
       }
     }
+  }
+
+  if (containerSize) {
+    // Math.max(0, ...) first, so a box bigger than the container (maxX < 0)
+    // still clamps to the top-left corner instead of a negative position.
+    const maxX = Math.max(0, containerSize.width - dragged.width)
+    const maxY = Math.max(0, containerSize.height - dragged.height)
+    x = Math.min(Math.max(0, x), maxX)
+    y = Math.min(Math.max(0, y), maxY)
   }
 
   return { x, y, guides: { x: guideX, y: guideY } }
