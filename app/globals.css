@@ -955,6 +955,22 @@
   border-color: var(--ring);
 }
 
+/* Centered trio of dots inside a ChromeStylePicker swatch (components/ui/
+   chrome-style-picker.tsx) -- unlike .theme-swatch-dot's two absolutely-
+   positioned corner accents, these sit together as a single glyph (mac's
+   traffic lights, or a custom chrome style's own saved dot colors). */
+.chrome-swatch-dots {
+  display: flex;
+  gap: 3px;
+}
+
+.chrome-swatch-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
 /* ---------------------------------------------------------------------------
    Editor header + Inspector panel -- layout/spacing only; the controls
    inside are real shadcn components (Button/Input/Select/Switch/etc).
@@ -1218,6 +1234,14 @@
   display: flex;
   gap: 16px;
   min-height: 420px;
+  /* DialogContent is a CSS grid, and this sits inside a `display: contents`
+     tab wrapper (see customize-dialog.tsx) -- meaning THIS element, not
+     that wrapper, is the actual grid item. Grid items default to
+     min-width: auto, which lets .scripture-customize-preview's unbreakable
+     monospace code lines dictate this row's minimum content width and
+     stretch the whole dialog wider than its own max-w-3xl instead of
+     scrolling within the preview's own overflow: auto as intended. */
+  min-width: 0;
 }
 
 .scripture-customize-list {

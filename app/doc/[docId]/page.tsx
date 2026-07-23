@@ -63,6 +63,10 @@ export default function DocumentEditorPage() {
   const [gutterClickMode, setGutterClickMode] = useState<GutterClickMode>('highlight')
   const [zoom, setZoom] = useState(1)
   const [customizeOpen, setCustomizeOpen] = useState(false)
+  // Which Customize tab to land on -- the Inspector's theme-picker "+" and
+  // window-chrome-section "+" (components/canvas/inspector-panel.tsx) both
+  // open this same dialog instance, to different tabs.
+  const [customizeTab, setCustomizeTab] = useState<'syntax' | 'chrome'>('syntax')
   // The natural (unscaled) content size of .scripture-canvas-viewport --
   // used to size .scripture-canvas-scale-box to the SCALED dimensions, so
   // the scrollable canvas area's scroll bounds actually grow/shrink with
@@ -264,6 +268,11 @@ export default function DocumentEditorPage() {
     setZoom(1)
   }
 
+  function handleOpenCustomize(tab: 'syntax' | 'chrome') {
+    setCustomizeTab(tab)
+    setCustomizeOpen(true)
+  }
+
   // Fits the card to the available canvas area (leaving room for its own
   // CSS padding, so the fitted card doesn't touch the very edge) and
   // centers the scroll position on it. A flat 100% can look tiny on a large
@@ -359,14 +368,13 @@ export default function DocumentEditorPage() {
           onZoomOut={handleZoomOut}
           onZoomReset={handleZoomReset}
           onRecenter={handleRecenter}
-          onOpenCustomize={() => setCustomizeOpen(true)}
         >
           <SearchReplacePanel />
           {exporting && <span className="text-xs text-muted-foreground">Exporting…</span>}
           {exportError && <span className="scripture-error-text">{exportError}</span>}
         </AppMenubar>
 
-        <CustomizeDialog open={customizeOpen} onOpenChange={setCustomizeOpen} />
+        <CustomizeDialog open={customizeOpen} onOpenChange={setCustomizeOpen} initialTab={customizeTab} />
 
         {pageIds.length > 0 && (
           <div className="scripture-page-tabs">
@@ -461,6 +469,7 @@ export default function DocumentEditorPage() {
               onSelectionChange={handleSelectionChange}
               gutterClickMode={gutterClickMode}
               onGutterClickModeChange={setGutterClickMode}
+              onOpenCustomize={handleOpenCustomize}
             />
           </div>
         ) : (

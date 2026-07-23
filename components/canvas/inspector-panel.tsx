@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
   Rows3,
   Columns3,
@@ -28,14 +28,11 @@ import type {
   FlexAlign,
   FlexJustify,
   ChildLayout,
-  ChromeStyle,
-  CustomChromeStyle,
   PageSize,
 } from '@/lib/layout/types'
 import { findNode, findParent, findFirstByKind, collectByKind } from '@/lib/layout/tree-utils'
 import { alignNodes, distributeNodes, type PositionedNode, type AlignEdge } from '@/lib/layout/align-distribute'
 import { listStylePresets, saveStylePreset, deleteStylePreset, type StylePreset } from '@/lib/presets/style-presets'
-import { listCustomChromeStyles, subscribeToCustomChromeStyles } from '@/lib/presets/custom-chrome-styles'
 import { getYDoc } from '@/lib/yjs/doc-store'
 import { deleteUploadedImage } from '@/lib/images/client'
 import {
@@ -69,6 +66,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ThemeSwatchPicker } from '@/components/ui/theme-swatch-picker'
+import { ChromeStylePicker } from '@/components/ui/chrome-style-picker'
 import { LanguagePicker } from '@/components/ui/language-picker'
 import { IconField } from '@/components/ui/icon-field'
 import { RadiusIcon } from '@/components/ui/radius-icon'
@@ -80,20 +78,16 @@ interface InspectorPanelProps {
   onSelectionChange: (ids: string[]) => void
   gutterClickMode: GutterClickMode
   onGutterClickModeChange: (mode: GutterClickMode) => void
+  // Opens the app-wide Customize dialog to the given tab -- triggered from
+  // the theme swatch picker's "+" (syntax) and the custom chrome section's
+  // "+" (chrome) below, not from a standalone menu entry anymore.
+  onOpenCustomize: (tab: 'syntax' | 'chrome') => void
 }
 
 const GUTTER_CLICK_MODE_OPTIONS: Array<{ value: GutterClickMode; label: string }> = [
   { value: 'highlight', label: 'Highlight' },
   { value: 'diff', label: 'Diff' },
   { value: 'trim', label: 'Trim' },
-]
-
-const CHROME_STYLE_OPTIONS: Array<{ value: ChromeStyle; label: string }> = [
-  { value: 'none', label: 'None' },
-  { value: 'mac', label: 'Mac window' },
-  { value: 'vscode-tab', label: 'VS Code tab' },
-  { value: 'terminal', label: 'Terminal' },
-  { value: 'custom', label: 'Custom' },
 ]
 
 const PAGE_SIZE_OPTIONS: Array<{ value: PageSize; label: string }> = [
@@ -312,43 +306,6 @@ function MultiSelectPanel({
   )
 }
 
-/** Code-block-only: pick from the saved library of custom window chrome
- * styles (lib/presets/custom-chrome-styles.ts) -- selecting one COPIES its
- * whole config onto this block's CodeBlockProps.customChrome (see that
- * type's comment in lib/layout/types.ts for why it's a copy, not a live
- * reference: the print/export route's fresh browser context has no
- * localStorage access, so the full config has to travel with the document). */
-function CustomChromeSection({ docId, node }: { docId: string; node: LayoutNode }) {
-  const { doc } = getYDoc(docId)
-  const [styles, setStyles] = useState<CustomChromeStyle[]>(() => listCustomChromeStyles())
-
-  useEffect(() => subscribeToCustomChromeStyles(() => setStyles(listCustomChromeStyles())), [])
-
-  return (
-    <div className="scripture-inspector-stack">
-      <Label>Custom chrome</Label>
-      {styles.length === 0 ? (
-        <p className="scripture-inspector-hint">
-          No custom chrome styles saved yet -- design one from the Customize window.
-        </p>
-      ) : (
-        <div className="scripture-inspector-actions">
-          {styles.map((style) => (
-            <Button
-              key={style.id}
-              variant={node.customChrome?.id === style.id ? 'secondary' : 'outline'}
-              size="sm"
-              className="justify-start"
-              onClick={() => updateCodeProps(doc, node.id, { customChrome: style })}
-            >
-              {style.name}
-            </Button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 
 /** Root-frame-only: save the whole document's current look (root FrameProps
  * + one representative code block's CodeBlockProps) as a reusable preset,
@@ -458,6 +415,7 @@ export function InspectorPanel({
   onSelectionChange,
   gutterClickMode,
   onGutterClickModeChange,
+  onOpenCustomize,
 }: InspectorPanelProps) {
   if (selectedIds.length > 1) {
     return (
@@ -816,6 +774,7 @@ export function InspectorPanel({
             <ThemeSwatchPicker
               value={node.theme ?? 'dracula'}
               onChange={(theme) => updateCodeProps(doc, node.id, { theme })}
+              onCreateCustom={() => onOpenCustomize('syntax')}
             />
           </div>
           <p className="scripture-inspector-hint">
@@ -844,26 +803,16 @@ export function InspectorPanel({
             </Select>
           </div>
 
-          <div className="scripture-inspector-row">
+          <div className="scripture-inspector-stack">
             <Label>Window chrome</Label>
-            <Select
-              value={node.chromeStyle ?? 'none'}
-              onValueChange={(v) => updateCodeProps(doc, node.id, { chromeStyle: v as ChromeStyle })}
-            >
-              <SelectTrigger className="w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CHROME_STYLE_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <ChromeStylePicker
+              value={node.chromeStyle === 'custom' ? 'custom' : (node.chromeStyle ?? 'none')}
+              customChromeId={node.customChrome?.id}
+              onSelectBuiltin={(style) => updateCodeProps(doc, node.id, { chromeStyle: style })}
+              onSelectCustom={(style) => updateCodeProps(doc, node.id, { chromeStyle: 'custom', customChrome: style })}
+              onCreateCustom={() => onOpenCustomize('chrome')}
+            />
           </div>
-
-          {node.chromeStyle === 'custom' && <CustomChromeSection docId={docId} node={node} />}
 
           <div className="scripture-inspector-row">
             <Label>Filename</Label>

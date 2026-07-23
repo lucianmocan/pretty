@@ -24,7 +24,6 @@ interface AppMenubarProps {
   onZoomOut: () => void
   onZoomReset: () => void
   onRecenter: () => void
-  onOpenCustomize: () => void
   /** Right-aligned slot for route-specific controls (e.g. search/replace). */
   children?: ReactNode
 }
@@ -40,7 +39,6 @@ export function AppMenubar({
   onZoomOut,
   onZoomReset,
   onRecenter,
-  onOpenCustomize,
   children,
 }: AppMenubarProps) {
   return (
@@ -81,13 +79,6 @@ export function AppMenubar({
             <MenubarItem onClick={onExportPng} disabled={exporting}>
               Export PNG
             </MenubarItem>
-          </MenubarContent>
-        </MenubarMenu>
-
-        <MenubarMenu>
-          <MenubarTrigger>Customize</MenubarTrigger>
-          <MenubarContent>
-            <MenubarItem onClick={onOpenCustomize}>Open customize window…</MenubarItem>
           </MenubarContent>
         </MenubarMenu>
       </Menubar>

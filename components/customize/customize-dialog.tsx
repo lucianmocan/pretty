@@ -449,25 +449,39 @@ function ChromeStyleEditor() {
   )
 }
 
+type CustomizeTab = 'syntax' | 'chrome'
+
 interface CustomizeDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  // Which tab to land on -- the theme swatch picker's "+" and the window
+  // chrome section's "+" (components/canvas/inspector-panel.tsx) open this
+  // same dialog instance to different tabs.
+  initialTab?: CustomizeTab
 }
 
-type CustomizeTab = 'syntax' | 'chrome'
-
 /** App-wide customization window -- design reusable syntax themes and
- * window chrome styles with a live preview, opened from the editor's
- * File/Customize menu. Fully independent of the current document: saved
+ * window chrome styles with a live preview, opened from the Inspector's
+ * theme swatch picker / custom chrome section (their own "+" buttons), not
+ * a standalone menu entry. Fully independent of the current document: saved
  * items go into the two localStorage libraries (lib/presets/custom-syntax-
  * themes.ts, lib/presets/custom-chrome-styles.ts) and are picked up from
  * there by the Inspector's ThemeSwatchPicker / CustomChromeSection. */
-export function CustomizeDialog({ open, onOpenChange }: CustomizeDialogProps) {
-  const [tab, setTab] = useState<CustomizeTab>('syntax')
+export function CustomizeDialog({ open, onOpenChange, initialTab = 'syntax' }: CustomizeDialogProps) {
+  const [tab, setTab] = useState<CustomizeTab>(initialTab)
+
+  // Jump to whichever tab the caller opened this for -- the theme picker's
+  // "+" and the chrome section's "+" target different tabs. Only re-synced
+  // on the open transition (not on every initialTab change), so manually
+  // switching tabs while the dialog is already open isn't fought.
+  useEffect(() => {
+    if (open) setTab(initialTab)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent className="sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>Customize</DialogTitle>
           <DialogDescription>

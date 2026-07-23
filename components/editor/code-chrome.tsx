@@ -7,7 +7,10 @@ import { rangesToSet } from '@/lib/layout/line-ranges'
 import { cn } from '@/lib/utils'
 import type { ChromeStyle, ChromeIconKey, CustomChromeStyle } from '@/lib/layout/types'
 
-const CUSTOM_CHROME_ICONS: Record<ChromeIconKey, LucideIcon | null> = {
+// Exported for components/ui/chrome-style-picker.tsx's own mini swatch
+// previews of saved custom chrome styles -- same icon set, no reason to
+// duplicate the mapping.
+export const CUSTOM_CHROME_ICONS: Record<ChromeIconKey, LucideIcon | null> = {
   none: null,
   'file-code': FileCode,
   terminal: Terminal,
