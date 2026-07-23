@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useEditor, useEditorState, EditorContent, type Editor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
+import { TextSelection } from '@tiptap/pm/state'
 import { Collaboration } from '@tiptap/extension-collaboration'
 import { getYDoc, getUndoManager, blockFragmentName } from '@/lib/yjs/doc-store'
 import { setRootBackgroundIfAuto } from '@/lib/yjs/layout-store'
@@ -26,14 +27,34 @@ function toProseMirrorNodes(view: EditorView, nodes: ProseMirrorTextNode[]) {
 /** Replaces the whole block's content with freshly tokenized text -- used
  * both for the initial paste and for re-highlighting existing text when the
  * language/theme changes (this intentionally drops any manual bold/italic/
- * highlight/font-size marks, same trade-off as a fresh paste). */
-function replaceWithTokenizedContent(view: EditorView, language: string, lines: PlainToken[][]) {
+ * highlight/font-size marks, same trade-off as a fresh paste).
+ *
+ * `selection`, when given, is restored after the replace -- for the
+ * language/theme-change caller, the text itself hasn't changed (same
+ * characters, just freshly re-tokenized marks), so the anchor/head positions
+ * captured just before calling this are still valid and still refer to the
+ * same underlying characters afterward. The paste caller never passes this:
+ * a paste's content is genuinely new, so there's no "same position" to
+ * preserve. */
+function replaceWithTokenizedContent(
+  view: EditorView,
+  language: string,
+  lines: PlainToken[][],
+  selection?: { anchor: number; head: number }
+) {
   const content = tokensToContent(lines)
   const node = view.state.schema.nodes.annotatedCodeBlock.create(
     { language },
     content.length ? toProseMirrorNodes(view, content) : null
   )
   const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, node)
+  if (selection) {
+    try {
+      tr.setSelection(TextSelection.create(tr.doc, selection.anchor, selection.head))
+    } catch {
+      // Out of range for the new doc -- fall back to PM's default mapping.
+    }
+  }
   view.dispatch(tr)
 }
 
@@ -230,9 +251,31 @@ export function BlockEditor({
         // (pre-edit) length here would replace the wrong-sized range and
         // duplicate/clip text.
         const newOffsets = lineStartOffsets(newLines)
-        from = 1 + newOffsets[lineIndex] + prefixLen
-        to = 1 + newOffsets[lineIndex] + (newLine.length - suffixLen)
-        replacementLines = [sliceTokensByChars(tokenizedLines[lineIndex] ?? [], prefixLen, newLine.length - suffixLen)]
+        const editStart = prefixLen
+        const editEnd = newLine.length - suffixLen
+        if (editEnd > editStart) {
+          from = 1 + newOffsets[lineIndex] + editStart
+          to = 1 + newOffsets[lineIndex] + editEnd
+          replacementLines = [sliceTokensByChars(tokenizedLines[lineIndex] ?? [], editStart, editEnd)]
+        } else {
+          // A pure DELETION (no characters typed, just removed) where the
+          // matching prefix+suffix already account for the entire new line
+          // collapses this to an EMPTY range -- prefixLen === newLine.length
+          // - suffixLen, so there's no "new" substring left to slice out.
+          // Replacing an empty range with an empty replacement is a total
+          // no-op: the line silently never gets re-colored at all (that's
+          // the "I have to press Enter before a line re-colors" bug --
+          // Enter forces the OTHER branch below, which always replaces a
+          // real, non-empty range). Retokenizing the WHOLE line instead
+          // guarantees an actual visible update here; it's less surgical
+          // than the prefix/suffix slice above (any manual bold/italic mark
+          // elsewhere on this one line is lost, same trade-off the line-
+          // count-changed branch below already accepts), but only for the
+          // specific line that was just edited, not the whole document.
+          from = 1 + newOffsets[lineIndex]
+          to = 1 + newOffsets[lineIndex] + newLine.length
+          replacementLines = [tokenizedLines[lineIndex] ?? []]
+        }
       } else {
         // Line count changed (Enter split a line, or a newline was deleted
         // merging two) -- replace from the first differing line through the
@@ -249,9 +292,30 @@ export function BlockEditor({
       }
 
       const replacementNodes = toProseMirrorNodes(editor.view, tokensToContent(replacementLines))
+      // Captured BEFORE building the transaction, from the CURRENT (pre-
+      // dispatch) selection -- replaceWith(from, to, ...) below swaps in the
+      // exact same characters over [from, to) (just freshly retokenized
+      // marks, not new text), so the document's total length is unchanged
+      // and anchor/head are still valid, still-correct positions afterward.
+      const { anchor, head } = editor.state.selection
       isRetokenizingRef.current = true
       try {
-        editor.view.dispatch(editor.view.state.tr.replaceWith(from, to, replacementNodes))
+        const tr = editor.view.state.tr.replaceWith(from, to, replacementNodes)
+        // ProseMirror's default mapping does NOT preserve this on its own: a
+        // selection that was strictly inside a replaced range collapses to
+        // the start of the new content instead of staying put -- exactly the
+        // "cursor jumps to a strange position while typing" bug this fixes.
+        // Restoring it explicitly, in the SAME transaction, means no extra
+        // render/flicker in between and no chance of a stale intermediate
+        // selection being visible.
+        try {
+          tr.setSelection(TextSelection.create(tr.doc, anchor, head))
+        } catch {
+          // Positions somehow out of range for tr.doc (shouldn't happen,
+          // given the same-length swap above) -- fall back to PM's own
+          // default mapping rather than losing the retokenize entirely.
+        }
+        editor.view.dispatch(tr)
       } finally {
         // finally, not a plain assignment after dispatch -- if dispatch
         // itself throws (e.g. an out-of-range position from an edge case
@@ -424,9 +488,10 @@ export function BlockEditor({
         // CURRENT text) catches up and re-colors those characters correctly
         // once typing settles, just a beat later than usual.
         if (editor.state.doc.textContent !== text) return
+        const { anchor, head } = editor.state.selection
         isRetokenizingRef.current = true
         try {
-          replaceWithTokenizedContent(editor.view, language ?? 'plaintext', lines)
+          replaceWithTokenizedContent(editor.view, language ?? 'plaintext', lines, { anchor, head })
         } finally {
           isRetokenizingRef.current = false
         }

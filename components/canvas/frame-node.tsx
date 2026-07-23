@@ -13,6 +13,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ResizeHandles } from './resize-handles'
 import { Callout } from './callout'
 import { ImageBlock } from './image-block'
+import { OverflowFade } from './overflow-fade'
+import { useOverflowFade } from '@/lib/use-overflow-fade'
 
 interface FrameNodeProps {
   node: LayoutNode
@@ -179,6 +181,12 @@ export function FrameNode({
   const [guides, setGuides] = useState<{ x: number[]; y: number[] } | null>(null)
   const [dragParentRect, setDragParentRect] = useState<DOMRect | null>(null)
   const elementRef = useRef<HTMLDivElement>(null)
+  // The inner content wrapper (.scripture-frame-content/.scripture-leaf-
+  // content) -- overflow-fade tracks THIS element's scroll state, since
+  // it's the one that actually has overflow: auto once node.height is set
+  // (see lib/layout/frame-style.ts's contentOverflowStyle/frameInnerStyle).
+  const contentRef = useRef<HTMLDivElement>(null)
+  const overflowFade = useOverflowFade(contentRef, node.height != null)
   // Holds the currently active move-drag's own cleanup, if any -- an unmount
   // mid-drag (deleting this node, e.g. via Delete/Backspace, or switching
   // pages while still holding it) would otherwise leave the window-level
@@ -410,7 +418,7 @@ export function FrameNode({
             outer box above -- see frameInnerStyle's doc comment for why:
             NodeControls/resizeHandles/callouts below must never be clipped
             by this frame's own overflow once it has an explicit height. */}
-        <div className="scripture-frame-content" style={frameInnerStyle(node)}>
+        <div ref={contentRef} className="scripture-frame-content" style={frameInnerStyle(node)}>
           {children.length === 0 && (
             <div className="scripture-empty-frame">Empty frame. Select it and add a block.</div>
           )}
@@ -435,6 +443,7 @@ export function FrameNode({
             />
           ))}
         </div>
+        <OverflowFade state={overflowFade} />
         {(node.callouts ?? []).map((callout) => (
           <Callout
             key={callout.id}
@@ -472,7 +481,7 @@ export function FrameNode({
           see contentOverflowStyle's doc comment: NodeControls/resizeHandles
           below must never be clipped by this block's own overflow once it
           has an explicit height. */}
-      <div className="scripture-leaf-content" style={contentOverflowStyle(node)}>
+      <div ref={contentRef} className="scripture-leaf-content" style={contentOverflowStyle(node)}>
         {node.kind === 'image' ? (
           <ImageBlock
             src={node.src ?? ''}
@@ -504,6 +513,7 @@ export function FrameNode({
           />
         )}
       </div>
+      <OverflowFade state={overflowFade} />
       {resizeHandles}
       {guideOverlay}
     </div>

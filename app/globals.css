@@ -687,6 +687,51 @@
   height: 1px;
 }
 
+/* Shown on whichever edge(s) of a resized block currently hide content past
+   them (see lib/use-overflow-fade.ts) -- a block that's been resized
+   smaller than its own content would otherwise clip the rest with no visual
+   sign anything's missing. A neutral, semi-transparent dark gradient reads
+   reasonably as "more content this way" regardless of the block's own
+   background color/theme underneath. pointer-events: none so it never
+   blocks scrolling/clicking the content itself. */
+.scripture-overflow-fade {
+  position: absolute;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.scripture-overflow-fade-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 20px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.18), transparent);
+}
+
+.scripture-overflow-fade-bottom {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 20px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.18), transparent);
+}
+
+.scripture-overflow-fade-left {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 20px;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.18), transparent);
+}
+
+.scripture-overflow-fade-right {
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 20px;
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.18), transparent);
+}
+
 /* A small floating arrow+caption (components/canvas/callout.tsx) -- the
    "tail" is a CSS-triangle speech-bubble point rather than a dynamically
    drawn line toward a target (see that file's comment for why). */
