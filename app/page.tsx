@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { FileCode, Pin, PinOff, Pencil, Trash2, Search, X } from 'lucide-react'
+import { FileCode, Pin, PinOff, Pencil, Trash2, Search, X, Lightbulb } from 'lucide-react'
 import {
   type DocumentMeta,
   listDocuments,
@@ -167,6 +167,12 @@ export default function DocumentsDashboard() {
     <div className="scripture-dashboard-shell">
       <PageToolbar>
         <h1 className="scripture-dashboard-title">scripture</h1>
+        <Button variant="ghost" size="sm" className="ml-auto" asChild>
+          <a href="https://github.com/lucianmocan/scripture" target="_blank" rel="noopener noreferrer">
+            <Lightbulb />
+            Feedback
+          </a>
+        </Button>
       </PageToolbar>
 
       <div className="scripture-page">
