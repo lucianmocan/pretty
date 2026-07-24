@@ -1,6 +1,6 @@
 <h1 align="center">
-  <a href="https://scripture-eight.vercel.app">
-    <img src="./docs/assets/scripture-wordmark.png" alt="Scripture" width="800">
+  <a href="https://trypretty.dev">
+    <img src="./docs/assets/pretty-wordmark.png" alt="Pretty" width="800">
   </a>
 </h1>
 
@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://scripture-eight.vercel.app"><strong>Open Scripture</strong></a>
+  <a href="https://trypretty.dev"><strong>Open Pretty</strong></a>
   ·
   <a href="https://github.com/lucianmocan/scripture/issues">Report a bug or request a feature</a>
   ·
@@ -18,7 +18,7 @@
 
 ## Make the explanation part of the code
 
-Scripture is a desktop design tool for code walkthroughs, before-and-after comparisons, tutorials, release notes, and any other place where a plain screenshot falls short.
+Pretty is a desktop design tool for code walkthroughs, before-and-after comparisons, tutorials, release notes, and any other place where a plain screenshot falls short.
 
 Start from a template or an empty document, arrange blocks on a free-form canvas, add context with text and images, then export the finished pages. The editor stays compact and out of the way while you work.
 
@@ -36,13 +36,13 @@ Start from a template or an empty document, arrange blocks on a free-form canvas
 
 ## A quick tour
 
-1. Open [Scripture](https://scripture-eight.vercel.app) and create a blank document or choose a template.
+1. Open [Pretty](https://trypretty.dev) and create a blank document or choose a template.
 2. Add code, text, images, or frames from the canvas controls.
 3. Use **Layers** to organize pages and blocks, and **Properties** to shape the selected item.
 4. Arrange the composition in flex or free-form mode.
 5. Export it from the inspector when it is ready to share.
 
-Scripture is currently designed for desktop workspaces only.
+Pretty is currently designed for desktop workspaces only.
 
 ### Your work stays in your browser
 
@@ -68,7 +68,7 @@ Shortcuts use <kbd>⌘</kbd> on macOS and <kbd>Ctrl</kbd> on Windows and Linux.
 
 ## For developers
 
-Scripture is a Next.js App Router application written in TypeScript. Its editor combines:
+Pretty is a Next.js App Router application written in TypeScript. Its editor combines:
 
 - React 19 and Next.js 16
 - Tiptap and ProseMirror for editable text and code content
@@ -117,8 +117,8 @@ When working in the editor, please preserve the local-first data model and the c
 
 ## License
 
-Scripture is free software licensed under the [GNU General Public License, version 3](./LICENSE). You may use, study, modify, and redistribute it under the terms of that license.
+Pretty is free software licensed under the [GNU General Public License, version 3](./LICENSE). You may use, study, modify, and redistribute it under the terms of that license.
 
 <p align="center">
-  The Scripture wordmark is set in <a href="https://fonts.google.com/specimen/Luckiest+Guy">Luckiest Guy</a>.
+  The Pretty wordmark is set in <a href="https://fonts.google.com/specimen/Luckiest+Guy">Luckiest Guy</a>.
 </p>

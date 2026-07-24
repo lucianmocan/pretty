@@ -573,7 +573,7 @@ export default function DocumentEditorPage() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${docName || 'scripture'}.${format}`
+      a.download = `${docName || 'pretty'}.${format}`
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {

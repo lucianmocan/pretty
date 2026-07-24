@@ -177,7 +177,7 @@ export default function DocumentsDashboardPage() {
     <div className="scripture-dashboard-shell">
       <PageToolbar>
         <h1 className="scripture-dashboard-title">
-          <Link href="/">scripture</Link>
+          <Link href="/">pretty</Link>
         </h1>
         <Button variant="ghost" size="sm" className="ml-auto" asChild>
           <a href="https://github.com/lucianmocan/scripture" target="_blank" rel="noopener noreferrer">

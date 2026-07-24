@@ -1745,6 +1745,8 @@ html[data-scripture-moving] * {
 }
 
 .scripture-landing-logo {
+  display: inline-flex;
+  align-items: center;
   width: fit-content;
   font-family: var(--font-luckiest-guy), var(--font-geist-sans), sans-serif;
   font-size: 30px;
@@ -1754,19 +1756,16 @@ html[data-scripture-moving] * {
   font-synthesis: none;
 }
 
-.scripture-landing-nav .scripture-landing-logo {
-  position: relative;
-  top: 3px;
-}
-
 .scripture-landing-nav-links {
   display: flex;
   align-items: center;
 }
 
 .scripture-landing-nav-links {
+  align-self: flex-start;
   justify-content: flex-end;
   gap: 28px;
+  margin-top: 18px;
 }
 
 .scripture-landing-nav-links a {
@@ -1774,8 +1773,9 @@ html[data-scripture-moving] * {
   align-items: center;
   gap: 6px;
   color: var(--landing-muted);
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 500;
+  line-height: 18px;
   transition: color 140ms ease;
 }
 
@@ -1784,8 +1784,8 @@ html[data-scripture-moving] * {
 }
 
 .scripture-github-mark {
-  width: 15px;
-  height: 15px;
+  width: 18px;
+  height: 18px;
   background: currentColor;
   mask: url('/github-mark.svg') center / contain no-repeat;
 }
@@ -2040,6 +2040,10 @@ html[data-scripture-moving] * {
 
   .scripture-landing-logo {
     font-size: 27px;
+  }
+
+  .scripture-landing-nav-links {
+    margin-top: 16px;
   }
 
   .scripture-landing-hero {

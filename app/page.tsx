@@ -12,7 +12,7 @@ import {
 import { createDocument } from '@/lib/documents/manifest'
 import { Button } from '@/components/ui/button'
 
-export default function ScriptureHomePage() {
+export default function PrettyHomePage() {
   const router = useRouter()
   const [creating, setCreating] = useState(false)
 
@@ -26,8 +26,8 @@ export default function ScriptureHomePage() {
   return (
     <div className="scripture-landing">
       <header className="scripture-landing-nav">
-        <Link href="/" className="scripture-landing-logo" aria-label="Scripture home">
-          scripture
+        <Link href="/" className="scripture-landing-logo" aria-label="Pretty home">
+          pretty
         </Link>
         <nav className="scripture-landing-nav-links" aria-label="Main navigation">
           <a href="https://github.com/lucianmocan/scripture" target="_blank" rel="noopener noreferrer">
@@ -41,11 +41,11 @@ export default function ScriptureHomePage() {
         <section className="scripture-landing-hero">
           <div className="scripture-hero-copy">
             <h1>
-              Pretty.
+              Nice
               <span>Code.</span>
             </h1>
             <p>
-              Scripture turns code, context, and annotation into clear visual narratives—without flattening your
+              Pretty turns code, context, and annotation into clear visual narratives—without flattening your
               work into another forgettable screenshot.
             </p>
             <div className="scripture-hero-actions">
@@ -80,8 +80,8 @@ export default function ScriptureHomePage() {
             <div className="scripture-product-glow" />
             <div className="scripture-product-screenshot">
               <Image
-                src="/scripture-editor-preview-v2.png"
-                alt="The Scripture editor showing a before-and-after TypeScript composition"
+                src="/pretty-editor-preview.png"
+                alt="The Pretty editor showing a before-and-after TypeScript composition"
                 width={2914}
                 height={1808}
                 sizes="(max-width: 1050px) calc(100vw - 48px), 58vw"
@@ -97,7 +97,7 @@ export default function ScriptureHomePage() {
       </main>
 
       <footer className="scripture-landing-footer">
-        <Link href="/" className="scripture-landing-logo" aria-label="Scripture home">scripture</Link>
+        <Link href="/" className="scripture-landing-logo" aria-label="Pretty home">pretty</Link>
         <p>Free and open source</p>
         <div>
           <a href="https://github.com/lucianmocan/scripture/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0</a>

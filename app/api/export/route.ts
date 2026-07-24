@@ -170,7 +170,7 @@ export async function GET(request: NextRequest) {
       return new Response(Buffer.from(png), {
         headers: {
           'Content-Type': 'image/png',
-          'Content-Disposition': 'attachment; filename="scripture.png"',
+          'Content-Disposition': 'attachment; filename="pretty.png"',
         },
       })
     }
@@ -184,7 +184,7 @@ export async function GET(request: NextRequest) {
     return new Response(Buffer.from(merged), {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': 'attachment; filename="scripture.pdf"',
+        'Content-Disposition': 'attachment; filename="pretty.pdf"',
       },
     })
   } catch (err) {
