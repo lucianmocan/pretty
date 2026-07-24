@@ -21,7 +21,7 @@ export function AppMenubar({
 }: AppMenubarProps) {
   return (
     <div className="scripture-app-menubar">
-      <Link href="/" className="scripture-home-link" aria-label="Back to documents" title="Back to documents">
+      <Link href="/dashboard" className="scripture-home-link" aria-label="Back to workspace" title="Back to workspace">
         <Home size={16} />
       </Link>
 

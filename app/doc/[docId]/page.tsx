@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { Plus } from 'lucide-react'
 import { FrameNode } from '@/components/canvas/frame-node'
 import { CanvasRoot } from '@/components/canvas/canvas-root'
 import { InspectorPanel } from '@/components/canvas/inspector-panel'
@@ -18,6 +19,7 @@ import {
   updateNodePosition,
   cycleGutterLine,
   addBlock,
+  seedRootFrame,
   ROOT_ID,
   type GutterClickMode,
 } from '@/lib/yjs/layout-store'
@@ -39,6 +41,8 @@ import { deletePage } from '@/lib/documents/delete-service'
 import { findNode, findParent } from '@/lib/layout/tree-utils'
 import { deleteUploadedImage } from '@/lib/images/client'
 import { refreshDocumentPreview } from '@/lib/documents/preview'
+import { TEMPLATES, type Template } from '@/lib/templates'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 const ZOOM_MIN = 0.1
 const ZOOM_MAX = 4
@@ -71,6 +75,9 @@ export default function DocumentEditorPage() {
   const [gutterClickMode, setGutterClickMode] = useState<GutterClickMode>('highlight')
   const [zoom, setZoom] = useState(1)
   const [customizeOpen, setCustomizeOpen] = useState(false)
+  const [showStarterPicker, setShowStarterPicker] = useState(false)
+  const [applyingTemplate, setApplyingTemplate] = useState(false)
+  const [starterError, setStarterError] = useState<string | null>(null)
   // Which Customize tab to land on -- the Inspector's theme-picker "+" and
   // window-chrome-section "+" (components/canvas/inspector-panel.tsx) both
   // open this same dialog instance, to different tabs.
@@ -104,8 +111,13 @@ export default function DocumentEditorPage() {
   }, [docId])
 
   useEffect(() => {
-    if (notFound) router.replace('/')
+    if (notFound) router.replace('/dashboard')
   }, [notFound, router])
+
+  useEffect(() => {
+    const search = new URLSearchParams(window.location.search)
+    if (search.get('new') === '1') setShowStarterPicker(true)
+  }, [])
 
   // Bump "last updated" and expose local persistence feedback on any change
   // to the active page -- layout tree or any block's content.
@@ -457,6 +469,39 @@ export default function DocumentEditorPage() {
     setCustomizeOpen(true)
   }
 
+  function clearNewProjectQuery() {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('new')
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+  }
+
+  function handleStarterPickerChange(open: boolean) {
+    if (applyingTemplate) return
+    setShowStarterPicker(open)
+    if (!open) {
+      setStarterError(null)
+      clearNewProjectQuery()
+    }
+  }
+
+  async function handleApplyStarter(template: Template) {
+    const pageId = activePageId ?? getPageIds(docId)[0]
+    if (!pageId || applyingTemplate) return
+    setApplyingTemplate(true)
+    setStarterError(null)
+    try {
+      const { doc, synced } = getYDoc(pageId)
+      await synced
+      seedRootFrame(doc, { rootProps: template.rootProps, children: template.children() })
+      setShowStarterPicker(false)
+      clearNewProjectQuery()
+    } catch (cause) {
+      setStarterError(cause instanceof Error ? cause.message : 'Could not apply this starting layout.')
+    } finally {
+      setApplyingTemplate(false)
+    }
+  }
+
   // Fits the card to the available canvas area (leaving room for its own
   // CSS padding, so the fitted card doesn't touch the very edge) and
   // centers the scroll position on it. A flat 100% can look tiny on a large
@@ -550,6 +595,40 @@ export default function DocumentEditorPage() {
           onRename={handleRename}
           saveState={saveState}
         />
+
+        <Dialog open={showStarterPicker} onOpenChange={handleStarterPickerChange}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Choose your starting point</DialogTitle>
+              <DialogDescription>
+                Your project is ready. Pick a layout now, or close this window to begin with an empty canvas.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-2 gap-2">
+              {TEMPLATES.map((template) => {
+                const previewBlocks =
+                  template.id === 'three-up' ? 3 : template.id === 'before-after' ? 2 : template.id === 'single' ? 1 : 0
+                return (
+                  <button
+                    key={template.id}
+                    type="button"
+                    disabled={applyingTemplate}
+                    className="scripture-template-card"
+                    onClick={() => void handleApplyStarter(template)}
+                  >
+                    <span className={`scripture-template-preview is-${template.id}`} aria-hidden="true">
+                      {Array.from({ length: previewBlocks }, (_, index) => <i key={index} />)}
+                      {previewBlocks === 0 && <Plus />}
+                    </span>
+                    <span className="scripture-template-card-name">{template.name}</span>
+                    <span className="scripture-template-card-description">{template.description}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {starterError && <p className="scripture-error-text" role="alert">{starterError}</p>}
+          </DialogContent>
+        </Dialog>
 
         <CustomizeDialog open={customizeOpen} onOpenChange={setCustomizeOpen} initialTab={customizeTab} />
         {operationError && (

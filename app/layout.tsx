@@ -46,8 +46,36 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "scripture",
-  description: "Paste, annotate, and lay out code for publication-quality PDF figures.",
+  metadataBase: new URL("https://scripture-eight.vercel.app"),
+  title: {
+    default: "Scripture — Design code that explains itself",
+    template: "%s · Scripture",
+  },
+  description:
+    "A local-first design studio for turning editable code, text, images, and annotations into polished technical visuals.",
+  openGraph: {
+    title: "Scripture — Design code that explains itself",
+    description:
+      "Turn editable code, context, and annotation into polished visual narratives.",
+    url: "/",
+    siteName: "Scripture",
+    type: "website",
+    images: [
+      {
+        url: "/og.png",
+        width: 1200,
+        height: 630,
+        alt: "Scripture code composition studio",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Scripture — Design code that explains itself",
+    description:
+      "Turn editable code, context, and annotation into polished visual narratives.",
+    images: ["/og.png"],
+  },
 };
 
 export default function RootLayout({
