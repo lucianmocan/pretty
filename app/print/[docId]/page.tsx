@@ -32,6 +32,13 @@ function canvasPositionStyle(node: LayoutNode, isRoot: boolean, parentChildLayou
   return { position: 'absolute' as const, left: node.x ?? 0, top: node.y ?? 0 }
 }
 
+function autoSizeClasses(node: LayoutNode): string[] {
+  return [
+    node.width == null ? 'scripture-auto-width' : '',
+    node.height == null ? 'scripture-auto-height' : '',
+  ].filter(Boolean)
+}
+
 /** Static (non-draggable) rendering of a frame's callouts -- same visual
  * classes as the live components/canvas/callout.tsx, just a <span> instead
  * of an <input> since nothing here is interactive. */
@@ -59,7 +66,11 @@ function renderNode(node: LayoutNode, ydoc: Y.Doc, parentChildLayout: ChildLayou
     return (
       <div
         key={node.id}
-        className={[isRoot && 'scripture-card', childLayout === 'canvas' && 'scripture-frame-canvas']
+        className={[
+          isRoot && 'scripture-card',
+          childLayout === 'canvas' && 'scripture-frame-canvas',
+          ...autoSizeClasses(node),
+        ]
           .filter(Boolean)
           .join(' ')}
         style={{ ...frameStyle(node), ...canvasPositionStyle(node, isRoot, parentChildLayout) }}
@@ -74,7 +85,11 @@ function renderNode(node: LayoutNode, ydoc: Y.Doc, parentChildLayout: ChildLayou
 
   if (node.kind === 'image') {
     return (
-      <div key={node.id} className="scripture-leaf" style={{ ...sizeStyle(node), ...leafPositionStyle }}>
+      <div
+        key={node.id}
+        className={['scripture-leaf', ...autoSizeClasses(node)].join(' ')}
+        style={{ ...sizeStyle(node), ...leafPositionStyle }}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element -- served from our own /api/images route */}
         {node.src && <img className="scripture-image" src={node.src} alt={node.alt ?? ''} />}
       </div>
@@ -87,7 +102,11 @@ function renderNode(node: LayoutNode, ydoc: Y.Doc, parentChildLayout: ChildLayou
 
   if (node.kind !== 'code') {
     return (
-      <div key={node.id} className="scripture-leaf" style={{ ...sizeStyle(node), ...leafPositionStyle }}>
+      <div
+        key={node.id}
+        className={['scripture-leaf', ...autoSizeClasses(node)].join(' ')}
+        style={{ ...sizeStyle(node), ...leafPositionStyle }}
+      >
         <div className="scripture-text-editor">{content}</div>
       </div>
     )
@@ -96,7 +115,11 @@ function renderNode(node: LayoutNode, ydoc: Y.Doc, parentChildLayout: ChildLayou
   const lineCount = extractPlainText(docJSON).split('\n').length
 
   return (
-    <div key={node.id} className="scripture-leaf" style={{ ...sizeStyle(node), ...leafPositionStyle }}>
+    <div
+      key={node.id}
+      className={['scripture-leaf', ...autoSizeClasses(node)].join(' ')}
+      style={{ ...sizeStyle(node), ...leafPositionStyle }}
+    >
       <CodeChrome
         fontFamily={node.fontFamily ?? 'geist-mono'}
         filename={node.filename ?? ''}

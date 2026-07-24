@@ -21,6 +21,7 @@ import {
   Group,
   Ungroup,
   Trash2,
+  Download,
 } from 'lucide-react'
 import type {
   LayoutNode,
@@ -70,6 +71,7 @@ import { ChromeStylePicker } from '@/components/ui/chrome-style-picker'
 import { LanguagePicker } from '@/components/ui/language-picker'
 import { IconField } from '@/components/ui/icon-field'
 import { RadiusIcon } from '@/components/ui/radius-icon'
+import { MIN_NODE_SIZE } from '@/lib/layout/resize-geometry'
 
 interface InspectorPanelProps {
   docId: string
@@ -82,6 +84,10 @@ interface InspectorPanelProps {
   // the theme swatch picker's "+" (syntax) and the custom chrome section's
   // "+" (chrome) below, not from a standalone menu entry anymore.
   onOpenCustomize: (tab: 'syntax' | 'chrome') => void
+  onExportPdf: () => void
+  onExportPng: () => void
+  exporting: 'pdf' | 'png' | null
+  exportError: string | null
 }
 
 const GUTTER_CLICK_MODE_OPTIONS: Array<{ value: GutterClickMode; label: string }> = [
@@ -145,12 +151,14 @@ function SizeSection({ node, docId }: { node: LayoutNode; docId: string }) {
           icon={<MoveHorizontal size={14} />}
           title="Width"
           value={node.width ?? 0}
+          min={MIN_NODE_SIZE}
           onChange={(width) => updateNodeSize(doc, node.id, { width })}
         />
         <IconField
           icon={<MoveVertical size={14} />}
           title="Height"
           value={node.height ?? 0}
+          min={MIN_NODE_SIZE}
           onChange={(height) => updateNodeSize(doc, node.id, { height })}
         />
       </div>
@@ -418,6 +426,10 @@ export function InspectorPanel({
   gutterClickMode,
   onGutterClickModeChange,
   onOpenCustomize,
+  onExportPdf,
+  onExportPng,
+  exporting,
+  exportError,
 }: InspectorPanelProps) {
   if (selectedIds.length > 1) {
     return (
@@ -617,7 +629,7 @@ export function InspectorPanel({
             <>
               <Separator />
               <div className="scripture-inspector-section">
-                <h3>Export page size</h3>
+                <h3>Export</h3>
                 <div className="scripture-inspector-row">
                   <Label>Page size</Label>
                   <Select
@@ -667,6 +679,18 @@ export function InspectorPanel({
                   Content-sized (default) exports at exactly the card&apos;s own size. The other options put that
                   same card onto a fixed paper size instead of resizing it to fill one.
                 </p>
+                <div className="scripture-inspector-actions">
+                  <Button size="sm" onClick={onExportPdf} disabled={exporting !== null}>
+                    <Download />
+                    {exporting === 'pdf' ? 'Exporting PDF…' : 'Export PDF'}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={onExportPng} disabled={exporting !== null}>
+                    <Download />
+                    {exporting === 'png' ? 'Exporting PNG…' : 'Export PNG'}
+                  </Button>
+                </div>
+                <p className="scripture-inspector-hint">PDF includes every page. PNG exports the first page.</p>
+                {exportError && <p className="scripture-error-text">{exportError}</p>}
               </div>
             </>
           )}

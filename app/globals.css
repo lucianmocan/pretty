@@ -291,6 +291,9 @@
    chrome (shadow, minimum size) that isn't a per-frame tunable. */
 .scripture-card {
   box-shadow: var(--shadow-lg);
+}
+
+.scripture-card.scripture-auto-width {
   min-width: 360px;
 }
 
@@ -304,8 +307,13 @@
    without it, that clamp would trap every drag inside a near-zero box.
    Only a floor: an explicit width/height override (resize handles, the
    Inspector's Size fields) still wins via sizeStyle()'s inline styles. */
-.scripture-frame-canvas {
+.scripture-frame-canvas.scripture-auto-width,
+.scripture-frame-canvas.scripture-auto-width > .scripture-frame-content {
   min-width: 640px;
+}
+
+.scripture-frame-canvas.scripture-auto-height,
+.scripture-frame-canvas.scripture-auto-height > .scripture-frame-content {
   min-height: 400px;
 }
 
@@ -529,31 +537,58 @@
 
 .scripture-frame {
   position: relative;
-  transition: box-shadow 0.12s;
 }
 
 .scripture-leaf {
   position: relative;
-  transition: box-shadow 0.12s;
+  border-radius: 4px;
+}
+
+.scripture-leaf.scripture-auto-width {
   /* Frames use align-items: flex-start (shrink-to-fit) by default, so an
      empty block (no text yet) would otherwise collapse to zero width --
      invisible and unclickable, with no way to focus it to paste into. */
   min-width: 120px;
+}
+
+.scripture-leaf.scripture-auto-height {
   min-height: 1.5em;
-  border-radius: 4px;
 }
 
-.scripture-frame:hover,
-.scripture-leaf:hover {
-  box-shadow: 0 0 0 1px var(--border);
+/* Hover/selection chrome is an inset pseudo-element instead of replacing the
+   node's box-shadow. This preserves the root card's natural shadow, follows
+   each node's radius, never changes layout, and stays one screen pixel thick
+   through the inverse-zoom variable set on .scripture-canvas-viewport. */
+.scripture-frame::after,
+.scripture-leaf::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 39;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: inset 0 0 0 var(--scripture-canvas-stroke, 1px) transparent;
+  transition: opacity 100ms ease, box-shadow 100ms ease;
 }
 
-.scripture-frame.is-drag-over {
-  box-shadow: 0 0 0 2px var(--ring) !important;
+.scripture-frame:hover::after,
+.scripture-leaf:hover::after {
+  opacity: 1;
+  box-shadow: inset 0 0 0 var(--scripture-canvas-stroke, 1px) var(--border);
 }
 
-.scripture-selected {
-  box-shadow: 0 0 0 2px var(--ring) !important;
+.scripture-frame.is-drag-over::after {
+  opacity: 1;
+  box-shadow: inset 0 0 0 calc(2 * var(--scripture-canvas-stroke, 1px)) var(--ring);
+}
+
+.scripture-frame.scripture-selected::after,
+.scripture-leaf.scripture-selected::after {
+  opacity: 1;
+  box-shadow:
+    inset 0 0 0 var(--scripture-canvas-stroke, 1px)
+    color-mix(in srgb, var(--ring) 78%, transparent);
 }
 
 /* Resize handles -- shown on the selected frame/block, Figma-style. See
@@ -562,75 +597,68 @@
    grabbable on every edge, matching how most direct-manipulation design
    tools let you resize by dragging anywhere along an edge. Discoverability
    comes from the cursor change alone: the hit area (below) is deliberately
-   generous, but purely invisible -- it must never read as the selection's
-   own border growing/moving. The four corners are only ever rendered
-   alongside n/w -- e/s/se are the only handles a flex-mode node or the root
-   gets, see resize-handles.tsx's clampToParent doc for why.
+   generous, but purely invisible. Canvas children expose all eight
+   directions because they have x/y coordinates to preserve the opposite
+   edge. Flex children and the root expose east/south/south-east, whose
+   geometry can be represented without inventing a persistent offset. */
 
-   Every handle sits FULLY INSIDE the box (0, never a negative/overhanging
-   offset) -- a resized node gets an explicit height, which makes
-   sizeStyle() add `overflow: auto` (lib/layout/frame-style.ts), and that
-   clips away any child positioned outside the box's own edges. A handle
-   that straddled the border (half in, half out) would silently lose its
-   outer half to that clip the moment the node had ever been resized once
-   before -- unclickable with no visual sign why. */
-
-.resize-handle {
+.resize-handles {
   position: absolute;
+  inset: 0;
   /* Higher than .scripture-zoom-controls (30, the floating zoom widget) and
      .scripture-canvas-guide (20) -- a resize handle is always genuinely
      interactive whenever it's rendered at all (gated by isOnlySelected in
      resize-handles.tsx), so it must never end up covered by the canvas's
      own floating chrome sitting in the same stacking context. */
   z-index: 40;
-  background: transparent;
+  overflow: visible;
+  pointer-events: none;
 }
 
-/* The 14px/18px sizes below are the DESIRED on-screen size at 100% zoom --
-   resize-handles.tsx applies an inline `transform: scale(1/zoom)` on top of
-   these so that size stays constant at every zoom level (these handles live
-   inside the zoomed canvas viewport, so without this a fixed CSS size would
-   scale WITH the content -- at this app's ~2-3x auto-fit-on-load default,
-   that turned a "14px" strip into 30-40+ screen px, swallowing most of a
-   modestly-sized block and stealing clicks meant for dragging its body).
-   transform-origin here keeps each handle flush against its real edge/
-   corner as it counter-scales, instead of shrinking toward its own center
-   and drifting away from that edge. */
+.resize-handle {
+  position: absolute;
+  background: transparent;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+/* The CSS variables are divided by zoom in resize-handles.tsx. Only the
+   strip THICKNESS is counter-scaled; the edge's length remains 100% of the
+   node at every zoom. Counter-scaling the whole handle previously shrank a
+   full edge down to a small center segment above 100% zoom. Hit targets
+   straddle the border now that scrolling lives on the inner content wrapper,
+   leaving most of the content-side pixels free for editing and selection. */
 
 .resize-handle-e {
   top: 0;
   bottom: 0;
-  right: 0;
-  width: 14px;
+  right: var(--resize-edge-offset);
+  width: var(--resize-edge-hit);
   cursor: ew-resize;
-  transform-origin: right center;
 }
 
 .resize-handle-w {
   top: 0;
   bottom: 0;
-  left: 0;
-  width: 14px;
+  left: var(--resize-edge-offset);
+  width: var(--resize-edge-hit);
   cursor: ew-resize;
-  transform-origin: left center;
 }
 
 .resize-handle-s {
   left: 0;
   right: 0;
-  bottom: 0;
-  height: 14px;
+  bottom: var(--resize-edge-offset);
+  height: var(--resize-edge-hit);
   cursor: ns-resize;
-  transform-origin: center bottom;
 }
 
 .resize-handle-n {
   left: 0;
   right: 0;
-  top: 0;
-  height: 14px;
+  top: var(--resize-edge-offset);
+  height: var(--resize-edge-hit);
   cursor: ns-resize;
-  transform-origin: center top;
 }
 
 /* Each corner gets its own small hit area, rendered last in the DOM (per
@@ -638,39 +666,69 @@
    testing over the full-length edge strips underneath -- otherwise there'd
    be no way to resize both axes at once from a corner. */
 .resize-handle-se {
-  right: 0;
-  bottom: 0;
-  width: 18px;
-  height: 18px;
+  right: var(--resize-corner-offset);
+  bottom: var(--resize-corner-offset);
+  width: var(--resize-corner-hit);
+  height: var(--resize-corner-hit);
   cursor: nwse-resize;
-  transform-origin: right bottom;
 }
 
 .resize-handle-sw {
-  left: 0;
-  bottom: 0;
-  width: 18px;
-  height: 18px;
+  left: var(--resize-corner-offset);
+  bottom: var(--resize-corner-offset);
+  width: var(--resize-corner-hit);
+  height: var(--resize-corner-hit);
   cursor: nesw-resize;
-  transform-origin: left bottom;
 }
 
 .resize-handle-ne {
-  right: 0;
-  top: 0;
-  width: 18px;
-  height: 18px;
+  right: var(--resize-corner-offset);
+  top: var(--resize-corner-offset);
+  width: var(--resize-corner-hit);
+  height: var(--resize-corner-hit);
   cursor: nesw-resize;
-  transform-origin: right top;
 }
 
 .resize-handle-nw {
-  left: 0;
-  top: 0;
-  width: 18px;
-  height: 18px;
+  left: var(--resize-corner-offset);
+  top: var(--resize-corner-offset);
+  width: var(--resize-corner-hit);
+  height: var(--resize-corner-hit);
   cursor: nwse-resize;
-  transform-origin: left top;
+}
+
+html[data-scripture-resize-axis='e'],
+html[data-scripture-resize-axis='w'] {
+  cursor: ew-resize;
+}
+
+html[data-scripture-resize-axis='n'],
+html[data-scripture-resize-axis='s'] {
+  cursor: ns-resize;
+}
+
+html[data-scripture-resize-axis='nw'],
+html[data-scripture-resize-axis='se'] {
+  cursor: nwse-resize;
+}
+
+html[data-scripture-resize-axis='ne'],
+html[data-scripture-resize-axis='sw'] {
+  cursor: nesw-resize;
+}
+
+html[data-scripture-resize-axis],
+html[data-scripture-moving] {
+  user-select: none;
+}
+
+html[data-scripture-moving] {
+  cursor: grabbing;
+}
+
+html[data-scripture-resize-axis] *,
+html[data-scripture-moving] * {
+  cursor: inherit !important;
 }
 
 /* Canvas-mode positioning: smart-guide lines shown for the duration of a
@@ -811,53 +869,19 @@
 }
 
 .scripture-node-controls {
-  position: absolute;
-  /* Fully clear of the block's own box (bottom edge stays above y=0) -- at
-     -16px this cluster (~26px tall incl. padding) overlapped the top of a
-     short/empty block, geometrically blocking clicks to it while hovered.
-     Floating above like this can visually overlap the PREVIOUS sibling
-     when the frame's gap is small (a transient, hover-only overlap, same
-     as Notion/Figma's own hover toolbars) -- that's an acceptable tradeoff
-     since it never blocks a real click (moving the mouse toward the
-     sibling first leaves this block's hover, hiding the cluster again).
-     Moving it fully inside the block instead was tried and reverted: it
-     then overlaps the block's OWN clickable area for short/empty blocks,
-     which silently steals real clicks aimed at the block itself. */
-  top: -30px;
-  right: -6px;
+  /* Portaled to document.body and anchored with viewport coordinates in
+     frame-node.tsx. A fixed overlay is the only reliable way for controls
+     to escape every nested frame's overflow/scroll clipping boundary. */
+  position: fixed;
   display: flex;
   gap: 1px;
   padding: 2px;
   border-radius: var(--radius-sm);
   background: var(--popover);
   border: 1px solid var(--border);
-  opacity: 0;
-  /* Invisible (opacity: 0) elements still capture clicks unless explicitly
-     excluded -- without this, this floating overlay silently swallows clicks
-     meant for the block underneath, especially on short/empty blocks where
-     it overlaps the content area. */
-  pointer-events: none;
-  transform: translateY(2px);
-  transition: opacity 0.12s, transform 0.12s;
-  z-index: 10;
-}
-
-/* z-index bumped only while actually interactive (hovered), not at rest --
-   in canvas mode, closely-positioned sibling blocks' floating controls
-   clusters can geometrically overlap (both sit outside their own block's
-   box, at top:-30px), so hovering near that overlap can put BOTH siblings
-   into :hover simultaneously; without this, the tie always resolved in
-   favor of whichever block is LATER in the DOM regardless of which one the
-   pointer is actually over. It also needs to beat .scripture-zoom-controls
-   (30, the floating zoom widget) and .scripture-canvas-guide (20) -- a
-   block's own hover controls/tooltip must never render underneath the
-   canvas's own floating chrome. */
-.scripture-frame:hover > .scripture-node-controls,
-.scripture-leaf:hover > .scripture-node-controls {
-  opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
-  z-index: 40;
+  transform: translateX(-50%);
+  z-index: 60;
 }
 
 .scripture-editor-loading {
@@ -871,6 +895,7 @@
 --------------------------------------------------------------------------- */
 
 .scripture-bubble-menu {
+  z-index: 70;
   display: flex;
   align-items: center;
   gap: 2px;

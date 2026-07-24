@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Plus, X } from 'lucide-react'
 import { FrameNode } from '@/components/canvas/frame-node'
@@ -12,14 +12,16 @@ import { useLayoutTree } from '@/lib/use-layout-tree'
 import { getYDoc, encodeDocState } from '@/lib/yjs/doc-store'
 import {
   moveNode,
+  duplicateNode,
   removeNode,
   moveNodeBeforeSibling,
-  updateNodeSize,
+  updateNodeGeometry,
   updateNodePosition,
   cycleGutterLine,
   ROOT_ID,
   type GutterClickMode,
 } from '@/lib/yjs/layout-store'
+import type { PositionPatch, SizePatch } from '@/lib/layout/resize-geometry'
 import {
   getDocumentMeta,
   renameDocument,
@@ -56,7 +58,7 @@ export default function DocumentEditorPage() {
   // which ONE block (if any) is actually in text-edit mode, entered via
   // double-click. null means "nothing is being text-edited right now".
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [exporting, setExporting] = useState(false)
+  const [exporting, setExporting] = useState<'pdf' | 'png' | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   const [docName, setDocName] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
@@ -229,6 +231,14 @@ export default function DocumentEditorPage() {
     moveNode(getYDoc(activePageId).doc, id, direction)
   }
 
+  function handleDuplicate(id: string) {
+    if (!activePageId) return
+    const duplicateId = duplicateNode(getYDoc(activePageId).doc, id)
+    if (!duplicateId) return
+    setSelectedIds([duplicateId])
+    setEditingId(null)
+  }
+
   function handleRemove(id: string) {
     if (!activePageId) return
     removeNode(getYDoc(activePageId).doc, id)
@@ -243,12 +253,12 @@ export default function DocumentEditorPage() {
     moveNodeBeforeSibling(getYDoc(activePageId).doc, draggedId, targetId)
   }
 
-  function handleResizeNode(id: string, size: { width: number; height: number }) {
+  function handleResizeNode(id: string, size: SizePatch, position?: PositionPatch) {
     if (!activePageId) return
-    updateNodeSize(getYDoc(activePageId).doc, id, size)
+    updateNodeGeometry(getYDoc(activePageId).doc, id, size, position)
   }
 
-  function handleRepositionNode(id: string, position: { x: number; y: number }) {
+  function handleRepositionNode(id: string, position: { x?: number; y?: number }) {
     if (!activePageId) return
     updateNodePosition(getYDoc(activePageId).doc, id, position)
   }
@@ -285,7 +295,10 @@ export default function DocumentEditorPage() {
     const availableWidth = area.clientWidth - CANVAS_PADDING * 2
     const availableHeight = area.clientHeight - CANVAS_PADDING * 2
     if (availableWidth <= 0 || availableHeight <= 0) return
-    setZoom(clampZoom(Math.min(availableWidth / naturalSize.width, availableHeight / naturalSize.height)))
+    // Capped at 1 -- a small or still-empty document (e.g. right after
+    // creation) shouldn't get blown up to fill the viewport, only large
+    // content should ever get scaled DOWN to fit.
+    setZoom(clampZoom(Math.min(1, availableWidth / naturalSize.width, availableHeight / naturalSize.height)))
     // Scroll centering needs the NEW zoom's layout to have actually
     // committed first (scrollWidth/Height below depend on it) -- a
     // requestAnimationFrame callback runs after React's render/commit but
@@ -313,7 +326,7 @@ export default function DocumentEditorPage() {
   }, [naturalSize])
 
   async function handleExport(format: 'pdf' | 'png') {
-    setExporting(true)
+    setExporting(format)
     setExportError(null)
     try {
       // Every page is saved before export, in order -- the export route
@@ -348,7 +361,7 @@ export default function DocumentEditorPage() {
       console.error(err)
       setExportError(err instanceof Error ? err.message : 'Export failed')
     } finally {
-      setExporting(false)
+      setExporting(null)
     }
   }
 
@@ -361,17 +374,12 @@ export default function DocumentEditorPage() {
           docName={docName ?? ''}
           onRename={handleRename}
           onAddPage={handleAddPage}
-          onExportPdf={() => handleExport('pdf')}
-          onExportPng={() => handleExport('png')}
-          exporting={exporting}
           onZoomIn={handleZoomIn}
           onZoomOut={handleZoomOut}
           onZoomReset={handleZoomReset}
           onRecenter={handleRecenter}
         >
           <SearchReplacePanel />
-          {exporting && <span className="text-xs text-muted-foreground">Exporting…</span>}
-          {exportError && <span className="scripture-error-text">{exportError}</span>}
         </AppMenubar>
 
         <CustomizeDialog open={customizeOpen} onOpenChange={setCustomizeOpen} initialTab={customizeTab} />
@@ -424,7 +432,15 @@ export default function DocumentEditorPage() {
                 <div
                   ref={viewportRef}
                   className="scripture-canvas-viewport"
-                  style={{ transform: `scale(${zoom})` }}
+                  style={
+                    {
+                      transform: `scale(${zoom})`,
+                      // Selection/hover strokes live inside this transformed
+                      // tree. Counter-scale their local thickness so they
+                      // remain one physical screen pixel at every zoom.
+                      '--scripture-canvas-stroke': `${1 / Math.max(zoom, 0.01)}px`,
+                    } as CSSProperties
+                  }
                 >
                   <CanvasRoot>
                     <FrameNode
@@ -433,6 +449,7 @@ export default function DocumentEditorPage() {
                       selectedIds={selectedIds}
                       onSelect={handleSelect}
                       onMove={handleMove}
+                      onDuplicate={handleDuplicate}
                       onRemove={handleRemove}
                       onReorder={handleReorder}
                       onResizeNode={handleResizeNode}
@@ -470,6 +487,10 @@ export default function DocumentEditorPage() {
               gutterClickMode={gutterClickMode}
               onGutterClickModeChange={setGutterClickMode}
               onOpenCustomize={handleOpenCustomize}
+              onExportPdf={() => handleExport('pdf')}
+              onExportPng={() => handleExport('png')}
+              exporting={exporting}
+              exportError={exportError}
             />
           </div>
         ) : (

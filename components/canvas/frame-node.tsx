@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { GripVertical, ChevronUp, ChevronDown, Trash2 } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { GripVertical, ChevronUp, ChevronDown, Copy, Trash2 } from 'lucide-react'
 import type { ChildLayout, LayoutNode } from '@/lib/layout/types'
 import { frameOuterStyle, frameInnerStyle, outerBoxStyle, contentOverflowStyle } from '@/lib/layout/frame-style'
 import { snapPosition } from '@/lib/layout/canvas-snap'
@@ -15,6 +16,7 @@ import { Callout } from './callout'
 import { ImageBlock } from './image-block'
 import { OverflowFade } from './overflow-fade'
 import { useOverflowFade } from '@/lib/use-overflow-fade'
+import type { PositionPatch, SizePatch } from '@/lib/layout/resize-geometry'
 
 interface FrameNodeProps {
   node: LayoutNode
@@ -22,10 +24,14 @@ interface FrameNodeProps {
   selectedIds: string[]
   onSelect: (id: string, additive: boolean) => void
   onMove: (id: string, direction: 'up' | 'down') => void
+  onDuplicate: (id: string) => void
   onRemove: (id: string) => void
   onReorder: (draggedId: string, targetId: string) => void
-  onResizeNode: (id: string, size: { width: number; height: number }) => void
-  onRepositionNode: (id: string, position: { x: number; y: number }) => void
+  onResizeNode: (id: string, size: SizePatch, position?: PositionPatch) => void
+  // Partial -- a resize-driven reposition only ever touches the axis
+  // actually being dragged (see ResizeHandlesProps.onResize); a move-drag
+  // always passes both.
+  onRepositionNode: (id: string, position: { x?: number; y?: number }) => void
   // The layout mode of THIS node's parent frame -- determines whether this
   // node flows via flex (default) or is absolutely positioned via its own
   // x/y. The root has no parent of its own, so this is irrelevant for it.
@@ -62,6 +68,18 @@ function classNames(...parts: Array<string | false | undefined>) {
 // node id. A type contenteditable doesn't recognize sidesteps that default
 // behavior completely.
 const DRAG_MIME = 'application/x-scripture-node-id'
+const MOVE_DRAG_THRESHOLD = 3
+const SNAP_THRESHOLD_PX = 6
+
+function suppressNextClick() {
+  const suppress = (event: MouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    window.removeEventListener('click', suppress, true)
+  }
+  window.addEventListener('click', suppress, true)
+  setTimeout(() => window.removeEventListener('click', suppress, true), 0)
+}
 
 interface GripHandlers {
   draggable?: boolean
@@ -71,13 +89,22 @@ interface GripHandlers {
 
 function NodeControls({
   id,
+  anchorRef,
+  visible,
   onMove,
+  onDuplicate,
   onRemove,
   gripHandlers,
   showGrip,
+  showReorderActions,
+  onPointerEnter,
+  onPointerLeave,
 }: {
   id: string
+  anchorRef: React.RefObject<HTMLElement | null>
+  visible: boolean
   onMove: (id: string, direction: 'up' | 'down') => void
+  onDuplicate: (id: string) => void
   onRemove: (id: string) => void
   gripHandlers: GripHandlers
   // false for canvas-mode nodes -- dragging works directly on the block
@@ -86,34 +113,99 @@ function NodeControls({
   // flex-mode nodes, where the grip is what starts native drag-and-drop
   // reordering (a different interaction, not a position drag).
   showGrip: boolean
+  showReorderActions: boolean
+  onPointerEnter: () => void
+  onPointerLeave: () => void
 }) {
-  return (
-    <div className="scripture-node-controls" onClick={(e) => e.stopPropagation()}>
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
+  const nativeDragRef = useRef(false)
+
+  useEffect(() => {
+    if (!visible) return
+    const anchor = anchorRef.current
+    if (!anchor) return
+
+    const update = () => setAnchorRect(anchor.getBoundingClientRect())
+    update()
+    window.addEventListener('resize', update)
+    // Capture is intentional: scroll events do not bubble, and the clipping
+    // frame can be any ancestor in a recursively nested layout tree.
+    window.addEventListener('scroll', update, true)
+    const observer = new ResizeObserver(update)
+    observer.observe(anchor)
+    return () => {
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+      observer.disconnect()
+    }
+  }, [anchorRef, visible])
+
+  if (!visible || !anchorRect) return null
+
+  return createPortal(
+    <div
+      className="scripture-node-controls"
+      style={{
+        top: Math.max(8, anchorRect.top - 30),
+        left: anchorRect.left + anchorRect.width / 2,
+      }}
+      onClick={(e) => e.stopPropagation()}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={() => {
+        if (!nativeDragRef.current) onPointerLeave()
+      }}
+    >
       {showGrip && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-xs" aria-label="Drag to move" {...gripHandlers}>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Drag to move"
+              draggable={gripHandlers.draggable}
+              onPointerDown={gripHandlers.onPointerDown}
+              onDragStart={(event) => {
+                nativeDragRef.current = true
+                gripHandlers.onDragStart?.(event)
+              }}
+              onDragEnd={() => {
+                nativeDragRef.current = false
+                onPointerLeave()
+              }}
+            >
               <GripVertical />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Drag to move</TooltipContent>
         </Tooltip>
       )}
+      {showReorderActions && (
+        <>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-xs" onClick={() => onMove(id, 'up')} aria-label="Move up">
+                <ChevronUp />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Move up</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-xs" onClick={() => onMove(id, 'down')} aria-label="Move down">
+                <ChevronDown />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Move down</TooltipContent>
+          </Tooltip>
+        </>
+      )}
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon-xs" onClick={() => onMove(id, 'up')} aria-label="Move up">
-            <ChevronUp />
+          <Button variant="ghost" size="icon-xs" onClick={() => onDuplicate(id)} aria-label="Duplicate">
+            <Copy />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Move up</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon-xs" onClick={() => onMove(id, 'down')} aria-label="Move down">
-            <ChevronDown />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Move down</TooltipContent>
+        <TooltipContent>Duplicate</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -123,7 +215,8 @@ function NodeControls({
         </TooltipTrigger>
         <TooltipContent>Delete</TooltipContent>
       </Tooltip>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -146,6 +239,7 @@ export function FrameNode({
   selectedIds,
   onSelect,
   onMove,
+  onDuplicate,
   onRemove,
   onReorder,
   onResizeNode,
@@ -173,39 +267,69 @@ export function FrameNode({
   const canDragViaBody = isCanvasChild && !(needsEditGate && isEditing)
   const isOnlySelected = isSelected && selectedIds.length === 1
   const [isDragOver, setIsDragOver] = useState(false)
+  const [controlsVisible, setControlsVisible] = useState(false)
   // Optimistic preview during a resize/move drag -- committed to Yjs only on
   // release (see ResizeHandles / beginMoveDrag), so dragging doesn't spam
   // the undo stack on every pixel of motion.
-  const [liveSize, setLiveSize] = useState<{ width: number; height: number } | null>(null)
-  const [livePosition, setLivePosition] = useState<{ x: number; y: number } | null>(null)
+  const [liveSize, setLiveSize] = useState<SizePatch | null>(null)
+  // Resize-driven updates are partial (only the axis actually being
+  // dragged, see ResizeHandlesProps.onResize) -- move-drag always sets both.
+  const [livePosition, setLivePosition] = useState<PositionPatch | null>(null)
   const [guides, setGuides] = useState<{ x: number[]; y: number[] } | null>(null)
-  const [dragParentRect, setDragParentRect] = useState<DOMRect | null>(null)
+  const [dragParentGeometry, setDragParentGeometry] = useState<{
+    rect: DOMRect
+    scrollLeft: number
+    scrollTop: number
+  } | null>(null)
   const elementRef = useRef<HTMLDivElement>(null)
   // The inner content wrapper (.scripture-frame-content/.scripture-leaf-
   // content) -- overflow-fade tracks THIS element's scroll state, since
-  // it's the one that actually has overflow: auto once node.height is set
+  // it's the one that actually has overflow once either dimension is fixed
   // (see lib/layout/frame-style.ts's contentOverflowStyle/frameInnerStyle).
   const contentRef = useRef<HTMLDivElement>(null)
-  const overflowFade = useOverflowFade(contentRef, node.height != null)
+  const renderedNode = liveSize ? { ...node, ...liveSize } : node
+  const overflowFade = useOverflowFade(contentRef, renderedNode.width != null || renderedNode.height != null)
   // Holds the currently active move-drag's own cleanup, if any -- an unmount
   // mid-drag (deleting this node, e.g. via Delete/Backspace, or switching
   // pages while still holding it) would otherwise leave the window-level
   // pointermove/pointerup listeners attached forever, later calling
   // onRepositionNode against a stale node id/closure.
   const activeDragCleanupRef = useRef<(() => void) | null>(null)
+  const controlsHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    return () => activeDragCleanupRef.current?.()
+    return () => {
+      activeDragCleanupRef.current?.()
+      if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current)
+    }
   }, [])
 
-  const sizeOverride = liveSize ? { width: `${liveSize.width}px`, height: `${liveSize.height}px` } : undefined
+  function showNodeControls() {
+    if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current)
+    controlsHideTimerRef.current = null
+    setControlsVisible(true)
+  }
+
+  function scheduleHideNodeControls() {
+    if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current)
+    controlsHideTimerRef.current = setTimeout(() => {
+      controlsHideTimerRef.current = null
+      setControlsVisible(false)
+    }, 100)
+  }
+
+  const isAutoWidth = renderedNode.width == null
+  const isAutoHeight = renderedNode.height == null
 
   const canvasPositionStyle: React.CSSProperties | undefined =
     !isRoot && parentChildLayout === 'canvas'
       ? {
           position: 'absolute',
-          left: livePosition ? livePosition.x : (node.x ?? 0),
-          top: livePosition ? livePosition.y : (node.y ?? 0),
+          // Per-axis fallback to the node's own stored value -- NOT to a
+          // freshly re-measured DOM rect -- so a resize that only touches
+          // one axis (e.g. dragging the w handle) never nudges the other.
+          left: (livePosition?.x ?? node.x) ?? 0,
+          top: (livePosition?.y ?? node.y) ?? 0,
         }
       : undefined
 
@@ -224,42 +348,41 @@ export function FrameNode({
         if (position) setLivePosition(position)
       }}
       onCommit={(size, position) => {
+        suppressNextClick()
         setLiveSize(null)
         setLivePosition(null)
-        onResizeNode(node.id, size)
-        // Only populated for a w/n-inclusive drag on a canvas-mode node --
-        // see ResizeHandles' clampToParent doc for why that's the only case
-        // a left/top-edge drag has an x/y to actually shift.
-        if (position) onRepositionNode(node.id, position)
+        onResizeNode(node.id, size, position)
+      }}
+      onCancel={() => {
+        setLiveSize(null)
+        setLivePosition(null)
       }}
       zoom={zoom}
-      clampToParent={isCanvasChild}
+      position={isCanvasChild ? { x: node.x ?? 0, y: node.y ?? 0 } : undefined}
     />
   )
 
   function beginMoveDrag(e: React.PointerEvent) {
+    if (!e.isPrimary || e.button !== 0 || activeDragCleanupRef.current) return
+    if ((e.target as HTMLElement).closest('button, input, textarea, select, a, [data-node-drag-ignore]')) return
     e.stopPropagation()
     e.preventDefault()
     const el = elementRef.current
     const parentEl = el?.parentElement
     if (!el || !parentEl) return
 
-    // Dragging now starts directly from the block itself (no floating grip
-    // to click first), so make sure it's actually selected as this drag
-    // begins -- matches Figma: click-dragging an unselected shape selects
-    // AND moves it in one motion. Skipped if already selected (whether
-    // alone or part of a multi-selection) so starting a drag on one member
-    // of an existing multi-select doesn't collapse the rest of it.
-    if (!isSelected) onSelect(node.id, e.shiftKey)
-
     const parentRect = parentEl.getBoundingClientRect()
-    setDragParentRect(parentRect)
     const startWidth = el.getBoundingClientRect().width / zoom
     const startHeight = el.getBoundingClientRect().height / zoom
     const startX = node.x ?? 0
     const startY = node.y ?? 0
     const startClientX = e.clientX
     const startClientY = e.clientY
+    const pointerId = e.pointerId
+    const startScrollLeft = parentEl.scrollLeft
+    const startScrollTop = parentEl.scrollTop
+    let moved = false
+    let selectionApplied = false
 
     const siblingEls = Array.from(parentEl.querySelectorAll<HTMLElement>(':scope > [data-node-id]')).filter(
       (sib) => sib !== el
@@ -267,8 +390,8 @@ export function FrameNode({
     const siblings = siblingEls.map((sib) => {
       const r = sib.getBoundingClientRect()
       return {
-        x: (r.left - parentRect.left) / zoom,
-        y: (r.top - parentRect.top) / zoom,
+        x: (r.left - parentRect.left) / zoom + startScrollLeft,
+        y: (r.top - parentRect.top) / zoom + startScrollTop,
         width: r.width / zoom,
         height: r.height / zoom,
       }
@@ -282,39 +405,95 @@ export function FrameNode({
     // what keeps a dragged block -- and the floating NodeControls/tooltip
     // cluster that renders outside its own top edge -- from ever crossing
     // into negative territory the scrollable canvas area can't scroll back to.
-    const containerSize = { width: parentRect.width / zoom, height: parentRect.height / zoom }
+    const containerSize = { width: parentEl.clientWidth, height: parentEl.clientHeight }
+
+    const updateDragGeometry = () => {
+      if (!moved) return
+      setDragParentGeometry({
+        rect: parentEl.getBoundingClientRect(),
+        scrollLeft: parentEl.scrollLeft,
+        scrollTop: parentEl.scrollTop,
+      })
+    }
 
     const compute = (ev: PointerEvent) => {
-      const dx = (ev.clientX - startClientX) / zoom
-      const dy = (ev.clientY - startClientY) / zoom
+      if (ev.pointerId !== pointerId) return null
+      // Include scroll accumulated during the gesture so the same content
+      // point remains under the pointer if any canvas ancestor is scrolled.
+      const dx = (ev.clientX - startClientX) / zoom + (parentEl.scrollLeft - startScrollLeft)
+      const dy = (ev.clientY - startClientY) / zoom + (parentEl.scrollTop - startScrollTop)
       return snapPosition(
         { x: startX + dx, y: startY + dy, width: startWidth, height: startHeight },
         siblings,
-        containerSize
+        containerSize,
+        SNAP_THRESHOLD_PX / Math.max(zoom, 0.01)
       )
     }
 
     const onMovePointer = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return
+      if (!moved && Math.hypot(ev.clientX - startClientX, ev.clientY - startClientY) < MOVE_DRAG_THRESHOLD) return
+      if (!moved) {
+        moved = true
+        document.documentElement.dataset.scriptureMoving = 'true'
+        updateDragGeometry()
+      }
+      if (!selectionApplied && !isSelected) {
+        selectionApplied = true
+        onSelect(node.id, e.shiftKey)
+      }
+      ev.preventDefault()
       const snapped = compute(ev)
+      if (!snapped) return
       setLivePosition({ x: snapped.x, y: snapped.y })
       setGuides(snapped.guides)
     }
     const onUpPointer = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return
+      const snapped = moved ? compute(ev) : null
       cleanup()
-      const snapped = compute(ev)
       setLivePosition(null)
       setGuides(null)
-      setDragParentRect(null)
-      onRepositionNode(node.id, { x: snapped.x, y: snapped.y })
+      setDragParentGeometry(null)
+      if (snapped) {
+        suppressNextClick()
+        onRepositionNode(node.id, { x: snapped.x, y: snapped.y })
+      }
+    }
+    const cancel = () => {
+      cleanup()
+      setLivePosition(null)
+      setGuides(null)
+      setDragParentGeometry(null)
+    }
+    const onPointerCancel = (ev: PointerEvent) => {
+      if (ev.pointerId === pointerId) cancel()
+    }
+    const onWindowBlur = () => cancel()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      cancel()
     }
     function cleanup() {
       window.removeEventListener('pointermove', onMovePointer)
       window.removeEventListener('pointerup', onUpPointer)
+      window.removeEventListener('pointercancel', onPointerCancel)
+      window.removeEventListener('blur', onWindowBlur)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('resize', updateDragGeometry)
+      window.removeEventListener('scroll', updateDragGeometry, true)
+      delete document.documentElement.dataset.scriptureMoving
       activeDragCleanupRef.current = null
     }
     activeDragCleanupRef.current = cleanup
-    window.addEventListener('pointermove', onMovePointer)
+    window.addEventListener('pointermove', onMovePointer, { passive: false })
     window.addEventListener('pointerup', onUpPointer)
+    window.addEventListener('pointercancel', onPointerCancel)
+    window.addEventListener('blur', onWindowBlur)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('resize', updateDragGeometry)
+    window.addEventListener('scroll', updateDragGeometry, true)
   }
 
   // Canvas mode no longer uses the grip at all -- see showGrip below --
@@ -331,6 +510,7 @@ export function FrameNode({
           },
         }
   const showGrip = parentChildLayout !== 'canvas'
+  const showReorderActions = parentChildLayout !== 'canvas'
 
   function handleDoubleClick(e: React.MouseEvent) {
     e.stopPropagation()
@@ -338,35 +518,39 @@ export function FrameNode({
     onSetEditing(node.id)
   }
 
-  const guideOverlay = guides && dragParentRect && (
-    <>
-      {guides.x.map((gx, i) => (
-        <div
-          key={`gx-${i}`}
-          className="scripture-canvas-guide scripture-canvas-guide-v"
-          style={{
-            // dragParentRect is a raw screen-space rect; gx/gy are
-            // content-space (unscaled), so they need re-scaling by zoom
-            // before being combined with it.
-            left: dragParentRect.left + gx * zoom,
-            top: dragParentRect.top,
-            height: dragParentRect.height,
-          }}
-        />
-      ))}
-      {guides.y.map((gy, i) => (
-        <div
-          key={`gy-${i}`}
-          className="scripture-canvas-guide scripture-canvas-guide-h"
-          style={{
-            top: dragParentRect.top + gy * zoom,
-            left: dragParentRect.left,
-            width: dragParentRect.width,
-          }}
-        />
-      ))}
-    </>
-  )
+  // A CSS transform creates a containing block for position:fixed children.
+  // Since the entire canvas is transformed for zoom, these must be portaled
+  // to body or their viewport coordinates get offset/scaled a second time.
+  const guideOverlay =
+    guides &&
+    dragParentGeometry &&
+    createPortal(
+      <>
+        {guides.x.map((gx, i) => (
+          <div
+            key={`gx-${i}`}
+            className="scripture-canvas-guide scripture-canvas-guide-v"
+            style={{
+              left: dragParentGeometry.rect.left + (gx - dragParentGeometry.scrollLeft) * zoom,
+              top: dragParentGeometry.rect.top,
+              height: dragParentGeometry.rect.height,
+            }}
+          />
+        ))}
+        {guides.y.map((gy, i) => (
+          <div
+            key={`gy-${i}`}
+            className="scripture-canvas-guide scripture-canvas-guide-h"
+            style={{
+              top: dragParentGeometry.rect.top + (gy - dragParentGeometry.scrollTop) * zoom,
+              left: dragParentGeometry.rect.left,
+              width: dragParentGeometry.rect.width,
+            }}
+          />
+        ))}
+      </>,
+      document.body
+    )
 
   const dragTargetHandlers = isRoot
     ? {}
@@ -400,25 +584,41 @@ export function FrameNode({
           'scripture-frame',
           isRoot && 'scripture-card',
           childLayout === 'canvas' && 'scripture-frame-canvas',
+          isAutoWidth && 'scripture-auto-width',
+          isAutoHeight && 'scripture-auto-height',
           isSelected && 'scripture-selected',
           isDragOver && 'is-drag-over'
         )}
-        style={{ ...frameOuterStyle(node), ...canvasPositionStyle, ...sizeOverride }}
+        style={{ ...frameOuterStyle(renderedNode), ...canvasPositionStyle }}
         onClick={(e) => {
           e.stopPropagation()
           onSelect(node.id, e.shiftKey)
         }}
+        onPointerEnter={showNodeControls}
+        onPointerLeave={scheduleHideNodeControls}
         onPointerDown={!isRoot && parentChildLayout === 'canvas' ? beginMoveDrag : undefined}
         {...dragTargetHandlers}
       >
-        {!isRoot && !livePosition && !liveSize && (
-          <NodeControls id={node.id} onMove={onMove} onRemove={onRemove} gripHandlers={gripHandlers} showGrip={showGrip} />
+        {!isRoot && (
+          <NodeControls
+            id={node.id}
+            anchorRef={elementRef}
+            visible={controlsVisible && !livePosition && !liveSize}
+            onMove={onMove}
+            onDuplicate={onDuplicate}
+            onRemove={onRemove}
+            gripHandlers={gripHandlers}
+            showGrip={showGrip}
+            showReorderActions={showReorderActions}
+            onPointerEnter={showNodeControls}
+            onPointerLeave={scheduleHideNodeControls}
+          />
         )}
         {/* Flex layout + scroll/clip live on this INNER wrapper, not the
             outer box above -- see frameInnerStyle's doc comment for why:
             NodeControls/resizeHandles/callouts below must never be clipped
-            by this frame's own overflow once it has an explicit height. */}
-        <div ref={contentRef} className="scripture-frame-content" style={frameInnerStyle(node)}>
+            by this frame's own overflow once it has an explicit size. */}
+        <div ref={contentRef} className="scripture-frame-content" style={frameInnerStyle(renderedNode)}>
           {children.length === 0 && (
             <div className="scripture-empty-frame">Empty frame. Select it and add a block.</div>
           )}
@@ -430,6 +630,7 @@ export function FrameNode({
               selectedIds={selectedIds}
               onSelect={onSelect}
               onMove={onMove}
+              onDuplicate={onDuplicate}
               onRemove={onRemove}
               onReorder={onReorder}
               onResizeNode={onResizeNode}
@@ -464,24 +665,42 @@ export function FrameNode({
     <div
       ref={elementRef}
       data-node-id={node.id}
-      className={classNames('scripture-leaf', isSelected && 'scripture-selected', isDragOver && 'is-drag-over')}
-      style={{ ...outerBoxStyle(node), ...canvasPositionStyle, ...sizeOverride }}
+      className={classNames(
+        'scripture-leaf',
+        isAutoWidth && 'scripture-auto-width',
+        isAutoHeight && 'scripture-auto-height',
+        isSelected && 'scripture-selected',
+        isDragOver && 'is-drag-over'
+      )}
+      style={{ ...outerBoxStyle(renderedNode), ...canvasPositionStyle }}
       onClick={(e) => {
         e.stopPropagation()
         onSelect(node.id, e.shiftKey)
       }}
       onDoubleClick={needsEditGate ? handleDoubleClick : undefined}
+      onPointerEnter={showNodeControls}
+      onPointerLeave={scheduleHideNodeControls}
       onPointerDown={canDragViaBody ? beginMoveDrag : undefined}
       {...dragTargetHandlers}
     >
-      {!livePosition && !liveSize && (
-        <NodeControls id={node.id} onMove={onMove} onRemove={onRemove} gripHandlers={gripHandlers} showGrip={showGrip} />
-      )}
+      <NodeControls
+        id={node.id}
+        anchorRef={elementRef}
+        visible={controlsVisible && !livePosition && !liveSize}
+        onMove={onMove}
+        onDuplicate={onDuplicate}
+        onRemove={onRemove}
+        gripHandlers={gripHandlers}
+        showGrip={showGrip}
+        showReorderActions={showReorderActions}
+        onPointerEnter={showNodeControls}
+        onPointerLeave={scheduleHideNodeControls}
+      />
       {/* Scroll/clip lives on this INNER wrapper, not the outer box above --
           see contentOverflowStyle's doc comment: NodeControls/resizeHandles
           below must never be clipped by this block's own overflow once it
-          has an explicit height. */}
-      <div ref={contentRef} className="scripture-leaf-content" style={contentOverflowStyle(node)}>
+          has an explicit size. */}
+      <div ref={contentRef} className="scripture-leaf-content" style={contentOverflowStyle(renderedNode)}>
         {node.kind === 'image' ? (
           <ImageBlock
             src={node.src ?? ''}

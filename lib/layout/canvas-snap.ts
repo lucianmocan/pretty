@@ -16,11 +16,67 @@ export interface SnapResult {
   guides: { x: number[]; y: number[] }
 }
 
+interface SnapCandidate {
+  position: number
+  guide: number
+  distance: number
+}
+
+function nearestAlignment(
+  draggedStart: number,
+  draggedSize: number,
+  siblingStartsAndSizes: Array<[start: number, size: number]>,
+  threshold: number,
+  fixedCandidates: Array<{ position: number; guide: number }> = []
+): { position: number; guides: number[] } | null {
+  const draggedOffsets = [0, draggedSize / 2, draggedSize]
+  // Fixed candidates come first so a parent-center alignment wins an exact
+  // distance tie with a sibling. That makes the artboard's primary axes feel
+  // stable instead of changing based on sibling DOM order.
+  const candidates: SnapCandidate[] = fixedCandidates.map(({ position, guide }) => ({
+    position,
+    guide,
+    distance: Math.abs(position - draggedStart),
+  }))
+
+  for (const [siblingStart, siblingSize] of siblingStartsAndSizes) {
+    const siblingEdges = [siblingStart, siblingStart + siblingSize / 2, siblingStart + siblingSize]
+    for (const draggedOffset of draggedOffsets) {
+      for (const guide of siblingEdges) {
+        const position = guide - draggedOffset
+        candidates.push({
+          position,
+          guide,
+          distance: Math.abs(position - draggedStart),
+        })
+      }
+    }
+  }
+
+  const nearest = candidates.reduce<SnapCandidate | null>(
+    (best, candidate) => (!best || candidate.distance < best.distance ? candidate : best),
+    null
+  )
+  if (!nearest || nearest.distance > threshold) return null
+
+  // Equal-sized boxes often align on two or three edges at once. Preserve
+  // every guide belonging to the winning position, but never show guides
+  // from other nearby candidates that did not actually determine the snap.
+  const guides = Array.from(
+    new Set(
+      candidates
+        .filter((candidate) => Math.abs(candidate.position - nearest.position) < 0.001)
+        .map((candidate) => candidate.guide)
+    )
+  )
+  return { position: nearest.position, guides }
+}
+
 /**
  * Snaps a dragged box's position to the nearest grid line, then to sibling
- * edges/centers if within a small threshold (a sibling alignment match wins
- * over plain grid snapping) -- the same "smart guides" technique design
- * tools use, scoped down to axis-aligned edge/center comparisons only.
+ * edges/centers or the parent frame's center axes if within a small threshold
+ * (an alignment match wins over plain grid snapping) -- the same "smart
+ * guides" technique design tools use, scoped down to axis-aligned comparisons.
  *
  * When `containerSize` is given, the result is also clamped so the box's
  * edges never leave [0, containerSize] on either axis -- the exact border
@@ -32,36 +88,47 @@ export interface SnapResult {
  * scrollLeft can never reach back to 0 or below to reveal it again. That's
  * functionally indistinguishable from the block just disappearing, even
  * though nothing is technically clipped by an overflow:hidden rule.
+ *
+ * `snapThreshold` is expressed in the same parent-local coordinate system as
+ * the boxes. The caller divides the desired screen-pixel threshold by canvas
+ * zoom, keeping the interaction equally forgiving at every zoom level.
  */
-export function snapPosition(dragged: Box, siblings: Box[], containerSize?: { width: number; height: number }): SnapResult {
+export function snapPosition(
+  dragged: Box,
+  siblings: Box[],
+  containerSize?: { width: number; height: number },
+  snapThreshold = SNAP_THRESHOLD
+): SnapResult {
   let x = Math.round(dragged.x / GRID_SIZE) * GRID_SIZE
   let y = Math.round(dragged.y / GRID_SIZE) * GRID_SIZE
-  const guideX: number[] = []
-  const guideY: number[] = []
+  let guideX: number[] = []
+  let guideY: number[] = []
 
-  const draggedEdgesX = [dragged.x, dragged.x + dragged.width / 2, dragged.x + dragged.width]
-  const draggedEdgesY = [dragged.y, dragged.y + dragged.height / 2, dragged.y + dragged.height]
-
-  for (const sib of siblings) {
-    const sibEdgesX = [sib.x, sib.x + sib.width / 2, sib.x + sib.width]
-    const sibEdgesY = [sib.y, sib.y + sib.height / 2, sib.y + sib.height]
-
-    for (const dEdge of draggedEdgesX) {
-      for (const sx of sibEdgesX) {
-        if (Math.abs(dEdge - sx) <= SNAP_THRESHOLD) {
-          x = sx - (dEdge - dragged.x)
-          guideX.push(sx)
-        }
-      }
-    }
-    for (const dEdge of draggedEdgesY) {
-      for (const sy of sibEdgesY) {
-        if (Math.abs(dEdge - sy) <= SNAP_THRESHOLD) {
-          y = sy - (dEdge - dragged.y)
-          guideY.push(sy)
-        }
-      }
-    }
+  const xAlignment = nearestAlignment(
+    dragged.x,
+    dragged.width,
+    siblings.map((sibling): [number, number] => [sibling.x, sibling.width]),
+    snapThreshold,
+    containerSize
+      ? [{ position: (containerSize.width - dragged.width) / 2, guide: containerSize.width / 2 }]
+      : []
+  )
+  const yAlignment = nearestAlignment(
+    dragged.y,
+    dragged.height,
+    siblings.map((sibling): [number, number] => [sibling.y, sibling.height]),
+    snapThreshold,
+    containerSize
+      ? [{ position: (containerSize.height - dragged.height) / 2, guide: containerSize.height / 2 }]
+      : []
+  )
+  if (xAlignment) {
+    x = xAlignment.position
+    guideX = xAlignment.guides
+  }
+  if (yAlignment) {
+    y = yAlignment.position
+    guideY = yAlignment.guides
   }
 
   if (containerSize) {
@@ -69,8 +136,14 @@ export function snapPosition(dragged: Box, siblings: Box[], containerSize?: { wi
     // still clamps to the top-left corner instead of a negative position.
     const maxX = Math.max(0, containerSize.width - dragged.width)
     const maxY = Math.max(0, containerSize.height - dragged.height)
-    x = Math.min(Math.max(0, x), maxX)
-    y = Math.min(Math.max(0, y), maxY)
+    const clampedX = Math.min(Math.max(0, x), maxX)
+    const clampedY = Math.min(Math.max(0, y), maxY)
+    // A boundary clamp can override the sibling snap. If so, suppress its
+    // guide—the line must only describe the position the block will land at.
+    if (clampedX !== x) guideX = []
+    if (clampedY !== y) guideY = []
+    x = clampedX
+    y = clampedY
   }
 
   return { x, y, guides: { x: guideX, y: guideY } }

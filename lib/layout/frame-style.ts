@@ -20,8 +20,8 @@ export function sizeStyle(node: LayoutNode): CSSProperties {
   }
   if (node.height != null) {
     style.height = `${node.height}px`
-    style.overflow = 'auto'
   }
+  if (node.width != null || node.height != null) style.overflow = 'auto'
   return style
 }
 
@@ -48,7 +48,7 @@ export function frameStyle(node: LayoutNode): CSSProperties {
  *
  * The live editor (components/canvas/frame-node.tsx) DOES have floating
  * chrome deliberately positioned outside a node's own box (NodeControls,
- * ResizeHandles) -- once a node gets an explicit height, sizeStyle()'s
+ * ResizeHandles) -- once a node gets an explicit size, sizeStyle()'s
  * `overflow: auto` would silently clip that chrome the moment it extends
  * past the box, with no visual sign why (found via a real repro: resize a
  * block once, its hover controls become permanently unclickable/invisible
@@ -69,11 +69,16 @@ export function outerBoxStyle(node: LayoutNode): CSSProperties {
   return style
 }
 
-/** height:'100%' fills the outer box's own explicit height exactly (a plain
- * block/flex child doesn't stretch to fill a parent's height by default,
- * unlike width) -- only meaningful once that outer height is actually set. */
+/** Keeps resized content inside the outer geometry box. Width-only resizing
+ * needs overflow just as much as height-only resizing does: a long `pre`
+ * line otherwise paints through the right edge with no scrollbar or fade. */
 export function contentOverflowStyle(node: LayoutNode): CSSProperties {
-  return node.height != null ? { height: '100%', overflow: 'auto' } : {}
+  if (node.width == null && node.height == null) return {}
+  return {
+    ...(node.width != null && { width: '100%', minWidth: 0 }),
+    ...(node.height != null && { height: '100%', minHeight: 0 }),
+    overflow: 'auto',
+  }
 }
 
 export function frameOuterStyle(node: LayoutNode): CSSProperties {
@@ -92,25 +97,17 @@ export function frameInnerStyle(node: LayoutNode): CSSProperties {
     padding: node.padding ?? 0,
     alignItems: node.align ?? 'flex-start',
     justifyContent: node.justify ?? 'flex-start',
+    // Canvas children are absolute relative to this content viewport. Keeping
+    // the wrapper in normal flow preserves a frame's intrinsic width when
+    // only its height is explicit; an absolute `inset: 0` wrapper made such
+    // frames collapse horizontally because it contributed no intrinsic size.
+    position: node.childLayout === 'canvas' ? 'relative' : undefined,
   }
-  // Canvas-mode children are absolutely positioned relative to THIS
-  // wrapper, and frame-node.tsx's beginMoveDrag/ResizeHandles measure it
-  // (via elementRef.parentElement) to clamp drag bounds -- both need it to
-  // reliably fill the OUTER box's actual rendered size, not just its own
-  // content. `height: 100%` doesn't do that reliably: per the CSS spec, a
-  // percentage height only resolves against an ancestor's own EXPLICIT
-  // `height`, not one merely clamped upward by `min-height` -- exactly the
-  // case for an un-resized canvas-mode frame, which relies entirely on
-  // .scripture-frame-canvas's CSS min-height floor. `position: absolute;
-  // inset: 0` fills the outer box's actual used size regardless of which
-  // of those established it (explicit resize or the CSS floor).
-  //
-  // The one case that must stay in NORMAL FLOW instead: a flex-mode frame
-  // with no explicit height, where the outer box's own auto-height is
-  // genuinely meant to be driven BY this wrapper's content -- an
-  // absolutely-positioned (out-of-flow) wrapper could no longer do that.
-  if (node.height != null || node.childLayout === 'canvas') {
-    return { ...base, position: 'absolute', inset: 0, overflow: node.height != null ? 'auto' : undefined }
+  if (node.width == null && node.height == null) return base
+  return {
+    ...base,
+    ...(node.width != null && { width: '100%', minWidth: 0 }),
+    ...(node.height != null && { height: '100%', minHeight: 0 }),
+    overflow: 'auto',
   }
-  return base
 }

@@ -37,7 +37,12 @@ export function BubbleToolbar({ editor }: { editor: Editor }) {
       editor={editor}
       className="scripture-bubble-menu"
       shouldShow={({ state }) => !state.selection.empty}
-      options={{ placement: 'top', offset: 10, flip: true }}
+      // Tiptap otherwise appends this beside the editor, where a resized
+      // block's inner overflow container clips it. Portaling to body with
+      // fixed positioning keeps it anchored to the selection while letting
+      // it float across every nested frame boundary.
+      appendTo={() => document.body}
+      options={{ placement: 'top', offset: 10, flip: true, strategy: 'fixed' }}
     >
       <Tooltip>
         <TooltipTrigger asChild>

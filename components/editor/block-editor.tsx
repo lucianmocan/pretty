@@ -24,18 +24,15 @@ function toProseMirrorNodes(view: EditorView, nodes: ProseMirrorTextNode[]) {
   return nodes.map((n) => view.state.schema.text(n.text, n.marks?.map((m) => view.state.schema.marks[m.type].create(m.attrs))))
 }
 
-/** Replaces the whole block's content with freshly tokenized text -- used
- * both for the initial paste and for re-highlighting existing text when the
+/** Replaces the whole block's content with freshly tokenized text when the
  * language/theme changes (this intentionally drops any manual bold/italic/
- * highlight/font-size marks, same trade-off as a fresh paste).
+ * highlight/font-size marks, same trade-off as a fresh re-highlight).
  *
  * `selection`, when given, is restored after the replace -- for the
  * language/theme-change caller, the text itself hasn't changed (same
  * characters, just freshly re-tokenized marks), so the anchor/head positions
  * captured just before calling this are still valid and still refer to the
- * same underlying characters afterward. The paste caller never passes this:
- * a paste's content is genuinely new, so there's no "same position" to
- * preserve. */
+ * same underlying characters afterward. */
 function replaceWithTokenizedContent(
   view: EditorView,
   language: string,
@@ -162,7 +159,7 @@ export function BlockEditor({
 
   // Per-line incremental re-highlighting while typing (see retokenizeChangedLines
   // below). `isRetokenizingRef` guards against reacting to our OWN programmatic
-  // dispatches (paste, language/theme change, or this feature's own replace) --
+  // dispatches (language/theme change or this feature's own replace) --
   // each of those triggers onUpdate again since it's a normal transaction
   // dispatch through the same EditorView. `prevTextRef` is the baseline the
   // next genuine edit gets diffed against; it's resynced (not diffed) whenever
@@ -184,6 +181,14 @@ export function BlockEditor({
   const retokenizeGenerationRef = useRef(0)
 
   useEffect(() => {
+    const generationRef = retokenizeGenerationRef
+    return () => {
+      if (retokenizeTimerRef.current) clearTimeout(retokenizeTimerRef.current)
+      generationRef.current++
+    }
+  }, [])
+
+  useEffect(() => {
     let cancelled = false
     getYDoc(docId).synced.then(() => {
       if (!cancelled) setSynced(true)
@@ -194,6 +199,11 @@ export function BlockEditor({
   }, [docId])
 
   async function retokenizeChangedLines(editor: Editor) {
+    // Replacing marked text while the browser is painting a range selection
+    // makes that selection visibly collapse and reappear. Wait until the
+    // selection is collapsed; onSelectionUpdate schedules the pending pass.
+    if (!editor.state.selection.empty) return
+
     const newText = editor.state.doc.textContent
     const oldText = prevTextRef.current ?? newText
     if (oldText === newText) return
@@ -206,12 +216,19 @@ export function BlockEditor({
         resolveThemeArg(themeRef.current)
       )
 
-      // A NEWER call (or a paste/language/theme change) already started
-      // since this one began -- this response's from/to were computed
-      // against a document snapshot that's no longer current, so applying
-      // it now would either corrupt content or clobber state the newer
-      // path already set correctly. Let that newer path be authoritative.
-      if (generation !== retokenizeGenerationRef.current) return
+      // A newer call/paste/theme change, OR simply more keystrokes that have
+      // not reached their next debounce yet, can make this response stale.
+      // In both cases its ranges were computed for a document snapshot that
+      // no longer exists; applying them can throw an out-of-range error or
+      // overwrite newer text. The pending debounce will tokenize the latest
+      // snapshot instead.
+      if (
+        generation !== retokenizeGenerationRef.current ||
+        editor.state.doc.textContent !== newText ||
+        !editor.state.selection.empty
+      ) {
+        return
+      }
 
       const oldLines = oldText.split('\n')
       const newLines = newText.split('\n')
@@ -333,6 +350,14 @@ export function BlockEditor({
     }
   }
 
+  function scheduleRetokenize(editor: Editor) {
+    if (retokenizeTimerRef.current) clearTimeout(retokenizeTimerRef.current)
+    retokenizeTimerRef.current = setTimeout(() => {
+      retokenizeTimerRef.current = null
+      if (!editor.isDestroyed) void retokenizeChangedLines(editor)
+    }, RETOKENIZE_DEBOUNCE_MS)
+  }
+
   const editor = useEditor(
     {
       immediatelyRender: false,
@@ -349,38 +374,20 @@ export function BlockEditor({
         handlePaste(view, event) {
           if (kind !== 'code') return false // text blocks use Tiptap's default paste
 
-          const text = event.clipboardData?.getData('text/plain')
+          const text = event.clipboardData?.getData('text/plain').replace(/\r\n?/g, '\n')
           if (!text) return false
           event.preventDefault()
 
-          const lang = languageRef.current ?? 'plaintext'
-          const themeName = themeRef.current
-
-          // Invalidates any slower, still-in-flight typing-triggered
-          // retokenizeChangedLines call -- a paste replaces the whole block,
-          // so that call's from/to (computed against a now-stale snapshot)
-          // must not be allowed to land afterward and clobber this.
+          // Paste behaves like a normal text editor: insert at the caret, or
+          // replace only the active selection. Syntax colors are applied by
+          // the same debounced incremental pass used for regular typing.
+          if (retokenizeTimerRef.current) {
+            clearTimeout(retokenizeTimerRef.current)
+            retokenizeTimerRef.current = null
+          }
           retokenizeGenerationRef.current++
-          tokenizeCode(text, lang, resolveThemeArg(themeName))
-            .then(({ lines, themeBg }) => {
-              isRetokenizingRef.current = true
-              try {
-                replaceWithTokenizedContent(view, lang, lines)
-              } finally {
-                isRetokenizingRef.current = false
-              }
-              prevTextRef.current = view.state.doc.textContent
-              setRootBackgroundIfAuto(ydoc, themeBg)
-            })
-            .catch((err) => {
-              console.error('Failed to tokenize pasted code, inserting as plain text', err)
-              const node = view.state.schema.nodes.annotatedCodeBlock.create(
-                { language: lang },
-                text.length ? view.state.schema.text(text) : null
-              )
-              const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, node)
-              view.dispatch(tr)
-            })
+          const { from, to } = view.state.selection
+          view.dispatch(view.state.tr.insertText(text, from, to).scrollIntoView())
 
           return true
         },
@@ -388,16 +395,31 @@ export function BlockEditor({
       onUpdate({ editor }) {
         if (kind !== 'code') return
         if (isRetokenizingRef.current || prevTextRef.current === null) {
-          // Our own programmatic dispatch (paste/theme-change/incremental
-          // replace) or the very first update after content was seeded --
+          // Our own programmatic dispatch (theme-change/incremental replace)
+          // or the very first update after content was seeded --
           // resync the baseline, don't treat it as an edit to re-highlight.
           prevTextRef.current = editor.state.doc.textContent
           return
         }
-        if (retokenizeTimerRef.current) clearTimeout(retokenizeTimerRef.current)
-        retokenizeTimerRef.current = setTimeout(() => {
-          retokenizeChangedLines(editor)
-        }, RETOKENIZE_DEBOUNCE_MS)
+        scheduleRetokenize(editor)
+      },
+      onSelectionUpdate({ editor }) {
+        if (kind !== 'code') return
+        if (!editor.state.selection.empty) {
+          if (retokenizeTimerRef.current) {
+            clearTimeout(retokenizeTimerRef.current)
+            retokenizeTimerRef.current = null
+          }
+          // Also invalidates a tokenizer request that was already in flight.
+          retokenizeGenerationRef.current++
+          return
+        }
+        if (
+          prevTextRef.current !== null &&
+          prevTextRef.current !== editor.state.doc.textContent
+        ) {
+          scheduleRetokenize(editor)
+        }
       },
       onBlur({ editor }) {
         if (editor.state.doc.textContent.trim().length === 0) {
@@ -458,6 +480,7 @@ export function BlockEditor({
       // every already-populated block reloaded from a saved document.
       if (editable) editor.commands.focus()
     }
+    if (kind === 'code') prevTextRef.current = editor.state.doc.textContent
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, synced])
 

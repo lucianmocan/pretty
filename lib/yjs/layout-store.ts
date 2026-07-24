@@ -1,5 +1,5 @@
 import * as Y from 'yjs'
-import { LAYOUT_MAP, LAYOUT_MUTATION_ORIGIN } from './doc-store'
+import { blockFragmentName, LAYOUT_MAP, LAYOUT_MUTATION_ORIGIN } from './doc-store'
 import {
   DEFAULT_FRAME_PROPS,
   DEFAULT_ROOT_FRAME_PROPS,
@@ -12,6 +12,8 @@ import {
   type CalloutAnnotation,
 } from '@/lib/layout/types'
 import { toggleLine } from '@/lib/layout/line-ranges'
+import { MIN_NODE_SIZE, type PositionPatch, type SizePatch } from '@/lib/layout/resize-geometry'
+import { planNodeDuplicate } from '@/lib/layout/duplicate-node'
 
 export const ROOT_ID = 'root'
 
@@ -120,6 +122,7 @@ function findNodeMap(node: Y.Map<unknown>, id: string): Y.Map<unknown> | null {
 }
 
 interface ParentInfo {
+  parent: Y.Map<unknown>
   children: Y.Array<Y.Map<unknown>>
   index: number
 }
@@ -129,7 +132,7 @@ function findParentInfo(node: Y.Map<unknown>, id: string): ParentInfo | null {
   if (!children) return null
   const arr = children.toArray()
   const index = arr.findIndex((child) => child.get('id') === id)
-  if (index !== -1) return { children, index }
+  if (index !== -1) return { parent: node, children, index }
   for (const child of arr) {
     const found = findParentInfo(child, id)
     if (found) return found
@@ -308,6 +311,43 @@ export function moveNode(doc: Y.Doc, id: string, direction: 'up' | 'down') {
 }
 
 /**
+ * Deep-duplicates one layout node immediately after its source. Code/text
+ * editor bodies live in separate top-level Y.XmlFragments, so those are
+ * cloned alongside the recursively re-keyed layout tree in the same
+ * transaction. Canvas duplicates receive a small paste-style offset.
+ */
+export function duplicateNode(doc: Y.Doc, id: string): string | null {
+  if (id === ROOT_ID) return null
+  const root = ensureRootFrame(doc)
+  const info = findParentInfo(root, id)
+  if (!info) return null
+
+  const source = info.children.get(info.index).toJSON() as LayoutNode
+  const isCanvas = info.parent.get('childLayout') === 'canvas'
+  const plan = planNodeDuplicate(source, {
+    offset: isCanvas ? { x: 24, y: 24 } : undefined,
+    resetPosition: !isCanvas,
+  })
+
+  doc.transact(() => {
+    for (const { sourceId, duplicateId } of plan.contentPairs) {
+      const sourceFragment = doc.getXmlFragment(blockFragmentName(sourceId))
+      const duplicateFragment = doc.getXmlFragment(blockFragmentName(duplicateId))
+      // Tiptap collaboration fragments contain only XmlElement/XmlText.
+      // Avoid runtime instanceof checks here: two bundled Yjs entrypoints
+      // can make an otherwise-valid shared type fail constructor identity.
+      const clonedContent = sourceFragment.toArray().map((item) => item.clone()) as Array<
+        Y.XmlElement | Y.XmlText
+      >
+      duplicateFragment.insert(0, clonedContent)
+    }
+    info.children.insert(info.index + 1, [buildYNode(plan.node)])
+  }, LAYOUT_MUTATION_ORIGIN)
+
+  return plan.node.id
+}
+
+/**
  * Drag-and-drop reordering: moves `draggedId` to sit where `targetId`
  * currently is, among the same parent's children. Cross-parent dragging
  * (moving a block into a different frame) isn't supported yet -- dropping
@@ -441,20 +481,50 @@ export function updateNodeSize(doc: Y.Doc, id: string, size: { width?: number | 
   const node = findNodeMap(root, id)
   if (!node) return
   doc.transact(() => {
-    if ('width' in size) node.set('width', size.width ?? null)
-    if ('height' in size) node.set('height', size.height ?? null)
+    if ('width' in size) {
+      node.set('width', size.width == null ? null : Math.max(MIN_NODE_SIZE, Math.round(size.width)))
+    }
+    if ('height' in size) {
+      node.set('height', size.height == null ? null : Math.max(MIN_NODE_SIZE, Math.round(size.height)))
+    }
   }, LAYOUT_MUTATION_ORIGIN)
 }
 
 /** Explicit position, only meaningful while the node's parent frame has
- * childLayout: 'canvas' -- works on any node kind, mirrors updateNodeSize. */
-export function updateNodePosition(doc: Y.Doc, id: string, position: { x: number; y: number }) {
+ * childLayout: 'canvas' -- works on any node kind, mirrors updateNodeSize.
+ * Partial: a resize-driven reposition only ever supplies the axis actually
+ * being dragged (see ResizeHandlesProps.onResize), so the other axis's
+ * stored value must be left untouched, not overwritten with a re-measured
+ * value that could differ from it by a rounding pixel or two. */
+export function updateNodePosition(doc: Y.Doc, id: string, position: { x?: number; y?: number }) {
   const root = ensureRootFrame(doc)
   const node = findNodeMap(root, id)
   if (!node) return
   doc.transact(() => {
-    node.set('x', position.x)
-    node.set('y', position.y)
+    if (position.x !== undefined) node.set('x', position.x)
+    if (position.y !== undefined) node.set('y', position.y)
+  }, LAYOUT_MUTATION_ORIGIN)
+}
+
+/**
+ * Commits the size and optional near-edge position from one resize gesture
+ * in a single Yjs transaction. Besides producing one coherent collaborative
+ * update, this makes one drag exactly one undoable layout operation.
+ */
+export function updateNodeGeometry(
+  doc: Y.Doc,
+  id: string,
+  size: SizePatch,
+  position?: PositionPatch
+) {
+  const root = ensureRootFrame(doc)
+  const node = findNodeMap(root, id)
+  if (!node) return
+  doc.transact(() => {
+    if (size.width !== undefined) node.set('width', Math.max(MIN_NODE_SIZE, Math.round(size.width)))
+    if (size.height !== undefined) node.set('height', Math.max(MIN_NODE_SIZE, Math.round(size.height)))
+    if (position?.x !== undefined) node.set('x', Math.max(0, Math.round(position.x)))
+    if (position?.y !== undefined) node.set('y', Math.max(0, Math.round(position.y)))
   }, LAYOUT_MUTATION_ORIGIN)
 }
 

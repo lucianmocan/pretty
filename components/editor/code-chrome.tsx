@@ -172,7 +172,11 @@ export function CodeChrome({
       <ChromeBar chromeStyle={chromeStyle} filename={filename} customChrome={customChrome} />
       <div className="scripture-code-body">
         {showLineNumbers && (
-          <div className="scripture-line-numbers" aria-hidden="true">
+          <div
+            className="scripture-line-numbers"
+            aria-hidden={onLineClick ? undefined : 'true'}
+            data-node-drag-ignore={onLineClick ? 'true' : undefined}
+          >
             {lineNumbers.map((lineNumber) => (
               <div
                 key={lineNumber}

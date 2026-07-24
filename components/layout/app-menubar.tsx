@@ -17,9 +17,6 @@ interface AppMenubarProps {
   docName: string
   onRename: (name: string) => void
   onAddPage: () => void
-  onExportPdf: () => void
-  onExportPng: () => void
-  exporting: boolean
   onZoomIn: () => void
   onZoomOut: () => void
   onZoomReset: () => void
@@ -32,9 +29,6 @@ export function AppMenubar({
   docName,
   onRename,
   onAddPage,
-  onExportPdf,
-  onExportPng,
-  exporting,
   onZoomIn,
   onZoomOut,
   onZoomReset,
@@ -67,18 +61,6 @@ export function AppMenubar({
             <MenubarSeparator />
             <MenubarItem onClick={onZoomReset}>Zoom to 100%</MenubarItem>
             <MenubarItem onClick={onRecenter}>Recenter</MenubarItem>
-          </MenubarContent>
-        </MenubarMenu>
-
-        <MenubarMenu>
-          <MenubarTrigger>Export</MenubarTrigger>
-          <MenubarContent>
-            <MenubarItem onClick={onExportPdf} disabled={exporting}>
-              Export PDF
-            </MenubarItem>
-            <MenubarItem onClick={onExportPng} disabled={exporting}>
-              Export PNG
-            </MenubarItem>
           </MenubarContent>
         </MenubarMenu>
       </Menubar>
