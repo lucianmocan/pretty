@@ -180,7 +180,7 @@ export default function DocumentsDashboardPage() {
           <Link href="/">pretty</Link>
         </h1>
         <Button variant="ghost" size="sm" className="ml-auto" asChild>
-          <a href="https://github.com/lucianmocan/scripture" target="_blank" rel="noopener noreferrer">
+          <a href="https://github.com/lucianmocan/pretty" target="_blank" rel="noopener noreferrer">
             <MessageSquare />
             Feedback
           </a>

@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://trypretty.dev"><strong>Open Pretty</strong></a>
   ·
-  <a href="https://github.com/lucianmocan/scripture/issues">Report a bug or request a feature</a>
+  <a href="https://github.com/lucianmocan/pretty/issues">Report a bug or request a feature</a>
   ·
   <a href="./LICENSE">GPL-3.0</a>
 </p>
@@ -82,8 +82,8 @@ Pretty is a Next.js App Router application written in TypeScript. Its editor com
 You will need Node.js 20.9 or newer.
 
 ```bash
-git clone https://github.com/lucianmocan/scripture.git
-cd scripture
+git clone https://github.com/lucianmocan/pretty.git
+cd pretty
 npm install
 npm run dev
 ```
@@ -107,7 +107,7 @@ If Playwright does not have a browser installed yet, run `npx playwright install
 
 Bug reports, focused fixes, and thoughtful feature proposals are welcome.
 
-1. [Open an issue](https://github.com/lucianmocan/scripture/issues) for a bug or larger idea so the problem is clear before implementation begins.
+1. [Open an issue](https://github.com/lucianmocan/pretty/issues) for a bug or larger idea so the problem is clear before implementation begins.
 2. Fork the repository and create a short-lived branch.
 3. Keep the change focused and add coverage for behavior that could regress.
 4. Run the relevant tests, lint, and production build.
