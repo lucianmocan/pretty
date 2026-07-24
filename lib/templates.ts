@@ -27,20 +27,21 @@ export const TEMPLATES: Template[] = [
     id: 'single',
     name: 'Single block',
     description: 'One code block, ready to paste into.',
+    rootProps: { childLayout: 'flex' },
     children: () => [codeChild()],
   },
   {
     id: 'before-after',
     name: 'Before / After',
     description: 'Two code blocks side by side, for comparisons.',
-    rootProps: { direction: 'row' },
+    rootProps: { childLayout: 'flex', direction: 'row' },
     children: () => [codeChild(), codeChild()],
   },
   {
     id: 'three-up',
     name: '3-up',
     description: 'Three code blocks side by side.',
-    rootProps: { direction: 'row' },
+    rootProps: { childLayout: 'flex', direction: 'row' },
     children: () => [codeChild(), codeChild(), codeChild()],
   },
 ]

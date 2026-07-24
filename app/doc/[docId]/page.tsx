@@ -2,14 +2,13 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Plus, X } from 'lucide-react'
 import { FrameNode } from '@/components/canvas/frame-node'
 import { CanvasRoot } from '@/components/canvas/canvas-root'
 import { InspectorPanel } from '@/components/canvas/inspector-panel'
 import { ZoomControls } from '@/components/canvas/zoom-controls'
 import { CanvasToolbar } from '@/components/canvas/canvas-toolbar'
 import { useLayoutTree } from '@/lib/use-layout-tree'
-import { getYDoc, encodeDocState } from '@/lib/yjs/doc-store'
+import { getYDoc, encodeDocState, getUndoManager } from '@/lib/yjs/doc-store'
 import {
   moveNode,
   duplicateNode,
@@ -18,6 +17,7 @@ import {
   updateNodeGeometry,
   updateNodePosition,
   cycleGutterLine,
+  addBlock,
   ROOT_ID,
   type GutterClickMode,
 } from '@/lib/yjs/layout-store'
@@ -28,13 +28,17 @@ import {
   touchDocument,
   getPageIds,
   addPage,
-  removePage,
+  reorderPages,
 } from '@/lib/documents/manifest'
 import { AppMenubar } from '@/components/layout/app-menubar'
 import { EditorRegistryProvider } from '@/components/editor/editor-registry'
-import { SearchReplacePanel } from '@/components/editor/search-replace-panel'
 import { CustomizeDialog } from '@/components/customize/customize-dialog'
-import { Button } from '@/components/ui/button'
+import { LayersPanel } from '@/components/layout/layers-panel'
+import { GeometryRegistryProvider } from '@/components/canvas/geometry-registry'
+import { deletePage } from '@/lib/documents/delete-service'
+import { findNode, findParent } from '@/lib/layout/tree-utils'
+import { deleteUploadedImage } from '@/lib/images/client'
+import { refreshDocumentPreview } from '@/lib/documents/preview'
 
 const ZOOM_MIN = 0.1
 const ZOOM_MAX = 4
@@ -60,6 +64,8 @@ export default function DocumentEditorPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [exporting, setExporting] = useState<'pdf' | 'png' | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
+  const [operationError, setOperationError] = useState<string | null>(null)
+  const [saveState, setSaveState] = useState<'saving' | 'saved'>('saved')
   const [docName, setDocName] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [gutterClickMode, setGutterClickMode] = useState<GutterClickMode>('highlight')
@@ -81,6 +87,9 @@ export default function DocumentEditorPage() {
   // user's own manual zoom every time naturalSize changes (e.g. after
   // adding/resizing a block), not just on first load. Reset per page switch.
   const autoFitDoneRef = useRef(false)
+  const spacePressedRef = useRef(false)
+  const [spacePressed, setSpacePressed] = useState(false)
+  const activePanCleanupRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     const meta = getDocumentMeta(docId)
@@ -98,23 +107,34 @@ export default function DocumentEditorPage() {
     if (notFound) router.replace('/')
   }, [notFound, router])
 
-  // Bump "last updated" on any change to the ACTIVE page -- layout tree or
+  // Bump "last updated" and expose local persistence feedback on any change
+  // to the active page -- layout tree or any block's content.
   // any block's content -- doc.on('update') fires for every transaction on
   // the whole Y.Doc regardless of which shared type changed. Only one
   // page's components are ever mounted/edited at a time, so watching just
   // that page's doc is sufficient.
   useEffect(() => {
     if (!activePageId) return
-    const { doc } = getYDoc(activePageId)
+    const { doc, synced } = getYDoc(activePageId)
     let timeout: ReturnType<typeof setTimeout> | null = null
+    let cancelled = false
+    void synced.then(() => {
+      if (!cancelled) setSaveState('saved')
+    })
     const handler = () => {
+      setSaveState('saving')
       if (timeout) clearTimeout(timeout)
-      timeout = setTimeout(() => touchDocument(docId), 800)
+      timeout = setTimeout(() => {
+        touchDocument(docId)
+        setSaveState('saved')
+        void refreshDocumentPreview(docId)
+      }, 800)
     }
     doc.on('update', handler)
     return () => {
       doc.off('update', handler)
       if (timeout) clearTimeout(timeout)
+      cancelled = true
     }
   }, [docId, activePageId])
 
@@ -154,27 +174,122 @@ export default function DocumentEditorPage() {
     return () => el.removeEventListener('wheel', onWheel)
   }, [activePageId, tree])
 
-  // Delete/Backspace removes the current selection -- the Figma-style
-  // direct-manipulation model has no floating Delete button to fall back on
-  // for canvas-mode blocks anymore. Guarded on the active element NOT being
-  // a real text input/contenteditable, so this never fires while the user
-  // is genuinely typing (in a code/text block mid-edit, the Inspector's
-  // Filename field, the search/replace box, etc) -- only when a block is
-  // merely *selected*.
+  // One guarded keyboard dispatcher owns canvas-level shortcuts. Editors,
+  // form fields, and dialogs keep their native key handling.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return
       const active = document.activeElement
       const tag = active?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || active?.getAttribute('contenteditable') === 'true') return
-      if (selectedIds.length === 0 || selectedIds.includes(ROOT_ID)) return
-      e.preventDefault()
-      for (const id of selectedIds) handleRemove(id)
+      const isTyping =
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        active?.getAttribute('contenteditable') === 'true'
+      const dialogOpen = Boolean(document.querySelector('[data-slot="dialog-content"], [data-slot="alert-dialog-content"]'))
+
+      if (e.code === 'Space' && !isTyping && !dialogOpen) {
+        spacePressedRef.current = true
+        setSpacePressed(true)
+        e.preventDefault()
+      }
+      if (dialogOpen) return
+      if (e.key === 'Escape' && editingId) {
+        e.preventDefault()
+        setEditingId(null)
+        ;(active as HTMLElement | null)?.blur?.()
+        return
+      }
+      if (isTyping) return
+
+      const command = e.metaKey || e.ctrlKey
+      if (command && e.key.toLowerCase() === 'z') {
+        if (!activePageId) return
+        e.preventDefault()
+        const manager = getUndoManager(activePageId)
+        if (e.shiftKey) manager.redo()
+        else manager.undo()
+        return
+      }
+      if (command && e.key.toLowerCase() === 'd') {
+        if (!activePageId) return
+        e.preventDefault()
+        const next = selectedIds
+          .filter((id) => id !== ROOT_ID)
+          .map((id) => duplicateNode(getYDoc(activePageId).doc, id))
+          .filter((id): id is string => Boolean(id))
+        if (next.length > 0) handleSelectionChange(next)
+        return
+      }
+      if (command && e.key.toLowerCase() === 'a') {
+        if (!tree) return
+        e.preventDefault()
+        const selected = findNode(tree, selectedIds[0] ?? ROOT_ID)
+        const parent = selected?.id === ROOT_ID ? selected : selected ? findParent(tree, selected.id) : null
+        handleSelectionChange((parent?.children ?? []).map((child) => child.id))
+        return
+      }
+      if (command && (e.key === '=' || e.key === '+')) {
+        e.preventDefault()
+        handleZoomIn()
+        return
+      }
+      if (command && e.key === '-') {
+        e.preventDefault()
+        handleZoomOut()
+        return
+      }
+      if (command && e.key === '0') {
+        e.preventDefault()
+        handleZoomReset()
+        return
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !selectedIds.includes(ROOT_ID)) {
+        e.preventDefault()
+        for (const id of selectedIds) handleRemove(id)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        handleSelectionChange([ROOT_ID])
+        return
+      }
+      if (e.key === 'Enter' && selectedIds.length === 1 && tree) {
+        const node = findNode(tree, selectedIds[0])
+        if (node?.kind === 'code' || node?.kind === 'text') {
+          e.preventDefault()
+          setEditingId(node.id)
+        }
+        return
+      }
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) && activePageId && tree) {
+        const delta = e.shiftKey ? 10 : 1
+        let changed = false
+        for (const id of selectedIds) {
+          const node = findNode(tree, id)
+          const parent = node ? findParent(tree, id) : null
+          if (!node || parent?.childLayout !== 'canvas') continue
+          changed = true
+          updateNodePosition(getYDoc(activePageId).doc, id, {
+            x: Math.max(0, (node.x ?? 0) + (e.key === 'ArrowLeft' ? -delta : e.key === 'ArrowRight' ? delta : 0)),
+            y: Math.max(0, (node.y ?? 0) + (e.key === 'ArrowUp' ? -delta : e.key === 'ArrowDown' ? delta : 0)),
+          })
+        }
+        if (changed) e.preventDefault()
+      }
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.code !== 'Space') return
+      spacePressedRef.current = false
+      setSpacePressed(false)
     }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedIds, activePageId])
+  }, [selectedIds, activePageId, tree, editingId])
 
   // Switching pages: the new page's tree hasn't loaded yet, so clear
   // selection now -- the effect above re-selects ROOT_ID once it has.
@@ -190,13 +305,16 @@ export default function DocumentEditorPage() {
     handleSwitchPage(pageId)
   }
 
-  function handleRemovePage(pageId: string) {
-    if (pageIds.length <= 1) return
-    removePage(docId, pageId)
+  async function handleRemovePage(pageId: string) {
+    await deletePage(docId, pageId)
     const next = pageIds.filter((id) => id !== pageId)
     setPageIds(next)
-    if (activePageId === pageId) handleSwitchPage(next[0])
-    fetch(`/api/documents/${pageId}`, { method: 'DELETE' }).catch(() => {})
+    if (activePageId === pageId) handleSwitchPage(next[Math.max(0, pageIds.indexOf(pageId) - 1)])
+  }
+
+  function handleReorderPages(next: string[]) {
+    reorderPages(docId, next)
+    setPageIds(next)
   }
 
   function handleRename(name: string) {
@@ -241,6 +359,12 @@ export default function DocumentEditorPage() {
 
   function handleRemove(id: string) {
     if (!activePageId) return
+    const node = tree ? findNode(tree, id) : null
+    if (node?.kind === 'image' && node.src) {
+      void deleteUploadedImage(node.src).catch((cause) => {
+        setOperationError(cause instanceof Error ? cause.message : 'The uploaded image could not be removed.')
+      })
+    }
     removeNode(getYDoc(activePageId).doc, id)
     setSelectedIds((prev) => {
       const next = prev.filter((existing) => existing !== id)
@@ -263,9 +387,59 @@ export default function DocumentEditorPage() {
     updateNodePosition(getYDoc(activePageId).doc, id, position)
   }
 
+  function beginCanvasPan(e: React.PointerEvent<HTMLDivElement>) {
+    const shouldPan = e.button === 1 || (e.button === 0 && spacePressedRef.current)
+    if (!shouldPan || activePanCleanupRef.current) return
+    e.preventDefault()
+    e.stopPropagation()
+    const area = e.currentTarget
+    const pointerId = e.pointerId
+    const startX = e.clientX
+    const startY = e.clientY
+    const startLeft = area.scrollLeft
+    const startTop = area.scrollTop
+    area.dataset.panning = 'true'
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return
+      event.preventDefault()
+      area.scrollLeft = startLeft - (event.clientX - startX)
+      area.scrollTop = startTop - (event.clientY - startY)
+    }
+    const finishPointer = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return
+      cleanup()
+    }
+    const finish = () => cleanup()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') finish()
+    }
+    function cleanup() {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', finishPointer)
+      window.removeEventListener('pointercancel', finishPointer)
+      window.removeEventListener('blur', finish)
+      window.removeEventListener('keydown', onKeyDown)
+      delete area.dataset.panning
+      activePanCleanupRef.current = null
+    }
+    activePanCleanupRef.current = cleanup
+    window.addEventListener('pointermove', onMove, { passive: false })
+    window.addEventListener('pointerup', finishPointer)
+    window.addEventListener('pointercancel', finishPointer)
+    window.addEventListener('blur', finish)
+    window.addEventListener('keydown', onKeyDown)
+  }
+
   function handleGutterClick(blockId: string, lineNumber: number) {
     if (!activePageId) return
     cycleGutterLine(getYDoc(activePageId).doc, blockId, lineNumber, gutterClickMode)
+  }
+
+  function handleAddBlockToFrame(frameId: string, kind: 'code' | 'text' | 'image') {
+    if (!activePageId) return
+    const id = addBlock(getYDoc(activePageId).doc, frameId, kind)
+    handleSelectionChange([id])
+    setEditingId(kind === 'image' ? null : id)
   }
 
   function handleZoomIn() {
@@ -370,56 +544,41 @@ export default function DocumentEditorPage() {
   return (
     <div className="scripture-editor-shell">
       <EditorRegistryProvider>
+        <GeometryRegistryProvider>
         <AppMenubar
           docName={docName ?? ''}
           onRename={handleRename}
-          onAddPage={handleAddPage}
-          onZoomIn={handleZoomIn}
-          onZoomOut={handleZoomOut}
-          onZoomReset={handleZoomReset}
-          onRecenter={handleRecenter}
-        >
-          <SearchReplacePanel />
-        </AppMenubar>
+          saveState={saveState}
+        />
 
         <CustomizeDialog open={customizeOpen} onOpenChange={setCustomizeOpen} initialTab={customizeTab} />
-
-        {pageIds.length > 0 && (
-          <div className="scripture-page-tabs">
-            {pageIds.map((pageId, index) => (
-              <button
-                key={pageId}
-                type="button"
-                className={pageId === activePageId ? 'scripture-page-tab is-active' : 'scripture-page-tab'}
-                onClick={() => handleSwitchPage(pageId)}
-              >
-                Page {index + 1}
-                {pageIds.length > 1 && (
-                  <span
-                    className="scripture-page-tab-remove"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleRemovePage(pageId)
-                    }}
-                    aria-label={`Remove page ${index + 1}`}
-                  >
-                    <X size={12} />
-                  </span>
-                )}
-              </button>
-            ))}
-            <Button variant="ghost" size="icon-xs" onClick={handleAddPage} aria-label="Add page">
-              <Plus />
-            </Button>
+        {operationError && (
+          <div className="scripture-operation-error" role="alert">
+            <span>{operationError}</span>
+            <button type="button" onClick={() => setOperationError(null)} aria-label="Dismiss error">×</button>
           </div>
         )}
 
         {tree ? (
           <div className="scripture-workspace" key={activePageId}>
+            <LayersPanel
+              tree={tree}
+              pageIds={pageIds}
+              activePageId={activePageId as string}
+              selectedIds={selectedIds}
+              onAddPage={handleAddPage}
+              onSelectPage={handleSwitchPage}
+              onDeletePage={handleRemovePage}
+              onReorderPages={handleReorderPages}
+              onSelectNode={handleSelect}
+              onReorderNode={handleReorder}
+            />
             <div
               ref={canvasAreaRef}
-              className="scripture-canvas-area"
+              className={spacePressed ? 'scripture-canvas-area is-pan-ready' : 'scripture-canvas-area'}
               onClick={() => handleSelectionChange([ROOT_ID])}
+              onPointerDownCapture={beginCanvasPan}
+              onAuxClick={(event) => event.preventDefault()}
             >
               <div
                 className="scripture-canvas-scale-box"
@@ -448,6 +607,7 @@ export default function DocumentEditorPage() {
                       docId={activePageId as string}
                       selectedIds={selectedIds}
                       onSelect={handleSelect}
+                      onSelectionChange={handleSelectionChange}
                       onMove={handleMove}
                       onDuplicate={handleDuplicate}
                       onRemove={handleRemove}
@@ -460,6 +620,8 @@ export default function DocumentEditorPage() {
                       zoom={zoom}
                       editingId={editingId}
                       onSetEditing={setEditingId}
+                      parentId={null}
+                      onAddBlockToFrame={handleAddBlockToFrame}
                     />
                   </CanvasRoot>
                 </div>
@@ -496,6 +658,7 @@ export default function DocumentEditorPage() {
         ) : (
           <div className="scripture-editor-loading">Loading…</div>
         )}
+        </GeometryRegistryProvider>
       </EditorRegistryProvider>
     </div>
   )

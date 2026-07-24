@@ -1,4 +1,4 @@
-import { DEFAULT_LANGUAGE, DEFAULT_THEME, DEFAULT_FONT_KEY } from '@/lib/presets'
+import { DEFAULT_LANGUAGE, DEFAULT_THEME, DEFAULT_FONT_KEY, THEME_PREVIEWS } from '@/lib/presets'
 
 export type FlexDirection = 'row' | 'column'
 export type FlexAlign = 'flex-start' | 'center' | 'flex-end' | 'stretch'
@@ -37,10 +37,9 @@ export interface FrameProps {
   align: FlexAlign
   justify: FlexJustify
   background: string | null
-  // Whether `background` should keep following the latest pasted theme's
-  // color. Set to false the moment a user manually edits it in the
-  // Inspector, so a later theme change never silently overwrites their
-  // choice -- see setRootBackgroundIfAuto in lib/yjs/layout-store.ts.
+  // Kept for backwards compatibility with documents created when syntax
+  // themes also controlled the canvas background. New documents never use
+  // that coupling; ensureRootFrame clears the old auto-derived value.
   backgroundAuto: boolean
   radius: number
   childLayout: ChildLayout
@@ -93,6 +92,9 @@ export interface CustomChromeStyle {
 export interface LayoutNode {
   id: string
   kind: LayoutNodeKind
+  // Optional user-facing name shown in the Layers panel. Older documents
+  // omit it and use a content-aware fallback label.
+  label?: string
   // any kind -- explicit size override via resize handles; null/undefined
   // means "size to content" (the default, flex-driven behavior).
   width?: number | null
@@ -120,6 +122,7 @@ export interface LayoutNode {
   // code-only
   language?: string
   theme?: string
+  themeBackground?: string
   fontFamily?: string
   filename?: string
   chromeStyle?: ChromeStyle
@@ -142,6 +145,7 @@ export interface LayoutNode {
 export interface CodeBlockProps {
   language: string
   theme: string
+  themeBackground: string
   fontFamily: string
   filename: string
   chromeStyle: ChromeStyle
@@ -159,6 +163,7 @@ export interface CodeBlockProps {
 export const DEFAULT_CODE_BLOCK_PROPS: CodeBlockProps = {
   language: DEFAULT_LANGUAGE,
   theme: DEFAULT_THEME,
+  themeBackground: THEME_PREVIEWS[DEFAULT_THEME].bg,
   fontFamily: DEFAULT_FONT_KEY,
   filename: '',
   chromeStyle: 'none',
@@ -193,7 +198,7 @@ export const DEFAULT_FRAME_PROPS: FrameProps = {
   align: 'flex-start',
   justify: 'flex-start',
   background: null,
-  backgroundAuto: true,
+  backgroundAuto: false,
   radius: 0,
   childLayout: 'flex',
   callouts: [],
@@ -208,10 +213,14 @@ export const DEFAULT_ROOT_FRAME_PROPS: FrameProps = {
   padding: 28,
   align: 'flex-start',
   justify: 'flex-start',
-  background: null, // auto-filled from the latest pasted theme's bg -- see setRootBackgroundIfAuto
-  backgroundAuto: true,
+  background: null,
+  backgroundAuto: false,
   radius: 12,
-  childLayout: 'flex',
+  // New documents default to Free-form (canvas-mode) -- freely positioning
+  // blocks is this app's main differentiator, so a brand new document
+  // should land there instead of Flex, which was really just the technical
+  // default before Free-form existed.
+  childLayout: 'canvas',
   callouts: [],
   pageSize: 'content',
   customPageWidthMm: 210,

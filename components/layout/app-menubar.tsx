@@ -1,26 +1,14 @@
 'use client'
 
 import Link from 'next/link'
-import { Home } from 'lucide-react'
+import { Check, Home, LoaderCircle } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Input } from '@/components/ui/input'
-import {
-  Menubar,
-  MenubarMenu,
-  MenubarTrigger,
-  MenubarContent,
-  MenubarItem,
-  MenubarSeparator,
-} from '@/components/ui/menubar'
 
 interface AppMenubarProps {
   docName: string
   onRename: (name: string) => void
-  onAddPage: () => void
-  onZoomIn: () => void
-  onZoomOut: () => void
-  onZoomReset: () => void
-  onRecenter: () => void
+  saveState: 'saving' | 'saved'
   /** Right-aligned slot for route-specific controls (e.g. search/replace). */
   children?: ReactNode
 }
@@ -28,11 +16,7 @@ interface AppMenubarProps {
 export function AppMenubar({
   docName,
   onRename,
-  onAddPage,
-  onZoomIn,
-  onZoomOut,
-  onZoomReset,
-  onRecenter,
+  saveState,
   children,
 }: AppMenubarProps) {
   return (
@@ -41,36 +25,26 @@ export function AppMenubar({
         <Home size={16} />
       </Link>
 
-      <Menubar className="border-0 bg-transparent p-0 h-auto gap-0.5 shadow-none">
-        <MenubarMenu>
-          <MenubarTrigger>File</MenubarTrigger>
-          <MenubarContent>
-            <MenubarItem onClick={onAddPage}>Add page</MenubarItem>
-            <MenubarSeparator />
-            <MenubarItem asChild>
-              <Link href="/">Back to Documents</Link>
-            </MenubarItem>
-          </MenubarContent>
-        </MenubarMenu>
-
-        <MenubarMenu>
-          <MenubarTrigger>View</MenubarTrigger>
-          <MenubarContent>
-            <MenubarItem onClick={onZoomIn}>Zoom in</MenubarItem>
-            <MenubarItem onClick={onZoomOut}>Zoom out</MenubarItem>
-            <MenubarSeparator />
-            <MenubarItem onClick={onZoomReset}>Zoom to 100%</MenubarItem>
-            <MenubarItem onClick={onRecenter}>Recenter</MenubarItem>
-          </MenubarContent>
-        </MenubarMenu>
-      </Menubar>
-
       <Input
         className="h-7 w-56 border-transparent bg-transparent px-2 text-sm font-medium shadow-none hover:border-input focus-visible:border-input"
         value={docName}
         onChange={(e) => onRename(e.target.value)}
         placeholder="Untitled"
       />
+
+      <span className="scripture-save-status" role="status" aria-live="polite">
+        {saveState === 'saving' ? (
+          <>
+            <LoaderCircle className="scripture-save-status-spinner" />
+            Saving…
+          </>
+        ) : (
+          <>
+            <Check />
+            Saved locally
+          </>
+        )}
+      </span>
 
       <div className="ml-auto flex items-center gap-2">{children}</div>
     </div>

@@ -2,23 +2,32 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { FileCode, Pin, PinOff, Pencil, Trash2, Search, X, Lightbulb } from 'lucide-react'
+import {
+  FileCode,
+  Files,
+  HardDrive,
+  MessageSquare,
+  Pin,
+  PinOff,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react'
 import {
   type DocumentMeta,
   listDocuments,
   createDocument,
   renameDocument,
-  deleteDocumentMeta,
-  getPageIds,
   togglePin,
 } from '@/lib/documents/manifest'
 import { extractDocumentText } from '@/lib/documents/search-index'
-import { cn } from '@/lib/utils'
-import { deleteYDoc, getYDoc } from '@/lib/yjs/doc-store'
-import { seedRootFrame, toPlainTree } from '@/lib/yjs/layout-store'
-import { collectByKind } from '@/lib/layout/tree-utils'
-import { deleteUploadedImage } from '@/lib/images/client'
+import { getYDoc } from '@/lib/yjs/doc-store'
+import { seedRootFrame } from '@/lib/yjs/layout-store'
+import { deleteDocument } from '@/lib/documents/delete-service'
 import { TEMPLATES, type Template } from '@/lib/templates'
+import { DocumentPreview } from '@/components/dashboard/document-preview'
 import { PageToolbar } from '@/components/layout/page-toolbar'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -56,6 +65,14 @@ function relativeTime(timestamp: number): string {
   return rtf.format(Math.round(duration), 'year')
 }
 
+function documentPageCount(doc: DocumentMeta): number {
+  return doc.pageIds?.length || 1
+}
+
+function plural(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? '' : 's'}`
+}
+
 export default function DocumentsDashboard() {
   const router = useRouter()
   const [docs, setDocs] = useState<DocumentMeta[] | null>(null)
@@ -63,6 +80,9 @@ export default function DocumentsDashboard() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [contentIndex, setContentIndex] = useState<Record<string, string>>({})
 
@@ -95,6 +115,7 @@ export default function DocumentsDashboard() {
 
   async function handleCreateWithTemplate(template: Template) {
     setCreating(true)
+    setCreateError(null)
     try {
       const meta = createDocument()
       const { doc, synced } = getYDoc(meta.id)
@@ -102,6 +123,8 @@ export default function DocumentsDashboard() {
       seedRootFrame(doc, { rootProps: template.rootProps, children: template.children() })
       setShowTemplatePicker(false)
       router.push(`/doc/${meta.id}`)
+    } catch (cause) {
+      setCreateError(cause instanceof Error ? cause.message : 'Could not create the document.')
     } finally {
       setCreating(false)
     }
@@ -120,32 +143,17 @@ export default function DocumentsDashboard() {
   async function handleConfirmDelete() {
     const id = pendingDeleteId
     if (!id) return
-    setPendingDeleteId(null)
-    // Read every page id BEFORE deleting the manifest entry -- that entry is
-    // the only place pageIds lives; deleting it first (as this used to) means
-    // every page after the first is never looked up again and leaks forever,
-    // both in IndexedDB and the server-side .data/documents files.
-    const pageIds = getPageIds(id)
-    deleteDocumentMeta(id)
-    setDocs(listDocuments())
-    await Promise.all(
-      pageIds.map(async (pageId) => {
-        // Read the tree BEFORE deleteYDoc wipes its IndexedDB state -- any
-        // image block it contains references an uploaded file that nothing
-        // else will ever clean up otherwise (no other code path calls
-        // DELETE /api/images/{id} at all).
-        const { doc, synced } = getYDoc(pageId)
-        await synced
-        const tree = toPlainTree(doc)
-        if (tree) {
-          for (const imageNode of collectByKind(tree, 'image')) {
-            deleteUploadedImage(imageNode.src)
-          }
-        }
-        await deleteYDoc(pageId)
-        await fetch(`/api/documents/${pageId}`, { method: 'DELETE' }).catch(() => {})
-      })
-    )
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await deleteDocument(id)
+      setPendingDeleteId(null)
+      setDocs(listDocuments())
+    } catch (cause) {
+      setDeleteError(cause instanceof Error ? cause.message : 'Could not delete the document.')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const query = searchQuery.trim().toLowerCase()
@@ -162,6 +170,7 @@ export default function DocumentsDashboard() {
   }, [docs, query, contentIndex])
   const isSearching = query.length > 0
   const indexing = docs !== null && docs.some((doc) => !(doc.id in contentIndex))
+  const totalPages = docs?.reduce((total, doc) => total + documentPageCount(doc), 0) ?? 0
 
   return (
     <div className="scripture-dashboard-shell">
@@ -169,47 +178,227 @@ export default function DocumentsDashboard() {
         <h1 className="scripture-dashboard-title">scripture</h1>
         <Button variant="ghost" size="sm" className="ml-auto" asChild>
           <a href="https://github.com/lucianmocan/scripture" target="_blank" rel="noopener noreferrer">
-            <Lightbulb />
+            <MessageSquare />
             Feedback
           </a>
         </Button>
       </PageToolbar>
 
       <div className="scripture-page">
-        <main className="flex flex-col items-center w-full max-w-[1100px]">
+        <main className="scripture-dashboard-main">
           {docs === null ? (
-            <div className="scripture-editor-loading">Loading…</div>
-          ) : docs.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-20 text-center">
-              <div className="flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                <FileCode size={22} />
-              </div>
-              <p className="text-sm font-medium">No documents yet</p>
-              <p className="max-w-xs text-sm text-muted-foreground">
-                Create your first document to start pasting and annotating code.
-              </p>
-              <Button className="mt-1" onClick={() => setShowTemplatePicker(true)}>
-                + New document
-              </Button>
+            <div className="scripture-dashboard-loading" aria-label="Loading documents">
+              <div />
+              <div />
+              <div />
             </div>
           ) : (
-            <div className="flex flex-col gap-8 w-full">
-              {pinnedDocs.length > 0 && (
-                <div className="scripture-doc-section">
-                  <h2 className="scripture-doc-section-title">Pinned</h2>
-                  <ul className="scripture-doc-grid">
-                    {pinnedDocs.map((doc) => (
-                      <li key={doc.id}>
-                        <Card>
-                          <CardContent className="flex flex-col gap-2">
-                            <div className="flex size-8 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                              <FileCode size={16} />
+            <>
+              <section className="scripture-dashboard-overview" aria-labelledby="documents-heading">
+                <div className="scripture-dashboard-heading">
+                  <span className="scripture-dashboard-eyebrow">Local workspace</span>
+                  <h2 id="documents-heading">Documents</h2>
+                  <p>Create, arrange, and export publication-ready code figures.</p>
+                </div>
+                {docs.length > 0 && (
+                  <Button onClick={() => setShowTemplatePicker(true)}>
+                    <Plus />
+                    New document
+                  </Button>
+                )}
+                <div className="scripture-dashboard-stats" aria-label="Workspace summary">
+                  <span>
+                    <Files />
+                    {plural(docs.length, 'document')}
+                  </span>
+                  <span>{plural(totalPages, 'page')}</span>
+                  <span>
+                    <HardDrive />
+                    Stored locally
+                  </span>
+                </div>
+              </section>
+
+              {docs.length === 0 ? (
+                <div className="scripture-dashboard-empty">
+                  <div className="scripture-empty-preview" aria-hidden="true">
+                    <span className="scripture-empty-preview-icon">
+                      <FileCode />
+                    </span>
+                    <span className="scripture-empty-preview-lines">
+                      <i />
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                  </div>
+                  <h3>Create your first document</h3>
+                  <p>Start blank or use a layout for a comparison, walkthrough, or single code figure.</p>
+                  <Button onClick={() => setShowTemplatePicker(true)}>
+                    <Plus />
+                    New document
+                  </Button>
+                  <span className="scripture-dashboard-local-note">
+                    <HardDrive />
+                    Your work stays in this browser
+                  </span>
+                </div>
+              ) : (
+                <div className="scripture-dashboard-content">
+                  {pinnedDocs.length > 0 && (
+                    <section className="scripture-doc-section" aria-labelledby="pinned-heading">
+                      <div className="scripture-doc-section-heading">
+                        <h2 id="pinned-heading" className="scripture-doc-section-title">Pinned</h2>
+                        <span>{pinnedDocs.length}</span>
+                      </div>
+                      <ul className="scripture-doc-grid">
+                        {pinnedDocs.map((doc) => (
+                          <li key={doc.id}>
+                            <Card className="scripture-doc-card" size="sm">
+                              <button
+                                type="button"
+                                className="scripture-doc-card-preview"
+                                onClick={() => router.push(`/doc/${doc.id}`)}
+                                aria-label={`Open ${doc.name}`}
+                              >
+                                <DocumentPreview documentMeta={doc} />
+                              </button>
+                              <CardContent className="scripture-doc-card-content">
+                                {editingId === doc.id ? (
+                                  <Input
+                                    autoFocus
+                                    defaultValue={doc.name}
+                                    onBlur={(e) => {
+                                      handleRename(doc.id, e.target.value)
+                                      setEditingId(null)
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') e.currentTarget.blur()
+                                      if (e.key === 'Escape') setEditingId(null)
+                                    }}
+                                  />
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="scripture-doc-card-name"
+                                    onClick={() => router.push(`/doc/${doc.id}`)}
+                                  >
+                                    {doc.name}
+                                  </button>
+                                )}
+
+                                <div className="scripture-doc-card-meta">
+                                  <span>{plural(documentPageCount(doc), 'page')}</span>
+                                  <span>Updated {relativeTime(doc.updatedAt)}</span>
+                                </div>
+
+                                <div className="scripture-doc-card-actions">
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon-xs"
+                                        onClick={() => handleTogglePin(doc.id)}
+                                        aria-label="Unpin"
+                                      >
+                                        <PinOff />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Unpin</TooltipContent>
+                                  </Tooltip>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon-xs"
+                                        onClick={() => setEditingId(doc.id)}
+                                        aria-label="Rename"
+                                      >
+                                        <Pencil />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Rename</TooltipContent>
+                                  </Tooltip>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon-xs"
+                                        onClick={() => setPendingDeleteId(doc.id)}
+                                        aria-label="Delete"
+                                      >
+                                        <Trash2 />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Delete</TooltipContent>
+                                  </Tooltip>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+
+                  <section className="scripture-doc-section" aria-labelledby="all-documents-heading">
+                    <div className="scripture-doc-browser-heading">
+                      <div className="scripture-doc-section-heading">
+                        <h2 id="all-documents-heading" className="scripture-doc-section-title">
+                          {pinnedDocs.length > 0 ? 'Other documents' : 'All documents'}
+                        </h2>
+                        <span>{docs.length - pinnedDocs.length}</span>
+                      </div>
+                      <div className="scripture-doc-search">
+                        <Search />
+                        <Input
+                          type="text"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          placeholder="Search names and content…"
+                          aria-label="Search documents"
+                        />
+                        {searchQuery && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            onClick={() => setSearchQuery('')}
+                            aria-label="Clear search"
+                          >
+                            <X />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    {indexing && <span className="scripture-doc-indexing">Indexing document content…</span>}
+
+                    {isSearching && otherDocs.length === 0 ? (
+                      <div className="scripture-doc-no-results">
+                        <Search />
+                        <p>No documents match &ldquo;{searchQuery.trim()}&rdquo;</p>
+                        <Button variant="ghost" size="sm" onClick={() => setSearchQuery('')}>
+                          Clear search
+                        </Button>
+                      </div>
+                    ) : otherDocs.length === 0 ? (
+                      <div className="scripture-doc-no-results">
+                        <Pin />
+                        <p>Every document is pinned above.</p>
+                      </div>
+                    ) : (
+                      <ul className="scripture-doc-list">
+                        {otherDocs.map((doc) => (
+                          <li key={doc.id} className="scripture-doc-list-item">
+                            <div className="scripture-doc-list-icon">
+                              <FileCode />
                             </div>
 
                             {editingId === doc.id ? (
                               <Input
                                 autoFocus
                                 defaultValue={doc.name}
+                                className="h-7 flex-1"
                                 onBlur={(e) => {
                                   handleRename(doc.id, e.target.value)
                                   setEditingId(null)
@@ -222,168 +411,67 @@ export default function DocumentsDashboard() {
                             ) : (
                               <button
                                 type="button"
-                                className="truncate text-left text-sm font-medium hover:underline"
+                                className="scripture-doc-list-name"
                                 onClick={() => router.push(`/doc/${doc.id}`)}
                               >
                                 {doc.name}
                               </button>
                             )}
 
-                            <span className="text-xs text-muted-foreground">Updated {relativeTime(doc.updatedAt)}</span>
+                            <span className="scripture-doc-list-pages">
+                              {plural(documentPageCount(doc), 'page')}
+                            </span>
+                            <span className="scripture-doc-list-time">Updated {relativeTime(doc.updatedAt)}</span>
 
-                            <div className="flex gap-1.5 pt-1">
+                            <div className="scripture-doc-list-actions">
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <Button
                                     variant="ghost"
                                     size="icon-xs"
                                     onClick={() => handleTogglePin(doc.id)}
-                                    aria-label="Unpin"
+                                    aria-label="Pin"
                                   >
-                                    <PinOff />
+                                    <Pin />
                                   </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>Unpin</TooltipContent>
+                                <TooltipContent>Pin</TooltipContent>
                               </Tooltip>
-                              <Button variant="ghost" size="sm" onClick={() => setEditingId(doc.id)} aria-label="Rename">
-                                Rename
-                              </Button>
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={() => setPendingDeleteId(doc.id)}
-                                aria-label="Delete"
-                              >
-                                Delete
-                              </Button>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-xs"
+                                    onClick={() => setEditingId(doc.id)}
+                                    aria-label="Rename"
+                                  >
+                                    <Pencil />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Rename</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-xs"
+                                    onClick={() => setPendingDeleteId(doc.id)}
+                                    aria-label="Delete"
+                                  >
+                                    <Trash2 />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Delete</TooltipContent>
+                              </Tooltip>
                             </div>
-                          </CardContent>
-                        </Card>
-                      </li>
-                    ))}
-                  </ul>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
                 </div>
               )}
-
-              <div className="scripture-doc-section">
-                <div className="flex items-center gap-2">
-                  {pinnedDocs.length > 0 && <h2 className="scripture-doc-section-title">All documents</h2>}
-                  <div className={cn('relative w-64', pinnedDocs.length > 0 && 'ml-auto')}>
-                    <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search documents…"
-                      className="h-8 pl-8 pr-7"
-                    />
-                    {searchQuery && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className="absolute right-1 top-1/2 -translate-y-1/2"
-                        onClick={() => setSearchQuery('')}
-                        aria-label="Clear search"
-                      >
-                        <X className="size-3" />
-                      </Button>
-                    )}
-                  </div>
-                  {indexing && <span className="text-xs text-muted-foreground">Indexing content…</span>}
-                  <Button
-                    className={pinnedDocs.length === 0 ? 'ml-auto' : undefined}
-                    onClick={() => setShowTemplatePicker(true)}
-                  >
-                    + New document
-                  </Button>
-                </div>
-
-                {isSearching && otherDocs.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-muted-foreground">
-                    No documents match &ldquo;{searchQuery.trim()}&rdquo;
-                  </p>
-                ) : (
-                  <ul className="scripture-doc-list">
-                    {otherDocs.map((doc) => (
-                      <li key={doc.id} className="scripture-doc-list-item">
-                        <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                          <FileCode size={14} />
-                        </div>
-
-                        {editingId === doc.id ? (
-                          <Input
-                            autoFocus
-                            defaultValue={doc.name}
-                            className="h-7 flex-1"
-                            onBlur={(e) => {
-                              handleRename(doc.id, e.target.value)
-                              setEditingId(null)
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') e.currentTarget.blur()
-                              if (e.key === 'Escape') setEditingId(null)
-                            }}
-                          />
-                        ) : (
-                          <button
-                            type="button"
-                            className="scripture-doc-list-name"
-                            onClick={() => router.push(`/doc/${doc.id}`)}
-                          >
-                            {doc.name}
-                          </button>
-                        )}
-
-                        <span className="scripture-doc-list-time">Updated {relativeTime(doc.updatedAt)}</span>
-
-                        <div className="flex items-center gap-0.5">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                onClick={() => handleTogglePin(doc.id)}
-                                aria-label="Pin"
-                              >
-                                <Pin />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Pin</TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                onClick={() => setEditingId(doc.id)}
-                                aria-label="Rename"
-                              >
-                                <Pencil />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Rename</TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                onClick={() => setPendingDeleteId(doc.id)}
-                                aria-label="Delete"
-                              >
-                                <Trash2 />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Delete</TooltipContent>
-                          </Tooltip>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
+            </>
           )}
         </main>
       </div>
@@ -395,19 +483,27 @@ export default function DocumentsDashboard() {
             <DialogDescription>Start blank or from a starter layout.</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-2">
-            {TEMPLATES.map((template) => (
-              <button
-                key={template.id}
-                type="button"
-                disabled={creating}
-                className="scripture-template-card"
-                onClick={() => handleCreateWithTemplate(template)}
-              >
-                <span className="scripture-template-card-name">{template.name}</span>
-                <span className="scripture-template-card-description">{template.description}</span>
-              </button>
-            ))}
+            {TEMPLATES.map((template) => {
+              const previewBlocks = template.id === 'three-up' ? 3 : template.id === 'before-after' ? 2 : template.id === 'single' ? 1 : 0
+              return (
+                <button
+                  key={template.id}
+                  type="button"
+                  disabled={creating}
+                  className="scripture-template-card"
+                  onClick={() => handleCreateWithTemplate(template)}
+                >
+                  <span className={`scripture-template-preview is-${template.id}`} aria-hidden="true">
+                    {Array.from({ length: previewBlocks }, (_, index) => <i key={index} />)}
+                    {previewBlocks === 0 && <Plus />}
+                  </span>
+                  <span className="scripture-template-card-name">{template.name}</span>
+                  <span className="scripture-template-card-description">{template.description}</span>
+                </button>
+              )
+            })}
           </div>
+          {createError && <p className="scripture-error-text" role="alert">{createError}</p>}
         </DialogContent>
       </Dialog>
 
@@ -415,12 +511,22 @@ export default function DocumentsDashboard() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this document?</AlertDialogTitle>
-            <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
+            <AlertDialogDescription>
+              This removes every page, uploaded image, local history, and saved export. It cannot be undone.
+            </AlertDialogDescription>
+            {deleteError && <p className="scripture-error-text" role="alert">{deleteError}</p>}
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setPendingDeleteId(null)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={handleConfirmDelete}>
-              Delete
+            <AlertDialogCancel disabled={deleting} onClick={() => setPendingDeleteId(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleting}
+              onClick={(event) => {
+                event.preventDefault()
+                void handleConfirmDelete()
+              }}
+            >
+              {deleting ? 'Deleting…' : 'Delete'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

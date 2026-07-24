@@ -14,6 +14,10 @@ import {
 import { toggleLine } from '@/lib/layout/line-ranges'
 import { MIN_NODE_SIZE, type PositionPatch, type SizePatch } from '@/lib/layout/resize-geometry'
 import { planNodeDuplicate } from '@/lib/layout/duplicate-node'
+import type { NodeGeometry } from '@/lib/layout/geometry'
+import { computeGroupBounds } from '@/lib/layout/group-geometry'
+import { planFlexToCanvasPositions } from '@/lib/layout/layout-transition'
+import { resolveThemeBackground } from '@/lib/presets/custom-syntax-themes'
 
 export const ROOT_ID = 'root'
 
@@ -30,6 +34,15 @@ export function ensureRootFrame(doc: Y.Doc): Y.Map<unknown> {
       root.set('kind', 'frame')
       setFrameFields(root, DEFAULT_ROOT_FRAME_PROPS)
       root.set('children', new Y.Array())
+    }, LAYOUT_MUTATION_ORIGIN)
+  } else if (root.get('backgroundAuto') !== false) {
+    // Older documents let the most recently used syntax theme paint the
+    // entire canvas. Theme backgrounds now belong to code blocks, so clear
+    // that auto-derived root color once while preserving manually chosen
+    // canvas backgrounds (those already have backgroundAuto === false).
+    doc.transact(() => {
+      root.set('background', null)
+      root.set('backgroundAuto', false)
     }, LAYOUT_MUTATION_ORIGIN)
   }
   return root
@@ -51,7 +64,22 @@ export function seedRootFrame(doc: Y.Doc, template: { rootProps?: Partial<FrameP
     }
     if (template.children.length > 0) {
       const children = root.get('children') as Y.Array<Y.Map<unknown>>
+      const startIndex = children.length
       children.push(template.children.map(buildYNode))
+      // Root defaults to canvas mode (see DEFAULT_ROOT_FRAME_PROPS) -- a
+      // template's own children (e.g. Before/After's two blocks) carry no
+      // x/y of their own, since they're plain flex-oriented starters, same
+      // as updateFrameProps' switch-to-canvas cascade below.
+      if ((root.get('childLayout') ?? DEFAULT_ROOT_FRAME_PROPS.childLayout) === 'canvas') {
+        template.children.forEach((_, i) => {
+          const child = children.get(startIndex + i)
+          if (child.get('x') == null || child.get('y') == null) {
+            const { x, y } = cascadeOffset(startIndex + i)
+            child.set('x', x)
+            child.set('y', y)
+          }
+        })
+      }
     }
   }, LAYOUT_MUTATION_ORIGIN)
 }
@@ -60,7 +88,15 @@ export function seedRootFrame(doc: Y.Doc, template: { rootProps?: Partial<FrameP
 export function toPlainTree(doc: Y.Doc): LayoutNode | null {
   const root = getRootMap(doc)
   if (!root.has('id')) return null
-  return root.toJSON() as LayoutNode
+  const tree = root.toJSON() as LayoutNode
+  // Read-only consumers such as the print route do not call
+  // ensureRootFrame. Normalize legacy auto-themed canvases here too so an
+  // export cannot resurrect the old canvas/theme coupling.
+  if (tree.backgroundAuto !== false) {
+    tree.background = null
+    tree.backgroundAuto = false
+  }
+  return tree
 }
 
 function setFrameFields(map: Y.Map<unknown>, props: FrameProps) {
@@ -85,6 +121,7 @@ function setFrameFields(map: Y.Map<unknown>, props: FrameProps) {
 function setCodeFields(map: Y.Map<unknown>, props: CodeBlockProps) {
   map.set('language', props.language)
   map.set('theme', props.theme)
+  map.set('themeBackground', props.themeBackground)
   map.set('fontFamily', props.fontFamily)
   map.set('filename', props.filename)
   map.set('chromeStyle', props.chromeStyle)
@@ -151,6 +188,7 @@ function buildYNode(plain: LayoutNode): Y.Map<unknown> {
   const map = new Y.Map<unknown>()
   map.set('id', plain.id)
   map.set('kind', plain.kind)
+  if (plain.label) map.set('label', plain.label)
   map.set('width', plain.width ?? null)
   map.set('height', plain.height ?? null)
   map.set('x', plain.x ?? null)
@@ -178,6 +216,7 @@ function buildYNode(plain: LayoutNode): Y.Map<unknown> {
     setCodeFields(map, {
       language: plain.language ?? DEFAULT_CODE_BLOCK_PROPS.language,
       theme: plain.theme ?? DEFAULT_CODE_BLOCK_PROPS.theme,
+      themeBackground: plain.themeBackground ?? resolveThemeBackground(plain.theme),
       fontFamily: plain.fontFamily ?? DEFAULT_CODE_BLOCK_PROPS.fontFamily,
       filename: plain.filename ?? DEFAULT_CODE_BLOCK_PROPS.filename,
       chromeStyle: plain.chromeStyle ?? DEFAULT_CODE_BLOCK_PROPS.chromeStyle,
@@ -371,31 +410,44 @@ export function moveNodeBeforeSibling(doc: Y.Doc, draggedId: string, targetId: s
   }, LAYOUT_MUTATION_ORIGIN)
 }
 
-export function updateFrameProps(doc: Y.Doc, id: string, patch: Partial<FrameProps>) {
+export function updateFrameProps(
+  doc: Y.Doc,
+  id: string,
+  patch: Partial<FrameProps>,
+  measuredChildren: Readonly<Record<string, NodeGeometry>> = {}
+) {
   const root = ensureRootFrame(doc)
   const node = findNodeMap(root, id)
   if (!node || node.get('kind') !== 'frame') return
+  const switchingToCanvas = patch.childLayout === 'canvas' && node.get('childLayout') !== 'canvas'
   doc.transact(() => {
     for (const [key, value] of Object.entries(patch)) {
       node.set(key, value)
     }
-    // A manual background edit permanently opts this frame out of following
-    // theme changes -- otherwise the next paste would silently overwrite it.
+    // Explicit frame backgrounds are never controlled by syntax themes.
     if ('background' in patch) node.set('backgroundAuto', false)
-    // Switching an already-populated frame into canvas mode: any child still
-    // missing x/y (created while this frame was still in flex mode) would
-    // otherwise all render at (0,0), fully overlapping -- assign each a
-    // distinct cascading position, the same one addBlock/addFrame already
-    // give brand-new canvas-mode children.
-    if (patch.childLayout === 'canvas') {
+    // Switching from flow to free-form captures every child's measured
+    // parent-local position before absolute positioning takes over. If a
+    // measurement is unavailable, retain previous coordinates or fall back
+    // to a non-overlapping cascade.
+    if (switchingToCanvas) {
       const children = node.get('children') as Y.Array<Y.Map<unknown>> | undefined
       if (children) {
-        children.toArray().forEach((child, index) => {
-          if (child.get('x') == null || child.get('y') == null) {
-            const { x, y } = cascadeOffset(index)
-            child.set('x', x)
-            child.set('y', y)
-          }
+        const childMaps = children.toArray()
+        const positions = planFlexToCanvasPositions(
+          id,
+          childMaps.map((child) => ({
+            id: child.get('id') as string,
+            x: child.get('x') as number | null | undefined,
+            y: child.get('y') as number | null | undefined,
+          })),
+          measuredChildren
+        )
+        childMaps.forEach((child) => {
+          const position = positions[child.get('id') as string]
+          if (!position) return
+          child.set('x', position.x)
+          child.set('y', position.y)
         })
       }
     }
@@ -453,25 +505,15 @@ export function updateImageProps(doc: Y.Doc, id: string, patch: Partial<ImageBlo
   }, LAYOUT_MUTATION_ORIGIN)
 }
 
-/** Called on every paste/theme change -- updates the root's background to
- * match as long as `backgroundAuto` is still true (i.e. the user hasn't
- * manually picked a background color for it). Unlike a one-time "only if
- * null" check, this keeps the card in sync on every subsequent change too. */
-export function setRootBackgroundIfAuto(doc: Y.Doc, color: string) {
-  const root = ensureRootFrame(doc)
-  if (root.get('backgroundAuto') !== false) {
-    doc.transact(() => root.set('background', color), LAYOUT_MUTATION_ORIGIN)
-  }
-}
-
-/** Re-enables auto-follow for a frame's background (the Inspector's "Auto"
- * reset) -- does not immediately change the color, just lets the next
- * paste/theme change take over again. */
-export function setBackgroundAuto(doc: Y.Doc, id: string, auto: boolean) {
+export function updateNodeLabel(doc: Y.Doc, id: string, label: string | undefined) {
   const root = ensureRootFrame(doc)
   const node = findNodeMap(root, id)
-  if (!node || node.get('kind') !== 'frame') return
-  doc.transact(() => node.set('backgroundAuto', auto), LAYOUT_MUTATION_ORIGIN)
+  if (!node) return
+  doc.transact(() => {
+    const next = label?.trim()
+    if (next) node.set('label', next)
+    else node.delete('label')
+  }, LAYOUT_MUTATION_ORIGIN)
 }
 
 /** Explicit size override via resize handles -- works on any node kind.
@@ -536,7 +578,11 @@ export function updateNodeGeometry(
  * a canvas-mode parent (siblings without x/y have nothing to preserve).
  * No-ops if fewer than 2 ids resolve to siblings under the same parent.
  */
-export function groupNodes(doc: Y.Doc, rawIds: string[]): string | null {
+export function groupNodes(
+  doc: Y.Doc,
+  rawIds: string[],
+  measured: Readonly<Record<string, NodeGeometry>>
+): string | null {
   // Deduped defensively -- a duplicate id would otherwise resolve to the
   // SAME index twice in sortedIndices below, and the second delete(index, 1)
   // would remove whatever unrelated sibling shifted into that slot after
@@ -556,17 +602,23 @@ export function groupNodes(doc: Y.Doc, rawIds: string[]): string | null {
     .filter((n) => n.x != null && n.y != null)
   if (plainNodes.length !== ids.length) return null
 
-  const minX = Math.min(...plainNodes.map((n) => n.x as number))
-  const minY = Math.min(...plainNodes.map((n) => n.y as number))
+  const bounds = computeGroupBounds(ids, measured)
+  if (!bounds) return null
   const groupId = crypto.randomUUID()
   const groupPlain: LayoutNode = {
     id: groupId,
     kind: 'frame',
-    x: minX,
-    y: minY,
+    x: bounds.x,
+    y: bounds.y,
+    width: Math.max(MIN_NODE_SIZE, Math.ceil(bounds.width)),
+    height: Math.max(MIN_NODE_SIZE, Math.ceil(bounds.height)),
     ...DEFAULT_FRAME_PROPS,
+    padding: 0,
     childLayout: 'canvas',
-    children: plainNodes.map((n) => ({ ...n, x: (n.x as number) - minX, y: (n.y as number) - minY })),
+    children: plainNodes.map((node) => {
+      const box = measured[node.id]
+      return { ...node, x: box.x - bounds.x, y: box.y - bounds.y }
+    }),
   }
   const groupMap = buildYNode(groupPlain)
 

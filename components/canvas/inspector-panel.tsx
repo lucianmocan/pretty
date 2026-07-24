@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Rows3,
   Columns3,
@@ -42,7 +42,6 @@ import {
   updateImageProps,
   updateNodeSize,
   updateNodePosition,
-  setBackgroundAuto,
   addCallout,
   groupNodes,
   ungroupNode,
@@ -51,6 +50,7 @@ import {
   type GutterClickMode,
 } from '@/lib/yjs/layout-store'
 import { FONT_OPTIONS, DEFAULT_LANGUAGE } from '@/lib/presets'
+import { resolveThemeBackground } from '@/lib/presets/custom-syntax-themes'
 import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
@@ -72,6 +72,8 @@ import { LanguagePicker } from '@/components/ui/language-picker'
 import { IconField } from '@/components/ui/icon-field'
 import { RadiusIcon } from '@/components/ui/radius-icon'
 import { MIN_NODE_SIZE } from '@/lib/layout/resize-geometry'
+import { useGeometryRegistry } from '@/components/canvas/geometry-registry'
+import { geometryRecord, type NodeGeometry } from '@/lib/layout/geometry'
 
 interface InspectorPanelProps {
   docId: string
@@ -103,12 +105,6 @@ const PAGE_SIZE_OPTIONS: Array<{ value: PageSize; label: string }> = [
   { value: 'custom', label: 'Custom' },
 ]
 
-// Fallback box size for nodes with no explicit width/height override yet
-// (still "size to content") -- align/distribute needs SOME number to work
-// with; this roughly matches the CSS min-width/min-height a fresh block
-// renders at (see .scripture-leaf in app/globals.css).
-const AUTO_SIZE_FALLBACK = { width: 160, height: 32 }
-
 function toHexColor(value: string | null | undefined): string {
   if (value && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value)) return value
   return '#282a36'
@@ -137,6 +133,62 @@ function IconTab({
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
+  )
+}
+
+function InspectorCard({
+  context,
+  children,
+}: {
+  context: string
+  children: ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const card = ref.current
+    if (!card) return
+    for (const heading of card.querySelectorAll<HTMLHeadingElement>('.scripture-inspector-section > h3')) {
+      const section = heading.parentElement
+      if (!section) continue
+      const key = `scripture:inspector-section:${context}:${heading.textContent?.trim() || 'section'}`
+      const collapsed = localStorage.getItem(key) === 'true'
+      section.classList.toggle('is-collapsed', collapsed)
+      heading.tabIndex = 0
+      heading.setAttribute('role', 'button')
+      heading.setAttribute('aria-expanded', String(!collapsed))
+      heading.dataset.preferenceKey = key
+    }
+  }, [context])
+
+  function toggle(target: EventTarget | null) {
+    const heading = (target as HTMLElement | null)?.closest<HTMLHeadingElement>(
+      '.scripture-inspector-section > h3'
+    )
+    if (!heading || !ref.current?.contains(heading)) return
+    const section = heading.parentElement
+    const key = heading.dataset.preferenceKey
+    if (!section || !key) return
+    const collapsed = section.classList.toggle('is-collapsed')
+    heading.setAttribute('aria-expanded', String(!collapsed))
+    localStorage.setItem(key, String(collapsed))
+  }
+
+  return (
+    <Card
+      ref={ref}
+      className="scripture-inspector"
+      size="sm"
+      onClick={(event) => toggle(event.target)}
+      onKeyDown={(event) => {
+        if ((event.key === 'Enter' || event.key === ' ') && (event.target as HTMLElement).matches('h3')) {
+          event.preventDefault()
+          toggle(event.target)
+        }
+      }}
+    >
+      {children}
+    </Card>
   )
 }
 
@@ -195,19 +247,17 @@ function MultiSelectPanel({
   onSelectionChange: (ids: string[]) => void
 }) {
   const { doc } = getYDoc(docId)
+  const { geometry, measureAll } = useGeometryRegistry()
   const nodes = selectedIds.map((id) => findNode(tree, id)).filter((n): n is LayoutNode => n !== null)
   const parents = selectedIds.map((id) => findParent(tree, id))
   const commonParent = parents[0]
   const sameParent = commonParent != null && parents.every((p) => p?.id === commonParent.id)
   const isCanvasSelection = sameParent && commonParent.childLayout === 'canvas' && nodes.length === selectedIds.length
 
-  const positioned: PositionedNode[] = nodes.map((n) => ({
-    id: n.id,
-    x: n.x ?? 0,
-    y: n.y ?? 0,
-    width: n.width ?? AUTO_SIZE_FALLBACK.width,
-    height: n.height ?? AUTO_SIZE_FALLBACK.height,
-  }))
+  const positioned: PositionedNode[] = nodes
+    .map((node) => geometry.get(node.id))
+    .filter((measured): measured is NodeGeometry => Boolean(measured))
+  const hasMeasuredSelection = positioned.length === nodes.length
 
   function applyPatch(patch: Record<string, { x: number; y: number }>) {
     for (const [id, pos] of Object.entries(patch)) {
@@ -216,7 +266,8 @@ function MultiSelectPanel({
   }
 
   function handleGroup() {
-    const groupId = groupNodes(doc, selectedIds)
+    measureAll()
+    const groupId = groupNodes(doc, selectedIds, geometryRecord(geometry, selectedIds))
     if (groupId) onSelectionChange([groupId])
   }
 
@@ -226,7 +277,7 @@ function MultiSelectPanel({
   }
 
   return (
-    <Card className="scripture-inspector" size="sm">
+    <InspectorCard context="multi">
       <CardContent className="flex flex-col gap-5">
         <div className="scripture-inspector-section">
           <h3>{selectedIds.length} selected</h3>
@@ -237,7 +288,7 @@ function MultiSelectPanel({
           )}
         </div>
 
-        {isCanvasSelection && (
+        {isCanvasSelection && hasMeasuredSelection && (
           <>
             <Separator />
             <div className="scripture-inspector-section">
@@ -305,6 +356,10 @@ function MultiSelectPanel({
           </>
         )}
 
+        {isCanvasSelection && !hasMeasuredSelection && (
+          <p className="scripture-inspector-hint">Measuring the selected layers…</p>
+        )}
+
         <Separator />
         <div className="scripture-inspector-section">
           <Button variant="destructive" size="sm" onClick={handleDeleteAll}>
@@ -312,7 +367,7 @@ function MultiSelectPanel({
           </Button>
         </div>
       </CardContent>
-    </Card>
+    </InspectorCard>
   )
 }
 
@@ -431,6 +486,8 @@ export function InspectorPanel({
   exporting,
   exportError,
 }: InspectorPanelProps) {
+  const { measureAll } = useGeometryRegistry()
+
   if (selectedIds.length > 1) {
     return (
       <MultiSelectPanel docId={docId} tree={tree} selectedIds={selectedIds} onSelectionChange={onSelectionChange} />
@@ -444,12 +501,11 @@ export function InspectorPanel({
   const { doc } = getYDoc(docId)
 
   if (node.kind === 'frame') {
-    const backgroundAuto = node.backgroundAuto ?? true
     const childLayout: ChildLayout = node.childLayout ?? 'flex'
     const isCanvasFrame = childLayout === 'canvas'
     const canUngroup = isCanvasFrame && node.id !== ROOT_ID
     return (
-      <Card className="scripture-inspector" size="sm">
+      <InspectorCard context={node.id === ROOT_ID ? 'canvas' : 'frame'}>
         <CardContent className="flex flex-col gap-5">
           <div className="scripture-inspector-section">
             <h3>{node.id === ROOT_ID ? 'Canvas' : 'Frame'}</h3>
@@ -467,7 +523,18 @@ export function InspectorPanel({
                 size="sm"
                 className="w-full"
                 value={childLayout}
-                onValueChange={(v) => v && updateFrameProps(doc, node.id, { childLayout: v as ChildLayout })}
+                onValueChange={(value) => {
+                  if (!value) return
+                  const nextLayout = value as ChildLayout
+                  const measuredChildren =
+                    nextLayout === 'canvas'
+                      ? geometryRecord(
+                          measureAll(),
+                          (node.children ?? []).map((child) => child.id)
+                        )
+                      : undefined
+                  updateFrameProps(doc, node.id, { childLayout: nextLayout }, measuredChildren)
+                }}
               >
                 <ToggleGroupItem value="flex" className="flex-1">
                   Flex
@@ -596,12 +663,12 @@ export function InspectorPanel({
               <div className="flex items-center gap-2">
                 <Button
                   type="button"
-                  variant={backgroundAuto ? 'secondary' : 'outline'}
+                  variant="outline"
                   size="sm"
-                  disabled={backgroundAuto}
-                  onClick={() => setBackgroundAuto(doc, node.id, true)}
+                  disabled={node.background == null}
+                  onClick={() => updateFrameProps(doc, node.id, { background: null })}
                 >
-                  Auto
+                  Reset
                 </Button>
                 <input
                   type="color"
@@ -744,13 +811,13 @@ export function InspectorPanel({
             </>
           )}
         </CardContent>
-      </Card>
+      </InspectorCard>
     )
   }
 
   if (node.kind === 'image') {
     return (
-      <Card className="scripture-inspector" size="sm">
+      <InspectorCard context="image">
         <CardContent className="flex flex-col gap-5">
           <div className="scripture-inspector-section">
             <h3>Image block</h3>
@@ -781,13 +848,13 @@ export function InspectorPanel({
           <Separator />
           <SizeSection node={node} docId={docId} />
         </CardContent>
-      </Card>
+      </InspectorCard>
     )
   }
 
   if (node.kind !== 'code') {
     return (
-      <Card className="scripture-inspector" size="sm">
+      <InspectorCard context="text">
         <CardContent className="flex flex-col gap-5">
           <div className="scripture-inspector-section">
             <h3>Text block</h3>
@@ -795,12 +862,12 @@ export function InspectorPanel({
           <Separator />
           <SizeSection node={node} docId={docId} />
         </CardContent>
-      </Card>
+      </InspectorCard>
     )
   }
 
   return (
-    <Card className="scripture-inspector" size="sm">
+    <InspectorCard context="code">
       <CardContent className="flex flex-col gap-5">
         <div className="scripture-inspector-section">
           <h3>Code block</h3>
@@ -817,12 +884,18 @@ export function InspectorPanel({
             <Label>Theme</Label>
             <ThemeSwatchPicker
               value={node.theme ?? 'dracula'}
-              onChange={(theme) => updateCodeProps(doc, node.id, { theme })}
+              onChange={(theme) =>
+                updateCodeProps(doc, node.id, {
+                  theme,
+                  themeBackground: resolveThemeBackground(theme),
+                })
+              }
               onCreateCustom={() => onOpenCustomize('syntax')}
             />
           </div>
           <p className="scripture-inspector-hint">
-            Changing language or theme re-highlights the existing code, clearing any manual bold/italic/highlight on it.
+            Themes color this code block only. Changing language or theme re-highlights existing code and clears manual
+            bold, italic, or highlight formatting.
           </p>
         </div>
 
@@ -958,6 +1031,6 @@ export function InspectorPanel({
 
         <SizeSection node={node} docId={docId} />
       </CardContent>
-    </Card>
+    </InspectorCard>
   )
 }

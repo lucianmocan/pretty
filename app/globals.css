@@ -202,6 +202,15 @@
   background-size: 22px 22px;
 }
 
+.scripture-canvas-area.is-pan-ready {
+  cursor: grab;
+}
+
+.scripture-canvas-area[data-panning='true'] {
+  cursor: grabbing;
+  user-select: none;
+}
+
 /* Scaled to `zoom` via a CSS transform on the INNER element -- this outer
    box is sized to the SCALED pixel dimensions (width/height set inline from
    a ResizeObserver reading, see app/doc/[docId]/page.tsx) so the scrollable
@@ -286,10 +295,12 @@
   align-self: flex-start;
 }
 
-/* Background/padding/radius/gap/direction come from the root frame's own
-   stored props via frameStyle() -- this class only adds the fixed "card"
-   chrome (shadow, minimum size) that isn't a per-frame tunable. */
+/* Padding/radius/gap/direction come from the root frame's own stored props.
+   A neutral fallback background keeps the canvas visually independent from
+   code syntax themes; a manually selected inline frame background still
+   overrides it. */
 .scripture-card {
+  background: var(--background);
   box-shadow: var(--shadow-lg);
 }
 
@@ -413,6 +424,7 @@
 
 .scripture-code-body {
   display: flex;
+  padding: 16px 20px;
 }
 
 /* Flex row default sizing (shrink-to-fit) collapses an empty/short code
@@ -424,12 +436,6 @@
   position: relative;
   flex: 1;
   min-width: 0;
-}
-
-/* Padding only when a chrome bar is showing -- without it, a code block
-   keeps the tight, hug-the-card-edge look driven by the frame's own padding. */
-.scripture-chrome-bar + .scripture-code-body {
-  padding: 16px 20px;
 }
 
 .scripture-line-numbers {
@@ -445,6 +451,15 @@
 }
 
 .scripture-line-number-clickable {
+  display: block;
+  width: 100%;
+  padding: 0 2px;
+  border: 0;
+  font: inherit;
+  line-height: inherit;
+  color: inherit;
+  text-align: right;
+  background: transparent;
   cursor: pointer;
   border-radius: 3px;
 }
@@ -452,6 +467,24 @@
 .scripture-line-number-clickable:hover {
   color: var(--foreground);
   background: rgba(255, 255, 255, 0.06);
+}
+
+.scripture-line-number-clickable:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: 1px;
+  color: var(--foreground);
+}
+
+.scripture-line-number-clickable[aria-pressed='true'] {
+  color: var(--foreground);
+}
+
+.scripture-line-number-clickable[data-diff='add'] {
+  box-shadow: inset 2px 0 #4ade80;
+}
+
+.scripture-line-number-clickable[data-diff='remove'] {
+  box-shadow: inset 2px 0 #f87171;
 }
 
 /* Highlight/diff row backgrounds -- positioned by arithmetic (line index *
@@ -531,6 +564,40 @@
 
 .scripture-editor-wrapper {
   position: relative;
+}
+
+.scripture-editor-wrapper[data-empty='true'] {
+  min-height: 1.5em;
+}
+
+.scripture-editor-wrapper[data-empty='true'][data-kind='code'] {
+  min-width: 180px;
+}
+
+.scripture-editor-wrapper[data-empty='true'][data-kind='text'] {
+  min-width: 160px;
+}
+
+.scripture-editor-placeholder {
+  position: absolute;
+  inset: 0 auto auto 0;
+  z-index: 1;
+  color: rgba(128, 128, 128, 0.82);
+  font-size: 14px;
+  line-height: var(--scripture-code-line-height, 1.65);
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.scripture-editor-wrapper[data-kind='code'] .scripture-editor-placeholder {
+  font-family: var(--scripture-code-font, var(--font-geist-mono)), ui-monospace, monospace;
+}
+
+.scripture-editor-wrapper[data-kind='text'] .scripture-editor-placeholder {
+  font-family: var(--font-geist-sans), sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
 }
 
 /* Layout tree: frames (containers) and leaves (code/text blocks). */
@@ -821,6 +888,7 @@ html[data-scripture-moving] * {
   bottom: -6px;
   width: 10px;
   height: 10px;
+  padding: 0;
   background: var(--popover);
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
@@ -843,6 +911,10 @@ html[data-scripture-moving] * {
 }
 
 .scripture-empty-frame {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
   border: 1.5px dashed var(--border);
   border-radius: var(--radius-sm);
   padding: 24px;
@@ -1075,6 +1147,11 @@ html[data-scripture-moving] * {
   padding: 0 10px;
   border-bottom: 1px solid var(--border);
   background: var(--card);
+  font-family: var(--font-geist-sans), sans-serif;
+}
+
+.scripture-app-menubar [data-slot='input'] {
+  font-size: 12px;
 }
 
 .scripture-home-link {
@@ -1094,57 +1171,297 @@ html[data-scripture-moving] * {
   color: var(--foreground);
 }
 
+.scripture-save-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.scripture-save-status svg {
+  width: 12px;
+  height: 12px;
+}
+
+.scripture-save-status-spinner {
+  animation: scripture-save-spin 800ms linear infinite;
+}
+
+@keyframes scripture-save-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.scripture-operation-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 5px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--destructive) 45%, var(--border));
+  background: color-mix(in srgb, var(--destructive) 10%, var(--card));
+  color: var(--destructive);
+  font-size: 12px;
+}
+
+.scripture-operation-error button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 16px;
+}
+
 .scripture-workspace {
   display: flex;
   flex: 1;
   min-height: 0;
   width: 100%;
+  min-width: 1100px;
 }
 
-.scripture-page-tabs {
+.scripture-layers-panel {
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
+  flex-direction: column;
+  width: 240px;
+  min-width: 240px;
+  height: 100%;
+  border-right: 1px solid var(--border);
   background: var(--card);
+  overflow: hidden;
 }
 
-.scripture-page-tab {
+.scripture-panel-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  z-index: 4;
+  width: 6px;
+  cursor: col-resize;
+}
+
+.scripture-panel-resize-handle:hover {
+  background: color-mix(in srgb, var(--ring) 35%, transparent);
+}
+
+.scripture-layers-panel.is-collapsed {
+  width: 40px;
+  min-width: 40px;
+  align-items: center;
+  padding-top: 8px;
+}
+
+.scripture-panel-heading,
+.scripture-section-heading {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-  background: transparent;
-  font-size: 12px;
-  color: var(--muted-foreground);
-  cursor: pointer;
+  justify-content: space-between;
+  flex-shrink: 0;
 }
 
-.scripture-page-tab:hover {
+.scripture-panel-heading {
+  height: 38px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.scripture-layers-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.scripture-layers-section.is-tree {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.scripture-section-heading {
+  height: 24px;
+  padding-left: 4px;
+}
+
+.scripture-section-heading h2 {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.scripture-section-heading > svg,
+.scripture-section-heading-actions > svg {
+  width: 13px;
+  height: 13px;
+  margin-right: 6px;
+  color: var(--muted-foreground);
+}
+
+.scripture-section-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.scripture-section-heading-actions > svg {
+  margin-right: 6px;
+  color: var(--muted-foreground);
+}
+
+.scripture-sidebar-search {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 2px 0 7px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--muted) 68%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 65%, transparent);
+}
+
+.scripture-property-panel .scripture-inspector-row label {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  cursor: default;
+}
+
+.scripture-property-panel [data-slot='input'],
+.scripture-property-panel [data-slot='button'] {
+  font-size: 12px;
+}
+
+.scripture-property-panel [data-slot='input'] {
+  height: 28px;
+  min-width: 0;
+}
+
+.scripture-pages-list,
+.scripture-layers-tree,
+.scripture-layers-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.scripture-layers-tree {
+  min-height: 0;
+  overflow: auto;
+}
+
+.scripture-page-row,
+.scripture-layer-row {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+}
+
+.scripture-page-row:hover,
+.scripture-layer-row:hover {
   background: var(--accent);
   color: var(--foreground);
 }
 
-.scripture-page-tab.is-active {
-  border-color: var(--border);
-  background: var(--card);
+.scripture-page-row.is-active,
+.scripture-layer-row.is-selected {
+  background: color-mix(in srgb, var(--ring) 16%, transparent);
   color: var(--foreground);
 }
 
-.scripture-page-tab-remove {
-  display: flex;
-  align-items: center;
-  border-radius: 3px;
-  opacity: 0.6;
+.scripture-page-row-label,
+.scripture-layer-label,
+.scripture-layer-disclosure {
+  border: 0;
+  background: transparent;
+  color: inherit;
 }
 
-.scripture-page-tab-remove:hover {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.1);
+.scripture-page-row-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  font-size: 12px;
+  text-align: left;
+}
+
+.scripture-page-row-label svg,
+.scripture-layer-row > svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.scripture-layer-disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 24px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.scripture-layer-disclosure svg {
+  width: 12px;
+  height: 12px;
+}
+
+.scripture-layer-label {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  overflow: hidden;
+  font-size: 12px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scripture-layer-label-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  margin: 2px 5px;
+  padding: 0 5px;
+  border: 1px solid var(--ring);
+  border-radius: 3px;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 12px;
+  outline: none;
+}
+
+.scripture-panel-error {
+  margin: 4px;
+  color: var(--destructive);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.scripture-selection-marquee {
+  position: absolute;
+  z-index: 38;
+  pointer-events: none;
+  border: 1px solid var(--ring);
+  background: color-mix(in srgb, var(--ring) 12%, transparent);
 }
 
 /* Docked flush against .scripture-canvas-area (no gap, Figma-style) --
@@ -1169,16 +1486,62 @@ html[data-scripture-moving] * {
 .scripture-inspector-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+/* Inspector sections are separated by whitespace, not repeated horizontal
+   rules. The old combination of gap-5 plus a Separator between every group
+   made the narrow panel feel fragmented and spent too much vertical space. */
+.scripture-inspector [data-slot='card-content'] {
+  gap: 0;
+}
+
+.scripture-inspector [data-slot='separator'] {
+  display: none;
 }
 
 .scripture-inspector h3 {
+  position: sticky;
+  top: -12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--muted-foreground);
-  margin: 0 0 2px;
+  margin: 0;
+  padding: 4px 0;
+  background: var(--card);
+  cursor: pointer;
+}
+
+.scripture-inspector h3::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  margin-right: 3px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translate(-1px, -1px);
+  transform-origin: center;
+  transition: transform 120ms ease;
+}
+
+.scripture-inspector h3:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.scripture-inspector-section.is-collapsed > :not(h3) {
+  display: none;
+}
+
+.scripture-inspector-section.is-collapsed > h3::after {
+  transform: rotate(-45deg);
 }
 
 .scripture-inspector-row {
@@ -1350,10 +1713,234 @@ html[data-scripture-moving] * {
 --------------------------------------------------------------------------- */
 
 .scripture-dashboard-title {
-  font-size: 20px;
-  font-weight: 700;
+  font-family: var(--font-luckiest-guy), var(--font-geist-sans), sans-serif;
+  font-size: 24px;
+  font-weight: 400;
+  color: #fff;
   margin: 0;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
+  line-height: 1;
+  font-synthesis: none;
+  /* Luckiest Guy's own glyph metrics reserve a lot of built-in space below
+     the baseline, so it sits visibly high within its line box at
+     line-height: 1 -- .scripture-toolbar's align-items: center correctly
+     centers that box, but the ink inside it isn't centered relative to a
+     sibling using a normal font (e.g. the Feedback button). Nudged down to
+     compensate for the font itself, not a flex/alignment bug. */
+  position: relative;
+  top: 3px;
+}
+
+.scripture-dashboard-shell .scripture-page {
+  padding: 32px 24px 80px;
+}
+
+.scripture-dashboard-main {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1040px;
+}
+
+.scripture-dashboard-overview {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+  width: 100%;
+  padding: 8px 0 26px;
+  border-bottom: 1px solid var(--border);
+}
+
+.scripture-dashboard-heading {
+  display: flex;
+  flex: 1;
+  min-width: 280px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scripture-dashboard-eyebrow {
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.scripture-dashboard-heading h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 620;
+  letter-spacing: -0.025em;
+}
+
+.scripture-dashboard-heading p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+.scripture-dashboard-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-basis: 100%;
+}
+
+.scripture-dashboard-stats span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.scripture-dashboard-stats svg {
+  width: 12px;
+  height: 12px;
+}
+
+.scripture-dashboard-content {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  width: 100%;
+  padding-top: 28px;
+}
+
+.scripture-dashboard-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  width: 100%;
+  padding-top: 32px;
+}
+
+.scripture-dashboard-loading div {
+  height: 42px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, var(--muted), var(--accent), var(--muted));
+  background-size: 220% 100%;
+  animation: scripture-dashboard-loading 1.4s ease infinite;
+}
+
+.scripture-dashboard-loading div:first-child {
+  width: 46%;
+  height: 86px;
+}
+
+@keyframes scripture-dashboard-loading {
+  to {
+    background-position: -120% 0;
+  }
+}
+
+.scripture-dashboard-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  margin-top: 32px;
+  padding: 48px 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  text-align: center;
+}
+
+.scripture-dashboard-empty h3 {
+  margin: 18px 0 5px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.scripture-dashboard-empty > p {
+  max-width: 430px;
+  margin: 0 0 18px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.scripture-empty-preview {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 210px;
+  height: 88px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background-color: var(--background);
+  background-image: radial-gradient(color-mix(in srgb, var(--border) 75%, transparent) 1px, transparent 1px);
+  background-size: 14px 14px;
+  box-shadow: var(--shadow-md);
+}
+
+.scripture-empty-preview-icon,
+.scripture-doc-card-preview-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--ring) 16%, var(--muted));
+  color: var(--foreground);
+}
+
+.scripture-empty-preview-icon svg,
+.scripture-doc-card-preview-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.scripture-empty-preview-lines,
+.scripture-doc-card-code {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.scripture-empty-preview-lines i,
+.scripture-doc-card-code i {
+  display: block;
+  width: 78%;
+  height: 3px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--muted-foreground) 35%, transparent);
+}
+
+.scripture-empty-preview-lines i:nth-child(2),
+.scripture-doc-card-code i:nth-child(2) {
+  width: 100%;
+  background: color-mix(in srgb, var(--ring) 50%, transparent);
+}
+
+.scripture-empty-preview-lines i:nth-child(3),
+.scripture-doc-card-code i:nth-child(3) {
+  width: 62%;
+}
+
+.scripture-dashboard-local-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 14px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.scripture-dashboard-local-note svg {
+  width: 12px;
+  height: 12px;
 }
 
 .scripture-doc-grid {
@@ -1362,8 +1949,8 @@ html[data-scripture-moving] * {
   padding: 0;
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
 }
 
 /* Wraps the Pinned cards grid and the All-documents list below it -- each
@@ -1382,6 +1969,163 @@ html[data-scripture-moving] * {
   letter-spacing: 0.06em;
   color: var(--muted-foreground);
   margin: 0;
+}
+
+.scripture-doc-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.scripture-doc-section-heading > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.scripture-doc-card {
+  gap: 0;
+  padding: 0;
+  transition: box-shadow 140ms ease, transform 140ms ease;
+}
+
+.scripture-doc-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.scripture-doc-card-preview {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background-color: color-mix(in srgb, var(--background) 82%, var(--card));
+  background-image: radial-gradient(color-mix(in srgb, var(--border) 62%, transparent) 1px, transparent 1px);
+  background-size: 15px 15px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scripture-doc-card-preview-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 180ms ease;
+}
+
+.scripture-doc-card:hover .scripture-doc-card-preview-image {
+  transform: scale(1.015);
+}
+
+.scripture-doc-card-preview-fallback {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+}
+
+.scripture-doc-card-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 10px;
+  padding: 11px 12px 10px;
+}
+
+.scripture-doc-card-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 550;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scripture-doc-card-name:hover {
+  text-decoration: underline;
+}
+
+.scripture-doc-card-meta {
+  display: flex;
+  grid-column: 1;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.scripture-doc-card-meta span + span::before {
+  content: '·';
+  margin-right: 6px;
+}
+
+.scripture-doc-card-actions {
+  display: flex;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-items: center;
+  align-self: center;
+  gap: 1px;
+}
+
+.scripture-doc-browser-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.scripture-doc-search {
+  position: relative;
+  width: min(320px, 48%);
+}
+
+.scripture-doc-search > svg {
+  position: absolute;
+  top: 50%;
+  left: 9px;
+  z-index: 1;
+  width: 13px;
+  height: 13px;
+  transform: translateY(-50%);
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+
+.scripture-doc-search [data-slot='input'] {
+  height: 30px;
+  padding-right: 30px;
+  padding-left: 29px;
+  font-size: 12px;
+}
+
+.scripture-doc-search [data-slot='button'] {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  transform: translateY(-50%);
+}
+
+.scripture-doc-indexing {
+  align-self: flex-end;
+  margin-top: -6px;
+  color: var(--muted-foreground);
+  font-size: 10px;
 }
 
 /* The main "All documents" list -- a single bordered, full-width block
@@ -1404,7 +2148,8 @@ html[data-scripture-moving] * {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
+  min-height: 44px;
+  padding: 7px 10px;
   transition: background 0.12s;
 }
 
@@ -1427,6 +2172,23 @@ html[data-scripture-moving] * {
   text-overflow: ellipsis;
 }
 
+.scripture-doc-list-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.scripture-doc-list-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
 .scripture-doc-list-name:hover {
   text-decoration: underline;
 }
@@ -1437,10 +2199,52 @@ html[data-scripture-moving] * {
   flex-shrink: 0;
 }
 
+.scripture-doc-list-pages {
+  min-width: 54px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  text-align: right;
+}
+
+.scripture-doc-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0.35;
+  transition: opacity 120ms ease;
+}
+
+.scripture-doc-list-item:hover .scripture-doc-list-actions,
+.scripture-doc-list-item:focus-within .scripture-doc-list-actions {
+  opacity: 1;
+}
+
+.scripture-doc-no-results {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 30px 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.scripture-doc-no-results > svg {
+  width: 18px;
+  height: 18px;
+}
+
+.scripture-doc-no-results p {
+  margin: 0;
+  font-size: 12px;
+}
+
 .scripture-template-card {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   padding: 12px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
@@ -1448,6 +2252,68 @@ html[data-scripture-moving] * {
   text-align: left;
   cursor: pointer;
   transition: border-color 0.12s, background 0.12s;
+}
+
+.scripture-template-preview {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 4px;
+  height: 58px;
+  margin-bottom: 4px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background-color: var(--background);
+  background-image: radial-gradient(color-mix(in srgb, var(--border) 65%, transparent) 1px, transparent 1px);
+  background-size: 10px 10px;
+  color: var(--muted-foreground);
+}
+
+.scripture-template-preview i {
+  display: block;
+  flex: 1;
+  max-width: 42px;
+  border: 1px solid color-mix(in srgb, var(--ring) 28%, var(--border));
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--muted) 80%, transparent);
+}
+
+.scripture-template-preview svg {
+  width: 16px;
+}
+
+@media (max-width: 720px) {
+  .scripture-dashboard-shell .scripture-page {
+    padding: 24px 16px 64px;
+  }
+
+  .scripture-dashboard-overview {
+    gap: 14px;
+  }
+
+  .scripture-dashboard-stats {
+    flex-wrap: wrap;
+  }
+
+  .scripture-doc-browser-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .scripture-doc-search {
+    width: 100%;
+  }
+
+  .scripture-doc-list-pages {
+    display: none;
+  }
+
+  .scripture-doc-list-time {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .scripture-template-card:hover {

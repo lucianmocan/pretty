@@ -107,6 +107,7 @@ export function addPage(docId: string): string {
   if (!doc) throw new Error(`Document ${docId} not found`)
   const pageId = crypto.randomUUID()
   doc.pageIds = [...(doc.pageIds && doc.pageIds.length > 0 ? doc.pageIds : [docId]), pageId]
+  doc.updatedAt = Date.now()
   writeAll(docs)
   return pageId
 }
@@ -120,6 +121,7 @@ export function removePage(docId: string, pageId: string) {
   const pageIds = doc.pageIds && doc.pageIds.length > 0 ? doc.pageIds : [docId]
   if (pageIds.length <= 1) return
   doc.pageIds = pageIds.filter((id) => id !== pageId)
+  doc.updatedAt = Date.now()
   writeAll(docs)
 }
 
@@ -128,5 +130,6 @@ export function reorderPages(docId: string, pageIds: string[]) {
   const doc = docs.find((d) => d.id === docId)
   if (!doc) return
   doc.pageIds = pageIds
+  doc.updatedAt = Date.now()
   writeAll(docs)
 }

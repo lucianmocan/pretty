@@ -22,6 +22,37 @@ interface SnapCandidate {
   distance: number
 }
 
+function equalGapCandidates(
+  draggedSize: number,
+  siblings: Array<[start: number, size: number]>
+): Array<{ position: number; guide: number }> {
+  const sorted = [...siblings].sort((a, b) => a[0] - b[0])
+  const candidates: Array<{ position: number; guide: number }> = []
+  for (let index = 0; index < sorted.length - 1; index += 1) {
+    const [firstStart, firstSize] = sorted[index]
+    const [secondStart, secondSize] = sorted[index + 1]
+    const firstEnd = firstStart + firstSize
+    const secondEnd = secondStart + secondSize
+    const gap = secondStart - firstEnd
+    if (gap < 0) continue
+
+    // Continue an existing equal gap before or after a sibling pair.
+    const after = secondEnd + gap
+    const before = firstStart - gap - draggedSize
+    candidates.push({ position: after, guide: secondEnd })
+    candidates.push({ position: before, guide: firstStart })
+
+    // Center the dragged box in an existing opening, producing equal gaps
+    // on both sides. Duplicate candidates retain both boundary guides.
+    if (secondStart - firstEnd >= draggedSize) {
+      const between = (firstEnd + secondStart - draggedSize) / 2
+      candidates.push({ position: between, guide: firstEnd })
+      candidates.push({ position: between, guide: secondStart })
+    }
+  }
+  return candidates
+}
+
 function nearestAlignment(
   draggedStart: number,
   draggedSize: number,
@@ -109,18 +140,30 @@ export function snapPosition(
     dragged.width,
     siblings.map((sibling): [number, number] => [sibling.x, sibling.width]),
     snapThreshold,
-    containerSize
-      ? [{ position: (containerSize.width - dragged.width) / 2, guide: containerSize.width / 2 }]
-      : []
+    [
+      ...(containerSize
+        ? [{ position: (containerSize.width - dragged.width) / 2, guide: containerSize.width / 2 }]
+        : []),
+      ...equalGapCandidates(
+        dragged.width,
+        siblings.map((sibling): [number, number] => [sibling.x, sibling.width])
+      ),
+    ]
   )
   const yAlignment = nearestAlignment(
     dragged.y,
     dragged.height,
     siblings.map((sibling): [number, number] => [sibling.y, sibling.height]),
     snapThreshold,
-    containerSize
-      ? [{ position: (containerSize.height - dragged.height) / 2, guide: containerSize.height / 2 }]
-      : []
+    [
+      ...(containerSize
+        ? [{ position: (containerSize.height - dragged.height) / 2, guide: containerSize.height / 2 }]
+        : []),
+      ...equalGapCandidates(
+        dragged.height,
+        siblings.map((sibling): [number, number] => [sibling.y, sibling.height])
+      ),
+    ]
   )
   if (xAlignment) {
     x = xAlignment.position

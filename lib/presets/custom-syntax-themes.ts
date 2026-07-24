@@ -1,4 +1,4 @@
-import { DEFAULT_THEME } from '@/lib/presets'
+import { DEFAULT_THEME, THEME_PREVIEWS } from '@/lib/presets'
 import { buildShikiTheme, type CustomSyntaxTheme } from '@/lib/shiki/custom-theme'
 
 const STORAGE_KEY = 'scripture:custom-syntax-themes'
@@ -92,4 +92,18 @@ export function resolveThemeArg(theme: string | undefined) {
   const id = value.slice(CUSTOM_THEME_PREFIX.length)
   const custom = getCustomSyntaxTheme(id)
   return custom ? buildShikiTheme(custom) : DEFAULT_THEME
+}
+
+/** Resolves the visual background that belongs to a code block's syntax
+ * theme. Unlike tokenization, this is synchronous so picking a theme updates
+ * the block surface immediately; the resolved value is also persisted on
+ * the block so the server-rendered print route can reproduce custom themes
+ * without access to this browser's localStorage. */
+export function resolveThemeBackground(theme: string | undefined): string {
+  const value = theme ?? DEFAULT_THEME
+  if (isCustomThemeValue(value)) {
+    const id = value.slice(CUSTOM_THEME_PREFIX.length)
+    return getCustomSyntaxTheme(id)?.background ?? THEME_PREVIEWS[DEFAULT_THEME].bg
+  }
+  return THEME_PREVIEWS[value as keyof typeof THEME_PREVIEWS]?.bg ?? THEME_PREVIEWS[DEFAULT_THEME].bg
 }

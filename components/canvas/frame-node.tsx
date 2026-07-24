@@ -8,7 +8,15 @@ import { frameOuterStyle, frameInnerStyle, outerBoxStyle, contentOverflowStyle }
 import { snapPosition } from '@/lib/layout/canvas-snap'
 import { BlockEditor } from '@/components/editor/block-editor'
 import { getYDoc } from '@/lib/yjs/doc-store'
-import { ROOT_ID, updateCallout, removeCallout, updateImageProps, type GutterClickMode } from '@/lib/yjs/layout-store'
+import {
+  ROOT_ID,
+  updateCallout,
+  removeCallout,
+  updateCodeProps,
+  updateImageProps,
+  type GutterClickMode,
+} from '@/lib/yjs/layout-store'
+import { resolveThemeBackground } from '@/lib/presets/custom-syntax-themes'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ResizeHandles } from './resize-handles'
@@ -17,12 +25,14 @@ import { ImageBlock } from './image-block'
 import { OverflowFade } from './overflow-fade'
 import { useOverflowFade } from '@/lib/use-overflow-fade'
 import type { PositionPatch, SizePatch } from '@/lib/layout/resize-geometry'
+import { useGeometryRegistry } from './geometry-registry'
 
 interface FrameNodeProps {
   node: LayoutNode
   docId: string
   selectedIds: string[]
   onSelect: (id: string, additive: boolean) => void
+  onSelectionChange: (ids: string[]) => void
   onMove: (id: string, direction: 'up' | 'down') => void
   onDuplicate: (id: string) => void
   onRemove: (id: string) => void
@@ -55,6 +65,8 @@ interface FrameNodeProps {
   // of "place a text cursor".
   editingId: string | null
   onSetEditing: (id: string | null) => void
+  parentId?: string | null
+  onAddBlockToFrame: (frameId: string, kind: 'code' | 'text' | 'image') => void
 }
 
 function classNames(...parts: Array<string | false | undefined>) {
@@ -238,6 +250,7 @@ export function FrameNode({
   docId,
   selectedIds,
   onSelect,
+  onSelectionChange,
   onMove,
   onDuplicate,
   onRemove,
@@ -250,8 +263,12 @@ export function FrameNode({
   zoom,
   editingId,
   onSetEditing,
+  parentId = null,
+  onAddBlockToFrame,
 }: FrameNodeProps) {
   const isRoot = node.id === ROOT_ID
+  const resolvedCodeBackground = node.kind === 'code' ? resolveThemeBackground(node.theme) : undefined
+  const nodeChildLayout = node.kind === 'frame' ? (node.childLayout ?? 'flex') : 'flex'
   const isSelected = selectedIds.includes(node.id)
   const isCanvasChild = parentChildLayout === 'canvas'
   // Only textual canvas-mode blocks need the selected-vs-editing split --
@@ -281,7 +298,18 @@ export function FrameNode({
     scrollLeft: number
     scrollTop: number
   } | null>(null)
+  const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   const elementRef = useRef<HTMLDivElement>(null)
+
+  // Persist the resolved color on the block so custom themes survive the
+  // server-rendered print/export path, which cannot read browser-local theme
+  // definitions. This also backfills existing blocks created before theme
+  // backgrounds moved off the canvas.
+  useEffect(() => {
+    if (node.kind !== 'code' || node.themeBackground === resolvedCodeBackground) return
+    updateCodeProps(getYDoc(docId).doc, node.id, { themeBackground: resolvedCodeBackground })
+  }, [docId, node.id, node.kind, node.themeBackground, resolvedCodeBackground])
+
   // The inner content wrapper (.scripture-frame-content/.scripture-leaf-
   // content) -- overflow-fade tracks THIS element's scroll state, since
   // it's the one that actually has overflow once either dimension is fixed
@@ -296,13 +324,31 @@ export function FrameNode({
   // onRepositionNode against a stale node id/closure.
   const activeDragCleanupRef = useRef<(() => void) | null>(null)
   const controlsHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const activeMarqueeCleanupRef = useRef<(() => void) | null>(null)
+  const { observe: observeGeometry } = useGeometryRegistry()
 
   useEffect(() => {
     return () => {
       activeDragCleanupRef.current?.()
+      activeMarqueeCleanupRef.current?.()
       if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    const element = elementRef.current
+    if (!element) return
+    return observeGeometry(node.id, parentId, element, element.parentElement, zoom)
+  }, [
+    node.id,
+    parentId,
+    zoom,
+    node.x,
+    node.y,
+    node.width,
+    node.height,
+    observeGeometry,
+  ])
 
   function showNodeControls() {
     if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current)
@@ -496,6 +542,109 @@ export function FrameNode({
     window.addEventListener('scroll', updateDragGeometry, true)
   }
 
+  function beginMarquee(e: React.PointerEvent<HTMLDivElement>) {
+    if (
+      nodeChildLayout !== 'canvas' ||
+      e.target !== e.currentTarget ||
+      !e.isPrimary ||
+      e.button !== 0 ||
+      activeMarqueeCleanupRef.current
+    ) {
+      return
+    }
+    e.stopPropagation()
+    const container = e.currentTarget
+    const pointerId = e.pointerId
+    const rect = container.getBoundingClientRect()
+    const startScrollLeft = container.scrollLeft
+    const startScrollTop = container.scrollTop
+    const start = {
+      x: (e.clientX - rect.left) / zoom + startScrollLeft,
+      y: (e.clientY - rect.top) / zoom + startScrollTop,
+    }
+    let moved = false
+
+    const point = (event: PointerEvent) => {
+      const currentRect = container.getBoundingClientRect()
+      return {
+        x: (event.clientX - currentRect.left) / zoom + container.scrollLeft,
+        y: (event.clientY - currentRect.top) / zoom + container.scrollTop,
+      }
+    }
+    const boxFor = (event: PointerEvent) => {
+      const current = point(event)
+      return {
+        x: Math.min(start.x, current.x),
+        y: Math.min(start.y, current.y),
+        width: Math.abs(current.x - start.x),
+        height: Math.abs(current.y - start.y),
+      }
+    }
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return
+      const box = boxFor(event)
+      if (!moved && Math.hypot(box.width, box.height) < MOVE_DRAG_THRESHOLD) return
+      moved = true
+      event.preventDefault()
+      setMarquee(box)
+    }
+    const finish = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return
+      const box = moved ? boxFor(event) : null
+      cleanup()
+      setMarquee(null)
+      if (!box) {
+        onSelectionChange([node.id])
+        return
+      }
+      suppressNextClick()
+      const selected = Array.from(container.querySelectorAll<HTMLElement>(':scope > [data-node-id]'))
+        .filter((child) => {
+          const currentRect = container.getBoundingClientRect()
+          const childRect = child.getBoundingClientRect()
+          const childBox = {
+            x: (childRect.left - currentRect.left) / zoom + container.scrollLeft,
+            y: (childRect.top - currentRect.top) / zoom + container.scrollTop,
+            width: childRect.width / zoom,
+            height: childRect.height / zoom,
+          }
+          return (
+            childBox.x < box.x + box.width &&
+            childBox.x + childBox.width > box.x &&
+            childBox.y < box.y + box.height &&
+            childBox.y + childBox.height > box.y
+          )
+        })
+        .map((child) => child.dataset.nodeId)
+        .filter((id): id is string => Boolean(id))
+      onSelectionChange(selected.length > 0 ? selected : [node.id])
+    }
+    const cancel = () => {
+      cleanup()
+      setMarquee(null)
+    }
+    const onCancel = (event: PointerEvent) => {
+      if (event.pointerId === pointerId) cancel()
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') cancel()
+    }
+    function cleanup() {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', onCancel)
+      window.removeEventListener('blur', cancel)
+      window.removeEventListener('keydown', onKeyDown)
+      activeMarqueeCleanupRef.current = null
+    }
+    activeMarqueeCleanupRef.current = cleanup
+    window.addEventListener('pointermove', onMove, { passive: false })
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', onCancel)
+    window.addEventListener('blur', cancel)
+    window.addEventListener('keydown', onKeyDown)
+  }
+
   // Canvas mode no longer uses the grip at all -- see showGrip below --
   // dragging is wired directly to the block's own onPointerDown instead.
   const gripHandlers: GripHandlers =
@@ -618,9 +767,26 @@ export function FrameNode({
             outer box above -- see frameInnerStyle's doc comment for why:
             NodeControls/resizeHandles/callouts below must never be clipped
             by this frame's own overflow once it has an explicit size. */}
-        <div ref={contentRef} className="scripture-frame-content" style={frameInnerStyle(renderedNode)}>
+        <div
+          ref={contentRef}
+          className="scripture-frame-content"
+          style={frameInnerStyle(renderedNode)}
+          onPointerDown={beginMarquee}
+        >
           {children.length === 0 && (
-            <div className="scripture-empty-frame">Empty frame. Select it and add a block.</div>
+            <div className="scripture-empty-frame">
+              <span>{isRoot ? 'Start your document with a code block.' : 'This frame is empty.'}</span>
+              <Button
+                size="sm"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onAddBlockToFrame(node.id, 'code')
+                }}
+              >
+                Add code block
+              </Button>
+            </div>
           )}
           {children.map((child) => (
             <FrameNode
@@ -629,6 +795,7 @@ export function FrameNode({
               docId={docId}
               selectedIds={selectedIds}
               onSelect={onSelect}
+              onSelectionChange={onSelectionChange}
               onMove={onMove}
               onDuplicate={onDuplicate}
               onRemove={onRemove}
@@ -641,8 +808,21 @@ export function FrameNode({
               zoom={zoom}
               editingId={editingId}
               onSetEditing={onSetEditing}
+              parentId={node.id}
+              onAddBlockToFrame={onAddBlockToFrame}
             />
           ))}
+          {marquee && (
+            <div
+              className="scripture-selection-marquee"
+              style={{
+                left: marquee.x,
+                top: marquee.y,
+                width: marquee.width,
+                height: marquee.height,
+              }}
+            />
+          )}
         </div>
         <OverflowFade state={overflowFade} />
         {(node.callouts ?? []).map((callout) => (
@@ -653,6 +833,7 @@ export function FrameNode({
             callout={callout}
             onChange={(patch) => updateCallout(getYDoc(docId).doc, node.id, callout.id, patch)}
             onRemove={() => removeCallout(getYDoc(docId).doc, node.id, callout.id)}
+            zoom={zoom}
           />
         ))}
         {resizeHandles}
@@ -672,7 +853,11 @@ export function FrameNode({
         isSelected && 'scripture-selected',
         isDragOver && 'is-drag-over'
       )}
-      style={{ ...outerBoxStyle(renderedNode), ...canvasPositionStyle }}
+      style={{
+        ...outerBoxStyle(renderedNode),
+        ...(resolvedCodeBackground && { background: resolvedCodeBackground }),
+        ...canvasPositionStyle,
+      }}
       onClick={(e) => {
         e.stopPropagation()
         onSelect(node.id, e.shiftKey)
@@ -728,7 +913,6 @@ export function FrameNode({
             trimRanges={node.trimRanges}
             diffLines={node.diffLines}
             onLineClick={(lineNumber) => onGutterClick(node.id, lineNumber)}
-            onEmptyBlur={() => onRemove(node.id)}
           />
         )}
       </div>

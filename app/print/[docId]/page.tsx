@@ -10,6 +10,7 @@ import { blockFragmentName } from '@/lib/yjs/doc-store'
 import { toPlainTree, ROOT_ID } from '@/lib/yjs/layout-store'
 import { frameStyle, sizeStyle } from '@/lib/layout/frame-style'
 import type { ChildLayout, LayoutNode } from '@/lib/layout/types'
+import { resolveThemeBackground } from '@/lib/presets/custom-syntax-themes'
 import { CanvasRoot } from '@/components/canvas/canvas-root'
 import { CodeChrome } from '@/components/editor/code-chrome'
 
@@ -118,7 +119,11 @@ function renderNode(node: LayoutNode, ydoc: Y.Doc, parentChildLayout: ChildLayou
     <div
       key={node.id}
       className={['scripture-leaf', ...autoSizeClasses(node)].join(' ')}
-      style={{ ...sizeStyle(node), ...leafPositionStyle }}
+      style={{
+        ...sizeStyle(node),
+        background: node.themeBackground ?? resolveThemeBackground(node.theme),
+        ...leafPositionStyle,
+      }}
     >
       <CodeChrome
         fontFamily={node.fontFamily ?? 'geist-mono'}

@@ -9,25 +9,38 @@ export interface Match extends LocalMatch {
   blockId: string
 }
 
-/** Position-tracked substring search over a single editor's document --
- * the standard ProseMirror technique: descendants() already reports each
- * text node's correct absolute position (accounting for every ancestor
- * node's open/close boundaries), so `pos + index` needs no further offset
- * math regardless of nesting depth (flat code blocks vs paragraph-wrapped
- * text blocks alike). Case-insensitive. */
+/** Position-tracked substring search over a single editor's document.
+ * Adjacent ProseMirror text nodes are merged into a searchable run, which
+ * lets a match cross bold/italic/syntax mark boundaries while preserving
+ * the exact document positions needed by selection and replacement. */
 export function findMatchesInEditor(editor: Editor, query: string): LocalMatch[] {
   if (!query) return []
   const matches: LocalMatch[] = []
   const lowerQuery = query.toLowerCase()
+  const runs: Array<{ text: string; positions: number[] }> = []
+  let current: { text: string; positions: number[] } | null = null
   editor.state.doc.descendants((node, pos) => {
     if (!node.isText || !node.text) return
-    const text = node.text.toLowerCase()
+    const expected = current && current.positions.length > 0
+      ? current.positions[current.positions.length - 1] + 1
+      : null
+    if (!current || expected !== pos) {
+      current = { text: '', positions: [] }
+      runs.push(current)
+    }
+    current.text += node.text
+    for (let index = 0; index < node.text.length; index += 1) current.positions.push(pos + index)
+  })
+
+  for (const run of runs) {
+    const text = run.text.toLowerCase()
     let index = text.indexOf(lowerQuery)
     while (index !== -1) {
-      matches.push({ from: pos + index, to: pos + index + query.length })
+      const endIndex = index + query.length - 1
+      matches.push({ from: run.positions[index], to: run.positions[endIndex] + 1 })
       index = text.indexOf(lowerQuery, index + 1)
     }
-  })
+  }
   return matches
 }
 

@@ -6,7 +6,6 @@ import type { EditorView } from '@tiptap/pm/view'
 import { TextSelection } from '@tiptap/pm/state'
 import { Collaboration } from '@tiptap/extension-collaboration'
 import { getYDoc, getUndoManager, blockFragmentName } from '@/lib/yjs/doc-store'
-import { setRootBackgroundIfAuto } from '@/lib/yjs/layout-store'
 import { baseExtensions } from '@/lib/tiptap/extensions'
 import { tokenizeCode } from '@/lib/shiki/tokenize'
 import { tokensToContent, type ProseMirrorTextNode } from '@/lib/tiptap/shiki-to-doc'
@@ -112,11 +111,6 @@ interface BlockEditorProps {
   trimRanges?: Array<[number, number]>
   diffLines?: Record<number, 'add' | 'remove'>
   onLineClick?: (lineNumber: number) => void
-  // Called when the user clicks away from a block that's completely empty --
-  // the caller (frame-node.tsx) wires this to the same removeNode used by
-  // the delete button, so an untouched/emptied block doesn't linger around
-  // invisible and hard to find.
-  onEmptyBlur?: () => void
 }
 
 /**
@@ -145,7 +139,6 @@ export function BlockEditor({
   trimRanges = [],
   diffLines = {},
   onLineClick,
-  onEmptyBlur,
 }: BlockEditorProps) {
   const [synced, setSynced] = useState(false)
   const languageRef = useRef(language)
@@ -210,7 +203,7 @@ export function BlockEditor({
 
     const generation = ++retokenizeGenerationRef.current
     try {
-      const { lines: tokenizedLines, themeBg } = await tokenizeCode(
+      const { lines: tokenizedLines } = await tokenizeCode(
         newText,
         languageRef.current ?? 'plaintext',
         resolveThemeArg(themeRef.current)
@@ -343,7 +336,6 @@ export function BlockEditor({
       }
 
       prevTextRef.current = newText
-      setRootBackgroundIfAuto(ydoc, themeBg)
     } catch (err) {
       console.error('Failed to re-highlight edited code', err)
       if (generation === retokenizeGenerationRef.current) prevTextRef.current = newText
@@ -419,11 +411,6 @@ export function BlockEditor({
           prevTextRef.current !== editor.state.doc.textContent
         ) {
           scheduleRetokenize(editor)
-        }
-      },
-      onBlur({ editor }) {
-        if (editor.state.doc.textContent.trim().length === 0) {
-          onEmptyBlur?.()
         }
       },
     },
@@ -502,7 +489,7 @@ export function BlockEditor({
     // retokenizeChangedLines call -- same reasoning as the paste handler.
     retokenizeGenerationRef.current++
     tokenizeCode(text, language ?? 'plaintext', resolveThemeArg(theme))
-      .then(({ lines, themeBg }) => {
+      .then(({ lines }) => {
         // `text` was captured before this await -- if the user kept typing
         // during the round trip, applying a replace built from that now-
         // stale snapshot would silently discard every character typed since
@@ -519,7 +506,6 @@ export function BlockEditor({
           isRetokenizingRef.current = false
         }
         prevTextRef.current = editor.state.doc.textContent
-        setRootBackgroundIfAuto(ydoc, themeBg)
       })
       .catch((err) => console.error('Failed to re-highlight existing code', err))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -531,14 +517,32 @@ export function BlockEditor({
     editor,
     selector: ({ editor }) => (editor ? editor.state.doc.textContent.split('\n').length : 1),
   })
+  const isEmpty = useEditorState({
+    editor,
+    selector: ({ editor }) => (editor ? editor.state.doc.textContent.trim().length === 0 : true),
+  })
 
   if (!synced) {
     return <div className="scripture-editor-loading">Loading…</div>
   }
 
+  const placeholder =
+    kind === 'code'
+      ? editable
+        ? 'Paste or type code…'
+        : 'Double-click to add code'
+      : editable
+        ? 'Write something…'
+        : 'Double-click to add text'
+
   const editorContent = (
-    <div className="scripture-editor-wrapper">
+    <div className="scripture-editor-wrapper" data-empty={isEmpty || undefined} data-kind={kind}>
       {editor && <BubbleToolbar editor={editor} />}
+      {isEmpty && (
+        <span className="scripture-editor-placeholder" aria-hidden="true">
+          {placeholder}
+        </span>
+      )}
       <EditorContent editor={editor} />
     </div>
   )

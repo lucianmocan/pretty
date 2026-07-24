@@ -1,5 +1,12 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, JetBrains_Mono, Fira_Code, IBM_Plex_Mono } from "next/font/google";
+import {
+  Fira_Code,
+  Geist,
+  Geist_Mono,
+  IBM_Plex_Mono,
+  JetBrains_Mono,
+  Luckiest_Guy,
+} from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
@@ -11,6 +18,12 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+});
+
+const luckiestGuy = Luckiest_Guy({
+  variable: "--font-luckiest-guy",
+  subsets: ["latin"],
+  weight: "400",
 });
 
 // Per-code-block font choices (see lib/presets.ts FONT_OPTIONS) -- loaded
@@ -45,7 +58,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`dark ${geistSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} ${firaCode.variable} ${ibmPlexMono.variable} h-full antialiased`}
+      className={`dark ${geistSans.variable} ${geistMono.variable} ${luckiestGuy.variable} ${jetbrainsMono.variable} ${firaCode.variable} ${ibmPlexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <TooltipProvider>{children}</TooltipProvider>

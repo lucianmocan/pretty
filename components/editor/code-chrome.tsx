@@ -164,6 +164,7 @@ export function CodeChrome({
 
   const rowHeight = lineHeight * CODE_FONT_SIZE_PX
   const highlightSet = rangesToSet(highlightLines)
+  const trimmedSet = rangesToSet(trimRanges)
   const showTrimCovers = trimRanges.length > 0 && !revealed
   const lineNumbers = Array.from({ length: Math.max(lineCount, 1) }, (_, i) => i + 1)
 
@@ -177,15 +178,35 @@ export function CodeChrome({
             aria-hidden={onLineClick ? undefined : 'true'}
             data-node-drag-ignore={onLineClick ? 'true' : undefined}
           >
-            {lineNumbers.map((lineNumber) => (
-              <div
-                key={lineNumber}
-                className={onLineClick ? 'scripture-line-number-clickable' : undefined}
-                onClick={onLineClick ? () => onLineClick(lineNumber) : undefined}
-              >
-                {lineNumber - 1 + startLineNumber}
-              </div>
-            ))}
+            {lineNumbers.map((lineNumber) => {
+              const displayNumber = lineNumber - 1 + startLineNumber
+              const diff = diffLines[lineNumber]
+              const highlighted = highlightSet.has(lineNumber)
+              const trimmed = trimmedSet.has(lineNumber)
+              const state = [
+                highlighted && 'highlighted',
+                diff === 'add' && 'added',
+                diff === 'remove' && 'removed',
+                trimmed && 'trimmed',
+              ].filter(Boolean)
+              return onLineClick ? (
+                <button
+                  key={lineNumber}
+                  type="button"
+                  className="scripture-line-number-clickable"
+                  onClick={() => onLineClick(lineNumber)}
+                  aria-pressed={state.length > 0}
+                  aria-label={`Line ${displayNumber}${state.length > 0 ? `, ${state.join(', ')}` : ''}`}
+                  data-highlighted={highlighted || undefined}
+                  data-diff={diff}
+                  data-trimmed={trimmed || undefined}
+                >
+                  {displayNumber}
+                </button>
+              ) : (
+                <div key={lineNumber}>{displayNumber}</div>
+              )
+            })}
           </div>
         )}
         <div className="scripture-code-content">

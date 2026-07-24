@@ -58,3 +58,29 @@ test('prefers a closer sibling over the parent center axis', () => {
   assert.equal(result.x, 142)
   assert.deepEqual(result.guides.x, [142, 192, 242])
 })
+
+test('snaps to continue an equal sibling gap', () => {
+  const result = snapPosition(
+    { x: 96, y: 200, width: 20, height: 20 },
+    [
+      { x: 20, y: 20, width: 20, height: 20 },
+      { x: 60, y: 80, width: 20, height: 20 },
+    ]
+  )
+
+  assert.equal(result.x, 100)
+  assert.deepEqual(result.guides.x, [80])
+})
+
+test('snaps to equal gaps on both sides inside an opening', () => {
+  const result = snapPosition(
+    { x: 74, y: 200, width: 20, height: 20 },
+    [
+      { x: 20, y: 20, width: 20, height: 20 },
+      { x: 120, y: 80, width: 20, height: 20 },
+    ]
+  )
+
+  assert.equal(result.x, 70)
+  assert.deepEqual(result.guides.x, [40, 120])
+})
