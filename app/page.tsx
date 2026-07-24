@@ -6,7 +6,9 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   ArrowRight,
+  Download,
   HardDrive,
+  Languages,
   MoveUpRight,
 } from 'lucide-react'
 import { createDocument } from '@/lib/documents/manifest'
@@ -67,11 +69,15 @@ export default function PrettyHomePage() {
                 No account or cloud sync. Everything stays in this browser.
               </span>
               <div className="scripture-hero-facts" aria-label="Product highlights">
-                <span>235+ languages</span>
+                <span>
+                  <Languages />
+                  235+ languages
+                </span>
                 <i />
-                <span>Flex + free-form</span>
-                <i />
-                <span>PNG + PDF export</span>
+                <span>
+                  <Download />
+                  PNG + PDF export
+                </span>
               </div>
             </div>
           </div>
@@ -98,8 +104,8 @@ export default function PrettyHomePage() {
 
       <footer className="scripture-landing-footer">
         <Link href="/" className="scripture-landing-logo" aria-label="Pretty home">pretty</Link>
-        <p>Free and open source</p>
         <div>
+          <p>Free and open source</p>
           <a href="https://github.com/lucianmocan/scripture/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0</a>
         </div>
       </footer>

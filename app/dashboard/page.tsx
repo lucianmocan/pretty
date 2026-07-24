@@ -199,9 +199,7 @@ export default function DocumentsDashboardPage() {
             <>
               <section className="scripture-dashboard-overview" aria-labelledby="documents-heading">
                 <div className="scripture-dashboard-heading">
-                  <span className="scripture-dashboard-eyebrow">Local workspace</span>
                   <h2 id="documents-heading">Documents</h2>
-                  <p>Create, arrange, and export publication-ready code figures.</p>
                 </div>
                 {docs.length > 0 && (
                   <Button onClick={() => setShowTemplatePicker(true)}>

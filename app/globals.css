@@ -1082,10 +1082,8 @@ html[data-scripture-moving] * {
 
 /* The dashboard's PageToolbar (components/layout/page-toolbar.tsx) -- a
    flush, full-bleed header bar sitting at the very top of the viewport,
-   matching .scripture-app-menubar's own treatment exactly (same height,
-   same bottom-border-only styling, no rounded corners/margin/shadow) so the
-   two routes read as one consistent product instead of the dashboard
-   inventing its own "floating rounded card" header look. Lives OUTSIDE
+   matching .scripture-app-menubar's compact treatment without introducing
+   a floating rounded card. Lives OUTSIDE
    .scripture-page now (see scripture-dashboard-shell), so it's never
    constrained by that content area's own max-width/padding. */
 .scripture-toolbar {
@@ -1097,7 +1095,7 @@ html[data-scripture-moving] * {
   height: 44px;
   flex-shrink: 0;
   padding: 0 20px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0;
   background: var(--card);
 }
 
@@ -1762,10 +1760,11 @@ html[data-scripture-moving] * {
 }
 
 .scripture-landing-nav-links {
-  align-self: flex-start;
+  align-self: center;
   justify-content: flex-end;
   gap: 28px;
-  margin-top: 18px;
+  margin-top: 0;
+  transform: translateY(-7px);
 }
 
 .scripture-landing-nav-links a {
@@ -1889,6 +1888,17 @@ html[data-scripture-moving] * {
   font-size: 10px;
 }
 
+.scripture-hero-facts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.scripture-hero-facts svg {
+  width: 12px;
+  height: 12px;
+}
+
 .scripture-hero-facts i {
   width: 2px;
   height: 2px;
@@ -1967,7 +1977,7 @@ html[data-scripture-moving] * {
 
 .scripture-landing-footer {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 28px;
   min-height: 108px;
@@ -2039,54 +2049,136 @@ html[data-scripture-moving] * {
   }
 
   .scripture-landing-logo {
-    font-size: 27px;
+    font-size: 28px;
   }
 
   .scripture-landing-nav-links {
-    margin-top: 16px;
+    align-self: center;
+    margin-top: 0;
+  }
+
+  .scripture-landing-nav-links a {
+    font-size: 14px;
+  }
+
+  .scripture-github-mark {
+    width: 17px;
+    height: 17px;
   }
 
   .scripture-landing-hero {
-    gap: 54px;
+    gap: 44px;
     min-height: auto;
-    padding: 70px 0 72px;
+    padding: 54px 0 64px;
   }
 
   .scripture-hero-copy h1 {
-    font-size: clamp(46px, 14vw, 68px);
+    margin-bottom: 18px;
+    font-size: clamp(48px, 15vw, 68px);
+    line-height: 0.93;
   }
 
   .scripture-hero-copy > p {
     font-size: 15px;
+    line-height: 1.55;
   }
 
   .scripture-hero-actions {
     align-items: stretch;
     flex-direction: column;
+    margin-top: 26px;
   }
 
   .scripture-hero-actions [data-slot='button'] {
     width: 100%;
   }
 
+  .scripture-hero-privacy {
+    width: 100%;
+    margin-top: 16px;
+    padding: 12px 13px;
+  }
+
+  .scripture-hero-local-note {
+    align-items: flex-start;
+    line-height: 1.45;
+  }
+
+  .scripture-hero-local-note svg {
+    margin-top: 1px;
+  }
+
   .scripture-hero-facts {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    gap: 6px 8px;
+    line-height: 1.4;
+  }
+
+  .scripture-product-glow {
+    inset: 12% 2% 0;
+    filter: blur(44px);
+  }
+
+  .scripture-product-screenshot {
+    aspect-ratio: 1.28;
+    border-radius: 10px;
+  }
+
+  .scripture-product-screenshot img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
   }
 
   .scripture-landing-cta {
-    margin-bottom: 70px;
-    padding: 40px 28px;
+    margin-bottom: 56px;
+    padding: 38px 22px;
+  }
+
+  .scripture-landing-cta h2 {
+    font-size: clamp(36px, 11vw, 48px);
   }
 
   .scripture-landing-footer {
-    display: flex;
-    align-items: flex-start;
-    flex-direction: column;
-    padding: 34px 0;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 12px;
+    min-height: auto;
+    padding: 28px 0 34px;
   }
 
   .scripture-landing-footer p {
-    text-align: left;
+    white-space: nowrap;
+    text-align: center;
+  }
+
+  .scripture-landing-footer > div {
+    justify-content: flex-end;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 440px) {
+  .scripture-landing-nav,
+  .scripture-landing-hero,
+  .scripture-landing-cta,
+  .scripture-landing-footer {
+    width: calc(100% - 24px);
+  }
+
+  .scripture-landing-hero {
+    gap: 38px;
+    padding-top: 44px;
+  }
+
+  .scripture-hero-copy h1 {
+    font-size: clamp(46px, 16vw, 60px);
+  }
+
+  .scripture-product-screenshot {
+    aspect-ratio: 1.12;
   }
 }
 
@@ -2151,11 +2243,11 @@ html[data-scripture-moving] * {
 .scripture-dashboard-overview {
   display: flex;
   align-items: flex-start;
-  gap: 20px;
+  gap: 8px 20px;
   flex-wrap: wrap;
   width: 100%;
-  padding: 8px 0 26px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 0;
+  border-bottom: 0;
 }
 
 .scripture-dashboard-heading {
@@ -2216,7 +2308,7 @@ html[data-scripture-moving] * {
   flex-direction: column;
   gap: 30px;
   width: 100%;
-  padding-top: 28px;
+  padding-top: 12px;
 }
 
 .scripture-dashboard-loading {
