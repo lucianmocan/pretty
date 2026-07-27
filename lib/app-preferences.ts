@@ -24,8 +24,10 @@ export const EXPORT_FORMAT_OPTIONS = ['pdf', 'png'] as const
 export type ExportFormat = (typeof EXPORT_FORMAT_OPTIONS)[number]
 export const EXPORT_QUALITY_OPTIONS = ['standard', 'high', 'maximum'] as const
 export type ExportQuality = (typeof EXPORT_QUALITY_OPTIONS)[number]
-export const EXPORT_MARGIN_OPTIONS = [0, 16, 32, 64] as const
-export type ExportMargin = (typeof EXPORT_MARGIN_OPTIONS)[number]
+export const EXPORT_MARGIN_OPTIONS = [0, 16, 32] as const
+export const MIN_EXPORT_MARGIN = 0
+export const MAX_EXPORT_MARGIN = 512
+export type ExportMargin = number
 
 export const DEFAULT_APP_THEME: AppTheme = 'dark'
 export const DEFAULT_UI_DENSITY: UiDensity = 'comfortable'
@@ -46,8 +48,11 @@ export const normalizeExportFormat = (value: unknown) => option(value, EXPORT_FO
 export const normalizeExportQuality = (value: unknown) => option(value, EXPORT_QUALITY_OPTIONS, DEFAULT_EXPORT_QUALITY)
 
 export function normalizeExportMargin(value: unknown): ExportMargin {
+  if (value === null || value === '') return DEFAULT_EXPORT_MARGIN
   const parsed = Number(value)
-  return EXPORT_MARGIN_OPTIONS.includes(parsed as ExportMargin) ? (parsed as ExportMargin) : DEFAULT_EXPORT_MARGIN
+  return Number.isInteger(parsed) && parsed >= MIN_EXPORT_MARGIN && parsed <= MAX_EXPORT_MARGIN
+    ? parsed
+    : DEFAULT_EXPORT_MARGIN
 }
 
 function stored(key: string): string | null {

@@ -5,7 +5,7 @@ import type { LayoutNode } from './types'
  * Pure data -> CSS mapping, the single source of truth for how a frame's
  * stored props become flexbox styling. The split outer/inner helpers below
  * are called identically by the live canvas and the static export renderer,
- * so both use the same sizing and positioning boxes. The root frame's shadow
+ * so both use the same sizing and positioning boxes. The root frame's base
  * treatment is a separate `.scripture-card` class the caller applies -- not
  * part of this data-driven style, since it's fixed chrome, not a stored prop.
  */

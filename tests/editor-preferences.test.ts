@@ -7,14 +7,19 @@ import {
   normalizeTabSize,
 } from '../lib/editor-preferences.ts'
 
-test('accepts the supported editor tab sizes', () => {
+test('accepts preset and custom editor tab sizes', () => {
+  assert.equal(normalizeTabSize(1), 1)
   assert.equal(normalizeTabSize(2), 2)
+  assert.equal(normalizeTabSize(3), 3)
   assert.equal(normalizeTabSize('4'), 4)
   assert.equal(normalizeTabSize(8), 8)
+  assert.equal(normalizeTabSize(16), 16)
 })
 
-test('falls back for unsupported or invalid tab sizes', () => {
-  assert.equal(normalizeTabSize(3), DEFAULT_TAB_SIZE)
+test('falls back for out-of-range or invalid tab sizes', () => {
+  assert.equal(normalizeTabSize(0), DEFAULT_TAB_SIZE)
+  assert.equal(normalizeTabSize(17), DEFAULT_TAB_SIZE)
+  assert.equal(normalizeTabSize(2.5), DEFAULT_TAB_SIZE)
   assert.equal(normalizeTabSize('nope'), DEFAULT_TAB_SIZE)
   assert.equal(normalizeTabSize(null), DEFAULT_TAB_SIZE)
 })

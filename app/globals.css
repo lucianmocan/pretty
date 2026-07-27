@@ -382,7 +382,7 @@ html[data-scripture-reduced-motion='true'] *::after {
    overrides it. */
 .scripture-card {
   background: var(--background);
-  box-shadow: var(--shadow-lg);
+  box-shadow: none;
 }
 
 .scripture-card.scripture-auto-width {
@@ -715,9 +715,8 @@ html[data-scripture-reduced-motion='true'] *::after {
   min-height: var(--scripture-default-code-height);
 }
 
-/* Hover/selection chrome is an inset pseudo-element instead of replacing the
-   node's box-shadow. This preserves the root card's natural shadow, follows
-   each node's radius, never changes layout, and stays one screen pixel thick
+/* Hover/selection chrome is an inset pseudo-element so it follows each
+   node's radius, never changes layout, and stays one screen pixel thick
    through the inverse-zoom variable set on .scripture-canvas-viewport. */
 .scripture-frame::after,
 .scripture-leaf::after {

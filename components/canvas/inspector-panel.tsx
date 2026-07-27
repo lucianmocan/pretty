@@ -63,6 +63,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import { NumericPresetControl } from '@/components/ui/numeric-preset-control'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -80,7 +81,21 @@ import { RadiusIcon } from '@/components/ui/radius-icon'
 import { MIN_NODE_SIZE } from '@/lib/layout/resize-geometry'
 import { useGeometryRegistry } from '@/components/canvas/geometry-registry'
 import { geometryRecord, type NodeGeometry } from '@/lib/layout/geometry'
-import { useExportFormat } from '@/lib/app-preferences'
+import {
+  EXPORT_MARGIN_OPTIONS,
+  MAX_EXPORT_MARGIN,
+  MIN_EXPORT_MARGIN,
+  setExportFormat,
+  setExportMargin,
+  setExportQuality,
+  setTransparentExport,
+  useExportFormat,
+  useExportMargin,
+  useExportQuality,
+  useTransparentExport,
+  type ExportFormat,
+  type ExportQuality,
+} from '@/lib/app-preferences'
 
 interface InspectorPanelProps {
   docId: string
@@ -507,6 +522,9 @@ export function InspectorPanel({
 }: InspectorPanelProps) {
   const { measureAll } = useGeometryRegistry()
   const preferredExportFormat = useExportFormat()
+  const exportQuality = useExportQuality()
+  const exportMargin = useExportMargin()
+  const transparentExport = useTransparentExport()
 
   if (selectedIds.length > 1) {
     return (
@@ -712,6 +730,16 @@ export function InspectorPanel({
             </div>
           </div>
 
+          {/* For the root frame, manual width/height only affects a
+              Content-sized export. Fixed paper formats own their dimensions,
+              so the Size controls are hidden for those formats. */}
+          {(node.id !== ROOT_ID || (node.pageSize ?? 'content') === 'content') && (
+            <>
+              <Separator />
+              <SizeSection node={node} docId={docId} />
+            </>
+          )}
+
           {node.id === ROOT_ID && (
             <>
               <Separator />
@@ -730,7 +758,7 @@ export function InspectorPanel({
                       // place here would silently make the on-screen card the
                       // wrong size with no way left to fix it (the Size section
                       // and resize handles are hidden for any non-Content page
-                      // size, see below).
+                      // size.
                       if (v !== 'content') updateNodeSize(doc, node.id, { width: null, height: null })
                     }}
                   >
@@ -766,6 +794,62 @@ export function InspectorPanel({
                   Content-sized (default) exports at exactly the card&apos;s own size. The other options put that
                   same card onto a fixed paper size instead of resizing it to fill one.
                 </p>
+                <div className="scripture-inspector-stack">
+                  <Label>Preferred format</Label>
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    size="sm"
+                    spacing={0}
+                    className="w-full"
+                    value={preferredExportFormat}
+                    onValueChange={(value) => value && setExportFormat(value as ExportFormat)}
+                    aria-label="Preferred export format"
+                  >
+                    <ToggleGroupItem value="pdf" className="flex-1">PDF</ToggleGroupItem>
+                    <ToggleGroupItem value="png" className="flex-1">PNG</ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+                <div className="scripture-inspector-stack">
+                  <Label>Raster quality</Label>
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    size="sm"
+                    spacing={0}
+                    className="w-full"
+                    value={exportQuality}
+                    onValueChange={(value) => value && setExportQuality(value as ExportQuality)}
+                    aria-label="Export raster quality"
+                  >
+                    <ToggleGroupItem value="standard" className="flex-1">Standard</ToggleGroupItem>
+                    <ToggleGroupItem value="high" className="flex-1">High</ToggleGroupItem>
+                    <ToggleGroupItem value="maximum" className="flex-1">Maximum</ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+                <div className="scripture-inspector-stack">
+                  <Label>Margin</Label>
+                  <NumericPresetControl
+                    value={exportMargin}
+                    options={EXPORT_MARGIN_OPTIONS}
+                    min={MIN_EXPORT_MARGIN}
+                    max={MAX_EXPORT_MARGIN}
+                    unit="px"
+                    ariaLabel="Export margin"
+                    onChange={setExportMargin}
+                    className="w-full justify-start gap-1.5"
+                    choiceClassName="min-w-6 px-1.5"
+                    inputClassName="w-12 px-1.5"
+                  />
+                </div>
+                <div className="scripture-inspector-row">
+                  <Label>Transparent background</Label>
+                  <Switch
+                    checked={transparentExport}
+                    onCheckedChange={setTransparentExport}
+                    aria-label="Transparent export background"
+                  />
+                </div>
                 <div className="scripture-inspector-actions">
                   <Button
                     variant={preferredExportFormat === 'pdf' ? 'default' : 'outline'}
@@ -789,18 +873,6 @@ export function InspectorPanel({
                 <p className="scripture-inspector-hint">PDF includes every page. PNG exports the first page.</p>
                 {exportError && <p className="scripture-error-text">{exportError}</p>}
               </div>
-            </>
-          )}
-
-          {/* For the root frame, manual width/height only ever affects the
-              export when Page size is Content-sized -- the fixed formats
-              force their own paper width/height regardless (see
-              app/api/export/route.ts), so showing resize controls that do
-              nothing there would just be confusing dead UI. */}
-          {(node.id !== ROOT_ID || (node.pageSize ?? 'content') === 'content') && (
-            <>
-              <Separator />
-              <SizeSection node={node} docId={docId} />
             </>
           )}
 

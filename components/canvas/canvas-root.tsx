@@ -13,9 +13,8 @@ interface CanvasRootProps {
 }
 
 /**
- * The bleed-gutter wrapper captured via #canvas-root. Its padding covers the root frame's shadow so
- * it doesn't get clipped in the exported PDF. The root frame itself (styled
- * via frameStyle() + the .scripture-card class) supplies its own
+ * The export-gutter wrapper captured via #canvas-root. The root frame itself
+ * (styled via frameStyle() + the .scripture-card class) supplies its own
  * background/padding/radius from the layout tree.
  */
 export function CanvasRoot({

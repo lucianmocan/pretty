@@ -23,7 +23,13 @@ test('normalizes export preferences', () => {
   assert.equal(normalizeExportQuality('maximum'), 'maximum')
   assert.equal(normalizeExportQuality('huge'), 'standard')
   assert.equal(normalizeExportMargin('64'), 64)
-  assert.equal(normalizeExportMargin(12), DEFAULT_EXPORT_MARGIN)
+  assert.equal(normalizeExportMargin(12), 12)
+  assert.equal(normalizeExportMargin(512), 512)
+  assert.equal(normalizeExportMargin(-1), DEFAULT_EXPORT_MARGIN)
+  assert.equal(normalizeExportMargin(513), DEFAULT_EXPORT_MARGIN)
+  assert.equal(normalizeExportMargin(12.5), DEFAULT_EXPORT_MARGIN)
+  assert.equal(normalizeExportMargin(null), DEFAULT_EXPORT_MARGIN)
+  assert.equal(normalizeExportMargin(''), DEFAULT_EXPORT_MARGIN)
 })
 
 test('preserves existing standard raster quality per format', () => {

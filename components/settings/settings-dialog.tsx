@@ -5,34 +5,25 @@ import { Code2, ExternalLink, HardDrive, MessageSquare } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import { NumericPresetControl } from '@/components/ui/numeric-preset-control'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import packageJson from '@/package.json'
 import {
-  EXPORT_MARGIN_OPTIONS,
   setAppTheme,
-  setExportFormat,
-  setExportMargin,
-  setExportQuality,
   setMotionPreference,
-  setTransparentExport,
   setUiDensity,
   useAppTheme,
-  useExportFormat,
-  useExportMargin,
-  useExportQuality,
   useMotionPreference,
-  useTransparentExport,
   useUiDensity,
   type AppTheme,
-  type ExportFormat,
-  type ExportMargin,
-  type ExportQuality,
   type MotionPreference,
   type UiDensity,
 } from '@/lib/app-preferences'
 import {
+  MAX_TAB_SIZE,
+  MIN_TAB_SIZE,
   setAutoIndent,
   setTabSize,
   TAB_SIZE_OPTIONS,
@@ -45,7 +36,7 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-type SettingsGroup = 'editor' | 'appearance' | 'shortcuts' | 'export' | 'about'
+type SettingsGroup = 'editor' | 'appearance' | 'shortcuts' | 'about'
 
 interface ShortcutItem {
   label: string
@@ -53,9 +44,12 @@ interface ShortcutItem {
   suffix?: string
 }
 
-const SHORTCUT_GROUPS: Array<{ title: string; items: ShortcutItem[] }> = [
+type ShortcutGroup = 'history' | 'canvas' | 'editor'
+
+const SHORTCUT_GROUPS: Array<{ id: ShortcutGroup; title: string; items: ShortcutItem[] }> = [
   {
-    title: 'History and selection',
+    id: 'history',
+    title: 'History & selection',
     items: [
       { label: 'Undo', keys: ['⌘ / Ctrl', 'Z'] },
       { label: 'Redo', keys: ['⌘ / Ctrl', 'Shift', 'Z'] },
@@ -67,7 +61,8 @@ const SHORTCUT_GROUPS: Array<{ title: string; items: ShortcutItem[] }> = [
     ],
   },
   {
-    title: 'Canvas navigation',
+    id: 'canvas',
+    title: 'Canvas',
     items: [
       { label: 'Pan canvas', keys: ['Space'], suffix: '+ drag' },
       { label: 'Zoom in', keys: ['⌘ / Ctrl', '+'] },
@@ -78,7 +73,8 @@ const SHORTCUT_GROUPS: Array<{ title: string; items: ShortcutItem[] }> = [
     ],
   },
   {
-    title: 'Code editor and search',
+    id: 'editor',
+    title: 'Code editor',
     items: [
       { label: 'Indent', keys: ['Tab'] },
       { label: 'Outdent', keys: ['Shift', 'Tab'] },
@@ -135,9 +131,12 @@ function ShortcutKeys({ keys, suffix }: Pick<ShortcutItem, 'keys' | 'suffix'>) {
 
 function ShortcutSection({ title, items }: { title: string; items: ShortcutItem[] }) {
   return (
-    <section className="border-t pt-4 first:border-t-0 first:pt-0" aria-label={title}>
-      <Label>{title}</Label>
-      <div className="mt-2">
+    <section aria-label={title}>
+      <div className="mb-3">
+        <Label>{title}</Label>
+        <p className="mt-1 text-xs text-muted-foreground">Keyboard commands available in this area.</p>
+      </div>
+      <div>
         {items.map((item) => (
           <div key={item.label} className="flex min-h-9 items-center justify-between gap-6 border-t py-1.5 first:border-t-0">
             <span className="text-xs text-muted-foreground">{item.label}</span>
@@ -156,15 +155,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const theme = useAppTheme()
   const density = useUiDensity()
   const motion = useMotionPreference()
-  const exportFormat = useExportFormat()
-  const exportQuality = useExportQuality()
-  const exportMargin = useExportMargin()
-  const transparentExport = useTransparentExport()
   const [group, setGroup] = useState<SettingsGroup>('editor')
+  const [shortcutGroup, setShortcutGroup] = useState<ShortcutGroup>('history')
+  const activeShortcutGroup = SHORTCUT_GROUPS.find((item) => item.id === shortcutGroup) ?? SHORTCUT_GROUPS[0]
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:h-[52rem] sm:max-h-[calc(100dvh-2rem)] sm:max-w-2xl">
+      <DialogContent className="flex h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:h-[38rem] sm:max-h-[calc(100dvh-2rem)] sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>Configure Pretty across all of your documents.</DialogDescription>
@@ -181,26 +178,23 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <Choice value="editor" className="min-w-20 flex-1">Editor</Choice>
           <Choice value="appearance" className="min-w-24 flex-1">Appearance</Choice>
           <Choice value="shortcuts" className="min-w-24 flex-1">Shortcuts</Choice>
-          <Choice value="export" className="min-w-20 flex-1">Export</Choice>
           <Choice value="about" className="min-w-20 flex-1">About</Choice>
         </ToggleGroup>
 
         <Separator />
 
-        <div className="-mr-1 min-h-0 flex-1 overflow-y-auto pr-1">
+        <div className="-mr-1 min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1">
           <section aria-label="Editor settings" style={{ display: group === 'editor' ? 'block' : 'none' }}>
-          <SettingsRow label="Indent size" description="Spaces inserted by Tab and removed to the previous tab stop.">
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              size="sm"
-              spacing={0}
-              value={String(tabSize)}
-              onValueChange={(value) => value && setTabSize(Number(value))}
-              aria-label="Indent size"
-            >
-              {TAB_SIZE_OPTIONS.map((size) => <Choice key={size} value={String(size)} ariaLabel={`${size} spaces`}>{size}</Choice>)}
-            </ToggleGroup>
+          <SettingsRow label="Indent size" description="Choose how many spaces Tab inserts and Backspace removes at each indentation stop.">
+            <NumericPresetControl
+              value={tabSize}
+              options={TAB_SIZE_OPTIONS}
+              min={MIN_TAB_SIZE}
+              max={MAX_TAB_SIZE}
+              unit="spaces"
+              ariaLabel="Indent size"
+              onChange={setTabSize}
+            />
           </SettingsRow>
 
           <SettingsRow label="Automatic indentation" description="Carry indentation forward and indent after an opening bracket.">
@@ -231,36 +225,31 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
           <section
             aria-label="Keyboard shortcuts"
-            className="space-y-4"
-            style={{ display: group === 'shortcuts' ? 'block' : 'none' }}
+            className={group === 'shortcuts'
+              ? 'min-h-full sm:grid sm:grid-cols-[10.5rem_minmax(0,1fr)]'
+              : 'hidden'}
           >
-            {SHORTCUT_GROUPS.map((shortcutGroup) => (
-              <ShortcutSection key={shortcutGroup.title} {...shortcutGroup} />
-            ))}
-          </section>
-
-          <section aria-label="Export settings" style={{ display: group === 'export' ? 'block' : 'none' }}>
-          <SettingsRow label="Preferred format" description="Marks the format you use most often as the primary export action.">
-            <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={exportFormat} onValueChange={(value) => value && setExportFormat(value as ExportFormat)} aria-label="Preferred export format">
-              <Choice value="pdf">PDF</Choice><Choice value="png">PNG</Choice>
-            </ToggleGroup>
-          </SettingsRow>
-
-          <SettingsRow label="Raster quality" description="Higher quality produces sharper PNGs and PDFs with larger files.">
-            <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={exportQuality} onValueChange={(value) => value && setExportQuality(value as ExportQuality)} aria-label="Export raster quality">
-              <Choice value="standard">Standard</Choice><Choice value="high">High</Choice><Choice value="maximum">Maximum</Choice>
-            </ToggleGroup>
-          </SettingsRow>
-
-          <SettingsRow label="Margin" description="Transparent space around the exported canvas, measured in pixels.">
-            <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={String(exportMargin)} onValueChange={(value) => value && setExportMargin(Number(value) as ExportMargin)} aria-label="Export margin">
-              {EXPORT_MARGIN_OPTIONS.map((margin) => <Choice key={margin} value={String(margin)} ariaLabel={`${margin} pixel margin`}>{margin}</Choice>)}
-            </ToggleGroup>
-          </SettingsRow>
-
-          <SettingsRow label="Transparent background" description="Keep the area around the canvas transparent instead of filling it.">
-            <Switch checked={transparentExport} onCheckedChange={setTransparentExport} aria-label="Transparent export background" />
-          </SettingsRow>
+            <nav
+              className="flex gap-1 overflow-x-auto border-b pb-3 sm:flex-col sm:overflow-x-visible sm:border-r sm:border-b-0 sm:pr-3 sm:pb-0"
+              aria-label="Shortcut groups"
+            >
+              {SHORTCUT_GROUPS.map((item) => (
+                <Button
+                  key={item.id}
+                  type="button"
+                  variant={shortcutGroup === item.id ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="shrink-0 justify-start"
+                  aria-pressed={shortcutGroup === item.id}
+                  onClick={() => setShortcutGroup(item.id)}
+                >
+                  {item.title}
+                </Button>
+              ))}
+            </nav>
+            <div className="pt-4 sm:pt-0 sm:pl-4">
+              <ShortcutSection title={activeShortcutGroup.title} items={activeShortcutGroup.items} />
+            </div>
           </section>
 
           <section aria-label="About" style={{ display: group === 'about' ? 'block' : 'none' }}>

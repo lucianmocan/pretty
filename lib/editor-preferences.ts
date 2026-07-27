@@ -7,10 +7,14 @@ const AUTO_INDENT_KEY = 'scripture:editor-auto-indent'
 const EDITOR_PREFERENCE_EVENT = 'scripture:editor-preferences-changed'
 export const DEFAULT_TAB_SIZE = 2
 export const TAB_SIZE_OPTIONS = [2, 4, 8] as const
+export const MIN_TAB_SIZE = 1
+export const MAX_TAB_SIZE = 16
 
 export function normalizeTabSize(value: unknown): number {
   const parsed = typeof value === 'number' ? value : Number(value)
-  return TAB_SIZE_OPTIONS.includes(parsed as (typeof TAB_SIZE_OPTIONS)[number]) ? parsed : DEFAULT_TAB_SIZE
+  return Number.isInteger(parsed) && parsed >= MIN_TAB_SIZE && parsed <= MAX_TAB_SIZE
+    ? parsed
+    : DEFAULT_TAB_SIZE
 }
 
 /** Number of leading spaces Backspace should remove to reach the previous
