@@ -702,6 +702,20 @@ export function FrameNode({
     onSetEditing(node.id)
   }
 
+  function handleLeafPointerDown(e: React.PointerEvent) {
+    // Selecting an unedited canvas block after the first click changes its
+    // surrounding selection UI. Enter edit mode on the second press itself
+    // instead of relying solely on the later `dblclick`, which can be lost
+    // when that first-click state update changes the event target tree.
+    if (needsEditGate && e.detail >= 2) {
+      e.stopPropagation()
+      onSelect(node.id, false)
+      onSetEditing(node.id)
+      return
+    }
+    if (canDragViaBody) beginMoveDrag(e)
+  }
+
   // A CSS transform creates a containing block for position:fixed children.
   // Since the entire canvas is transformed for zoom, these must be portaled
   // to body or their viewport coordinates get offset/scaled a second time.
@@ -907,7 +921,7 @@ export function FrameNode({
         onSelect(node.id, e.shiftKey)
       }}
       onDoubleClick={needsEditGate ? handleDoubleClick : undefined}
-      onPointerDown={canDragViaBody ? beginMoveDrag : undefined}
+      onPointerDown={needsEditGate || canDragViaBody ? handleLeafPointerDown : undefined}
       {...dragTargetHandlers}
     >
       <NodeControls

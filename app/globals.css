@@ -1353,6 +1353,27 @@ html[data-scripture-panning] .scripture-node-controls {
   font-size: 0.75rem;
 }
 
+.scripture-document-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.scripture-document-breadcrumb {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+
+.scripture-app-menubar .scripture-document-title-input {
+  width: auto;
+  min-width: 5rem;
+  max-width: min(22rem, 40vw);
+  field-sizing: content;
+}
+
 .scripture-home-link {
   display: flex;
   align-items: center;
