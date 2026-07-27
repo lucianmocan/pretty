@@ -17,7 +17,10 @@ import {
   updateImageProps,
   type GutterClickMode,
 } from '@/lib/yjs/layout-store'
-import { resolveThemeBackground } from '@/lib/presets/custom-syntax-themes'
+import {
+  resolveThemeBackground,
+  resolveThemeLineNumberForeground,
+} from '@/lib/presets/custom-syntax-themes'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ResizeHandles } from './resize-handles'
@@ -315,6 +318,8 @@ export function FrameNode({
 }: FrameNodeProps) {
   const isRoot = node.id === ROOT_ID
   const resolvedCodeBackground = node.kind === 'code' ? resolveThemeBackground(node.theme) : undefined
+  const resolvedLineNumberForeground =
+    node.kind === 'code' ? resolveThemeLineNumberForeground(node.theme) : undefined
   const nodeChildLayout = node.kind === 'frame' ? (node.childLayout ?? 'flex') : 'flex'
   const isSelected = selectedIds.includes(node.id)
   const isCanvasChild = parentChildLayout === 'canvas'
@@ -347,14 +352,30 @@ export function FrameNode({
   const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   const elementRef = useRef<HTMLDivElement>(null)
 
-  // Persist the resolved color on the block so custom themes survive the
+  // Persist resolved theme chrome on the block so custom themes survive the
   // server-rendered print/export path, which cannot read browser-local theme
-  // definitions. This also backfills existing blocks created before theme
-  // backgrounds moved off the canvas.
+  // definitions. This also backfills existing blocks created before these
+  // values were stored with each block.
   useEffect(() => {
-    if (node.kind !== 'code' || node.themeBackground === resolvedCodeBackground) return
-    updateCodeProps(getYDoc(docId).doc, node.id, { themeBackground: resolvedCodeBackground })
-  }, [docId, node.id, node.kind, node.themeBackground, resolvedCodeBackground])
+    if (node.kind !== 'code') return
+    const patch = {
+      ...(node.themeBackground !== resolvedCodeBackground && {
+        themeBackground: resolvedCodeBackground,
+      }),
+      ...(node.themeLineNumberForeground !== resolvedLineNumberForeground && {
+        themeLineNumberForeground: resolvedLineNumberForeground,
+      }),
+    }
+    if (Object.keys(patch).length > 0) updateCodeProps(getYDoc(docId).doc, node.id, patch)
+  }, [
+    docId,
+    node.id,
+    node.kind,
+    node.themeBackground,
+    node.themeLineNumberForeground,
+    resolvedCodeBackground,
+    resolvedLineNumberForeground,
+  ])
 
   // The inner content wrapper (.scripture-frame-content/.scripture-leaf-
   // content) -- overflow-fade tracks THIS element's scroll state, since
@@ -696,24 +717,23 @@ export function FrameNode({
   const showGrip = parentChildLayout !== 'canvas'
   const showReorderActions = parentChildLayout !== 'canvas'
 
-  function handleDoubleClick(e: React.MouseEvent) {
+  function enterTextEditing(e: React.MouseEvent) {
     e.stopPropagation()
     onSelect(node.id, false)
     onSetEditing(node.id)
   }
 
-  function handleLeafPointerDown(e: React.PointerEvent) {
-    // Selecting an unedited canvas block after the first click changes its
-    // surrounding selection UI. Enter edit mode on the second press itself
-    // instead of relying solely on the later `dblclick`, which can be lost
-    // when that first-click state update changes the event target tree.
-    if (needsEditGate && e.detail >= 2) {
-      e.stopPropagation()
-      onSelect(node.id, false)
-      onSetEditing(node.id)
-      return
-    }
-    if (canDragViaBody) beginMoveDrag(e)
+  function handleLeafClick(e: React.MouseEvent) {
+    e.stopPropagation()
+    onSelect(node.id, e.shiftKey)
+
+    // PointerEvent.detail is consistently 0 for pointerdown in browsers, so
+    // it cannot identify the second press of a double-click. The bubbling
+    // click is attached to this stable leaf instead: even when a theme
+    // re-highlight replaces token spans between presses, click.detail still
+    // reaches 2 here and enters edit mode before a target-sensitive dblclick
+    // can be lost.
+    if (needsEditGate && e.detail >= 2) onSetEditing(node.id)
   }
 
   // A CSS transform creates a containing block for position:fixed children.
@@ -916,12 +936,9 @@ export function FrameNode({
         ...(resolvedCodeBackground && { background: resolvedCodeBackground }),
         ...canvasPositionStyle,
       }}
-      onClick={(e) => {
-        e.stopPropagation()
-        onSelect(node.id, e.shiftKey)
-      }}
-      onDoubleClick={needsEditGate ? handleDoubleClick : undefined}
-      onPointerDown={needsEditGate || canDragViaBody ? handleLeafPointerDown : undefined}
+      onClick={handleLeafClick}
+      onDoubleClick={needsEditGate ? enterTextEditing : undefined}
+      onPointerDown={canDragViaBody ? beginMoveDrag : undefined}
       {...dragTargetHandlers}
     >
       <NodeControls

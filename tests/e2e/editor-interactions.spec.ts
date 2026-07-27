@@ -73,3 +73,24 @@ test('zoom controls and keyboard zoom shortcuts update the canvas scale', async 
   await expect(percent).toHaveText('100%')
 })
 
+test('a free-form code block can be re-entered after switching syntax theme', async ({ page }) => {
+  await openFreshDocument(page)
+  await page.getByRole('button', { name: 'Free-form' }).click()
+  await page.getByRole('button', { name: 'Add code block' }).click()
+
+  const codeBlock = page.locator('.scripture-code-leaf')
+  const liveEditor = codeBlock.locator('[contenteditable="true"]')
+  await expect(liveEditor).toBeFocused()
+  await page.keyboard.type('const answer = 42')
+  await page.keyboard.press('Escape')
+  await expect(liveEditor).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'nord' }).click()
+  await expect(codeBlock).toHaveCSS('background-color', 'rgb(46, 52, 64)')
+  await codeBlock.locator('code').dblclick()
+
+  const reenteredEditor = codeBlock.locator('[contenteditable="true"]')
+  await expect(reenteredEditor).toBeFocused()
+  await page.keyboard.type('\nconst next = answer + 1')
+  await expect(reenteredEditor).toContainText('const next = answer + 1')
+})

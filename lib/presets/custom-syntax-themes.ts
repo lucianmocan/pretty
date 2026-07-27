@@ -113,3 +113,28 @@ export function resolveThemeForeground(theme: string | undefined): string {
   }
   return THEME_PREVIEWS[value as keyof typeof THEME_PREVIEWS]?.fg ?? THEME_PREVIEWS[DEFAULT_THEME].fg
 }
+
+/** Line-number foreground for both the live gutter and exported output.
+ * Older custom themes fall back to their comment color, which is normally
+ * the palette's intended subdued-but-readable text color. */
+export function resolveThemeLineNumberForeground(theme: string | undefined): string {
+  const value = theme ?? DEFAULT_THEME
+  if (isCustomThemeValue(value)) {
+    const id = value.slice(CUSTOM_THEME_PREFIX.length)
+    const custom = getCustomSyntaxTheme(id)
+    return custom?.lineNumberForeground ?? custom?.colors.comment ?? THEME_PREVIEWS[DEFAULT_THEME].lineNumber
+  }
+  return THEME_PREVIEWS[value as keyof typeof THEME_PREVIEWS]?.lineNumber ?? THEME_PREVIEWS[DEFAULT_THEME].lineNumber
+}
+
+/** Accent used by the browser's native text selection inside code blocks.
+ * Keeping it theme-derived makes selection feel native to each palette
+ * without changing the authored syntax colors themselves. */
+export function resolveThemeSelectionAccent(theme: string | undefined): string {
+  const value = theme ?? DEFAULT_THEME
+  if (isCustomThemeValue(value)) {
+    const id = value.slice(CUSTOM_THEME_PREFIX.length)
+    return getCustomSyntaxTheme(id)?.colors.keyword ?? THEME_PREVIEWS[DEFAULT_THEME].accents[0]
+  }
+  return THEME_PREVIEWS[value as keyof typeof THEME_PREVIEWS]?.accents[0] ?? THEME_PREVIEWS[DEFAULT_THEME].accents[0]
+}

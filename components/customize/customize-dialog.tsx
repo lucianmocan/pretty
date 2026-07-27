@@ -160,11 +160,23 @@ function SyntaxThemeEditor() {
           <p className="scripture-inspector-hint">Select a theme to edit, or create a new one.</p>
         ) : (
           <>
-            <Input
-              value={draft.name}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              placeholder="Theme name"
-            />
+            <div className="scripture-customize-title-row">
+              <Input
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                placeholder="Theme name"
+              />
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="outline"
+                onClick={handleDuplicate}
+                aria-label="Duplicate theme"
+                title="Duplicate theme"
+              >
+                <Copy />
+              </Button>
+            </div>
             <div className="scripture-inspector-row">
               <Label>Background</Label>
               <input
@@ -180,6 +192,15 @@ function SyntaxThemeEditor() {
                 type="color"
                 value={draft.foreground}
                 onChange={(e) => setDraft({ ...draft, foreground: e.target.value })}
+                className={COLOR_INPUT_CLASS}
+              />
+            </div>
+            <div className="scripture-inspector-row">
+              <Label>Line numbers</Label>
+              <input
+                type="color"
+                value={draft.lineNumberForeground ?? draft.colors.comment}
+                onChange={(e) => setDraft({ ...draft, lineNumberForeground: e.target.value })}
                 className={COLOR_INPUT_CLASS}
               />
             </div>
@@ -200,12 +221,9 @@ function SyntaxThemeEditor() {
               ))}
             </div>
             <Separator />
-            <div className="flex gap-2">
+            <div className="scripture-customize-actions">
               <Button size="sm" onClick={handleSave}>
                 Save
-              </Button>
-              <Button size="sm" variant="outline" onClick={handleDuplicate}>
-                <Copy /> Duplicate
               </Button>
               {isSaved && (
                 <Button size="sm" variant="destructive" onClick={handleDelete}>
@@ -225,7 +243,23 @@ function SyntaxThemeEditor() {
         }}
       >
         {draft && preview ? (
-          <TokenPreview lines={preview} />
+          <CodeChrome
+            fontFamily="geist-mono"
+            filename=""
+            chromeStyle="none"
+            showLineNumbers
+            lineNumberColor={draft.lineNumberForeground ?? draft.colors.comment}
+            lineCount={preview.length}
+            startLineNumber={1}
+            ligatures
+            lineHeight={1.65}
+            letterSpacing={0}
+            highlightLines={[]}
+            trimRanges={[]}
+            diffLines={{}}
+          >
+            <TokenPreview lines={preview} />
+          </CodeChrome>
         ) : (
           <p className="scripture-inspector-hint">Preview appears here.</p>
         )}
@@ -304,11 +338,23 @@ function ChromeStyleEditor() {
           <p className="scripture-inspector-hint">Select a chrome style to edit, or create a new one.</p>
         ) : (
           <>
-            <Input
-              value={draft.name}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              placeholder="Chrome style name"
-            />
+            <div className="scripture-customize-title-row">
+              <Input
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                placeholder="Chrome style name"
+              />
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="outline"
+                onClick={handleDuplicate}
+                aria-label="Duplicate chrome style"
+                title="Duplicate chrome style"
+              >
+                <Copy />
+              </Button>
+            </div>
             <div className="scripture-inspector-row">
               <Label>Bar background</Label>
               <input
@@ -412,12 +458,9 @@ function ChromeStyleEditor() {
             </div>
 
             <Separator />
-            <div className="flex gap-2">
+            <div className="scripture-customize-actions">
               <Button size="sm" onClick={handleSave}>
                 Save
-              </Button>
-              <Button size="sm" variant="outline" onClick={handleDuplicate}>
-                <Copy /> Duplicate
               </Button>
               {isSaved && (
                 <Button size="sm" variant="destructive" onClick={handleDelete}>
@@ -488,7 +531,7 @@ export function CustomizeDialog({ open, onOpenChange, initialTab = 'syntax' }: C
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-4xl">
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Customize</DialogTitle>
           <DialogDescription>

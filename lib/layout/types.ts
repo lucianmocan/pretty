@@ -123,6 +123,7 @@ export interface LayoutNode {
   language?: string
   theme?: string
   themeBackground?: string
+  themeLineNumberForeground?: string
   fontFamily?: string
   filename?: string
   chromeStyle?: ChromeStyle
@@ -146,6 +147,7 @@ export interface CodeBlockProps {
   language: string
   theme: string
   themeBackground: string
+  themeLineNumberForeground: string
   fontFamily: string
   filename: string
   chromeStyle: ChromeStyle
@@ -172,6 +174,7 @@ export const DEFAULT_CODE_BLOCK_PROPS: CodeBlockProps = {
   language: DEFAULT_LANGUAGE,
   theme: DEFAULT_THEME,
   themeBackground: THEME_PREVIEWS[DEFAULT_THEME].bg,
+  themeLineNumberForeground: THEME_PREVIEWS[DEFAULT_THEME].lineNumber,
   fontFamily: DEFAULT_FONT_KEY,
   filename: '',
   chromeStyle: 'none',

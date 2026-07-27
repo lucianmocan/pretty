@@ -271,18 +271,18 @@ export const DEFAULT_THEME: (typeof THEMES)[number] = 'dracula'
 // representative, not exact token colors, purely for a recognizable preview.
 export const THEME_PREVIEWS: Record<
   (typeof THEMES)[number],
-  { bg: string; fg: string; accents: [string, string] }
+  { bg: string; fg: string; lineNumber: string; accents: [string, string] }
 > = {
-  dracula: { bg: '#282a36', fg: '#f8f8f2', accents: ['#ff79c6', '#50fa7b'] },
-  nord: { bg: '#2e3440', fg: '#d8dee9', accents: ['#88c0d0', '#a3be8c'] },
-  'one-dark-pro': { bg: '#282c34', fg: '#abb2bf', accents: ['#e06c75', '#61afef'] },
-  'github-dark': { bg: '#24292e', fg: '#e1e4e8', accents: ['#79c0ff', '#ffa657'] },
-  'github-light': { bg: '#ffffff', fg: '#24292e', accents: ['#0550ae', '#8250df'] },
-  monokai: { bg: '#272822', fg: '#f8f8f2', accents: ['#f92672', '#a6e22e'] },
-  'catppuccin-mocha': { bg: '#1e1e2e', fg: '#cdd6f4', accents: ['#cba6f7', '#a6e3a1'] },
-  'vitesse-dark': { bg: '#121212', fg: '#dbd7caee', accents: ['#e6cc77', '#4d9375'] },
-  'vitesse-light': { bg: '#ffffff', fg: '#393a34', accents: ['#b07d48', '#388a34'] },
-  'material-theme-ocean': { bg: '#0f111a', fg: '#babed8', accents: ['#89ddff', '#f78c6c'] },
+  dracula: { bg: '#282a36', fg: '#f8f8f2', lineNumber: '#6272a4', accents: ['#ff79c6', '#50fa7b'] },
+  nord: { bg: '#2e3440', fg: '#d8dee9', lineNumber: '#7b88a1', accents: ['#88c0d0', '#a3be8c'] },
+  'one-dark-pro': { bg: '#282c34', fg: '#abb2bf', lineNumber: '#7f8999', accents: ['#e06c75', '#61afef'] },
+  'github-dark': { bg: '#24292e', fg: '#e1e4e8', lineNumber: '#8b949e', accents: ['#79c0ff', '#ffa657'] },
+  'github-light': { bg: '#ffffff', fg: '#24292e', lineNumber: '#57606a', accents: ['#0550ae', '#8250df'] },
+  monokai: { bg: '#272822', fg: '#f8f8f2', lineNumber: '#8f8a73', accents: ['#f92672', '#a6e22e'] },
+  'catppuccin-mocha': { bg: '#1e1e2e', fg: '#cdd6f4', lineNumber: '#7f849c', accents: ['#cba6f7', '#a6e3a1'] },
+  'vitesse-dark': { bg: '#121212', fg: '#dbd7caee', lineNumber: '#758575', accents: ['#e6cc77', '#4d9375'] },
+  'vitesse-light': { bg: '#ffffff', fg: '#393a34', lineNumber: '#6c6f64', accents: ['#b07d48', '#388a34'] },
+  'material-theme-ocean': { bg: '#0f111a', fg: '#babed8', lineNumber: '#717cb4', accents: ['#89ddff', '#f78c6c'] },
 }
 
 export const FONT_OPTIONS = [

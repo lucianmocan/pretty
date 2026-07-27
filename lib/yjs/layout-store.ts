@@ -19,7 +19,10 @@ import { planNodeDuplicate } from '@/lib/layout/duplicate-node'
 import type { NodeGeometry } from '@/lib/layout/geometry'
 import { computeGroupBounds } from '@/lib/layout/group-geometry'
 import { planFlexToCanvasPositions } from '@/lib/layout/layout-transition'
-import { resolveThemeBackground } from '@/lib/presets/custom-syntax-themes'
+import {
+  resolveThemeBackground,
+  resolveThemeLineNumberForeground,
+} from '@/lib/presets/custom-syntax-themes'
 
 export const ROOT_ID = 'root'
 
@@ -124,6 +127,7 @@ function setCodeFields(map: Y.Map<unknown>, props: CodeBlockProps) {
   map.set('language', props.language)
   map.set('theme', props.theme)
   map.set('themeBackground', props.themeBackground)
+  map.set('themeLineNumberForeground', props.themeLineNumberForeground)
   map.set('fontFamily', props.fontFamily)
   map.set('filename', props.filename)
   map.set('chromeStyle', props.chromeStyle)
@@ -219,6 +223,8 @@ function buildYNode(plain: LayoutNode): Y.Map<unknown> {
       language: plain.language ?? DEFAULT_CODE_BLOCK_PROPS.language,
       theme: plain.theme ?? DEFAULT_CODE_BLOCK_PROPS.theme,
       themeBackground: plain.themeBackground ?? resolveThemeBackground(plain.theme),
+      themeLineNumberForeground:
+        plain.themeLineNumberForeground ?? resolveThemeLineNumberForeground(plain.theme),
       fontFamily: plain.fontFamily ?? DEFAULT_CODE_BLOCK_PROPS.fontFamily,
       filename: plain.filename ?? DEFAULT_CODE_BLOCK_PROPS.filename,
       chromeStyle: plain.chromeStyle ?? DEFAULT_CODE_BLOCK_PROPS.chromeStyle,

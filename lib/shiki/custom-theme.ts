@@ -21,6 +21,9 @@ export interface CustomSyntaxTheme {
   name: string
   background: string
   foreground: string
+  // Optional only for backward compatibility with themes saved before this
+  // field existed. New themes always persist an explicit value.
+  lineNumberForeground?: string
   colors: Record<SyntaxCategory, string>
 }
 
@@ -87,6 +90,7 @@ export function createBlankCustomTheme(name = 'Untitled theme'): CustomSyntaxThe
     name,
     background: '#282a36',
     foreground: '#f8f8f2',
+    lineNumberForeground: '#6272a4',
     colors: { ...DEFAULT_CUSTOM_THEME_COLORS },
   }
 }
@@ -135,6 +139,7 @@ export function buildShikiTheme(custom: CustomSyntaxTheme): ThemeRegistrationRaw
     colors: {
       'editor.background': custom.background,
       'editor.foreground': custom.foreground,
+      'editorLineNumber.foreground': custom.lineNumberForeground ?? custom.colors.comment,
     },
     tokenColors: (Object.keys(custom.colors) as SyntaxCategory[]).map((category) => ({
       scope: CATEGORY_SCOPES[category],

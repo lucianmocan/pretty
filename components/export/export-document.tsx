@@ -14,6 +14,7 @@ import type { ChildLayout, LayoutNode } from '@/lib/layout/types'
 import {
   resolveThemeBackground,
   resolveThemeForeground,
+  resolveThemeLineNumberForeground,
 } from '@/lib/presets/custom-syntax-themes'
 import { baseExtensions } from '@/lib/tiptap/extensions'
 import { blockFragmentName } from '@/lib/yjs/doc-store'
@@ -128,6 +129,9 @@ function renderNode(
           chromeStyle={node.chromeStyle ?? 'none'}
           customChrome={node.customChrome}
           showLineNumbers={node.showLineNumbers ?? false}
+          lineNumberColor={
+            node.themeLineNumberForeground ?? resolveThemeLineNumberForeground(node.theme)
+          }
           lineCount={lineCount}
           startLineNumber={node.startLineNumber ?? 1}
           ligatures={node.ligatures ?? true}

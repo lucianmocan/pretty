@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { renderToReactElement } from '@tiptap/static-renderer'
 import type { JSONContent } from '@tiptap/core'
 import { CodeChrome } from './code-chrome'
@@ -21,6 +21,8 @@ import { useSyntaxPriority } from '@/lib/shiki/use-syntax-priority'
 import {
   resolveThemeArg,
   resolveThemeForeground,
+  resolveThemeLineNumberForeground,
+  resolveThemeSelectionAccent,
   subscribeToCustomSyntaxThemes,
 } from '@/lib/presets/custom-syntax-themes'
 import type { SyntaxStyleRange } from '@/lib/shiki/token-types'
@@ -166,7 +168,14 @@ export const StaticBlockEditor = memo(function StaticBlockEditor({
       className="scripture-editor-wrapper"
       data-empty={isEmpty || undefined}
       data-kind={kind}
-      style={kind === 'code' ? { color: resolveThemeForeground(theme) } : undefined}
+      style={
+        kind === 'code'
+          ? {
+              color: resolveThemeForeground(theme),
+              '--scripture-code-selection-accent': resolveThemeSelectionAccent(theme),
+            } as CSSProperties
+          : undefined
+      }
     >
       {isEmpty && (
         <span className="scripture-editor-placeholder" aria-hidden="true">
@@ -187,6 +196,7 @@ export const StaticBlockEditor = memo(function StaticBlockEditor({
       chromeStyle={chromeStyle}
       customChrome={customChrome}
       showLineNumbers={showLineNumbers}
+      lineNumberColor={resolveThemeLineNumberForeground(theme)}
       lineCount={text.split('\n').length}
       startLineNumber={startLineNumber}
       ligatures={ligatures}

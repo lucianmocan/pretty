@@ -31,6 +31,7 @@ interface CodeChromeProps {
   filename: string
   chromeStyle: ChromeStyle
   showLineNumbers: boolean
+  lineNumberColor?: string
   lineCount: number
   startLineNumber: number
   ligatures: boolean
@@ -137,6 +138,7 @@ export function CodeChrome({
   chromeStyle,
   customChrome,
   showLineNumbers,
+  lineNumberColor = '#8b949e',
   lineCount,
   startLineNumber,
   ligatures,
@@ -160,6 +162,7 @@ export function CodeChrome({
     '--scripture-code-ligature-variant': ligatures ? 'normal' : 'none',
     '--scripture-code-line-height': lineHeight,
     '--scripture-code-letter-spacing': `${letterSpacing}px`,
+    '--scripture-line-number-color': lineNumberColor,
   } as CSSProperties
 
   const rowHeight = lineHeight * CODE_FONT_SIZE_PX
@@ -177,6 +180,13 @@ export function CodeChrome({
             className="scripture-line-numbers"
             aria-hidden={onLineClick ? undefined : 'true'}
             data-node-drag-ignore={onLineClick ? 'true' : undefined}
+            style={{
+              // Keep the critical contrast values inline. Besides making the
+              // theme ownership explicit, this prevents a generic app-theme
+              // gutter rule from winning over a light syntax theme.
+              color: lineNumberColor,
+              borderRightColor: `color-mix(in srgb, ${lineNumberColor} 36%, transparent)`,
+            }}
           >
             {lineNumbers.map((lineNumber) => {
               const displayNumber = lineNumber - 1 + startLineNumber

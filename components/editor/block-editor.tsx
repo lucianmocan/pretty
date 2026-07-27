@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useEditor, useEditorState, EditorContent, type Editor } from '@tiptap/react'
 import { Collaboration } from '@tiptap/extension-collaboration'
 import { TextSelection } from '@tiptap/pm/state'
@@ -18,6 +18,8 @@ import { DEFAULT_THEME } from '@/lib/presets'
 import {
   resolveThemeArg,
   resolveThemeForeground,
+  resolveThemeLineNumberForeground,
+  resolveThemeSelectionAccent,
   subscribeToCustomSyntaxThemes,
 } from '@/lib/presets/custom-syntax-themes'
 import type { ChromeStyle, CustomChromeStyle } from '@/lib/layout/types'
@@ -358,8 +360,12 @@ function InteractiveBlockEditor({
   }, [editor, editable])
 
   useEffect(() => {
-    if (editor && focusOnMount) editor.commands.focus()
-  }, [editor, focusOnMount])
+    // Existing canvas blocks mount the interactive editor before the Yjs
+    // sync promise settles. Until `synced` is true EditorContent is not in
+    // the DOM, so an earlier focus() succeeds only internally and no caret
+    // appears. Focus after the synced render has committed instead.
+    if (editor && synced && focusOnMount) editor.commands.focus()
+  }, [editor, focusOnMount, synced])
 
   // Seed initial content once synced, if this block's fragment is still empty.
   useEffect(() => {
@@ -467,7 +473,15 @@ function InteractiveBlockEditor({
       className="scripture-editor-wrapper"
       data-empty={isEmpty || undefined}
       data-kind={kind}
-      style={kind === 'code' ? { tabSize, color: resolveThemeForeground(theme) } : undefined}
+      style={
+        kind === 'code'
+          ? {
+              tabSize,
+              color: resolveThemeForeground(theme),
+              '--scripture-code-selection-accent': resolveThemeSelectionAccent(theme),
+            } as CSSProperties
+          : undefined
+      }
     >
       {editor && <BubbleToolbar editor={editor} />}
       {isEmpty && (
@@ -488,6 +502,7 @@ function InteractiveBlockEditor({
       chromeStyle={chromeStyle}
       customChrome={customChrome}
       showLineNumbers={showLineNumbers}
+      lineNumberColor={resolveThemeLineNumberForeground(theme)}
       lineCount={lineCount}
       startLineNumber={startLineNumber}
       ligatures={ligatures}

@@ -442,6 +442,24 @@ html[data-scripture-reduced-motion='true'] *::after {
   font-family: inherit;
 }
 
+/* Native code selection, but tuned to the active syntax theme instead of
+   the browser's generic blue. A translucent theme accent preserves every
+   token's foreground color; the restrained glow gives the selected range a
+   little depth without compromising copy/edit legibility. */
+.scripture-code-editor::selection,
+.scripture-code-editor *::selection {
+  background-color: color-mix(
+    in srgb,
+    var(--scripture-code-selection-accent, #7c3aed) 34%,
+    transparent
+  );
+  text-shadow: 0 0 0.5em color-mix(
+    in srgb,
+    var(--scripture-code-selection-accent, #7c3aed) 24%,
+    transparent
+  );
+}
+
 /* Code block chrome: an optional bar (one of a few styles -- mac traffic
    lights, a VS Code-style tab, a plain terminal bar) and a line-number
    gutter, wrapping .scripture-code-editor. See components/editor/
@@ -523,12 +541,12 @@ html[data-scripture-reduced-motion='true'] *::after {
   font-family: var(--scripture-code-font, var(--font-geist-mono)), ui-monospace, monospace;
   font-size: 14px;
   line-height: var(--scripture-code-line-height, 1.65);
-  color: rgba(255, 255, 255, 0.28);
+  color: var(--scripture-line-number-color, #8b949e);
   text-align: right;
   user-select: none;
   padding-right: 16px;
   margin-right: 8px;
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  border-right: 1px solid color-mix(in srgb, var(--scripture-line-number-color, #8b949e) 36%, transparent);
 }
 
 .scripture-line-number-clickable {
@@ -546,18 +564,18 @@ html[data-scripture-reduced-motion='true'] *::after {
 }
 
 .scripture-line-number-clickable:hover {
-  color: var(--foreground);
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--scripture-line-number-color, #8b949e);
+  background: color-mix(in srgb, var(--scripture-line-number-color, #8b949e) 14%, transparent);
 }
 
 .scripture-line-number-clickable:focus-visible {
   outline: 1px solid var(--ring);
   outline-offset: 1px;
-  color: var(--foreground);
+  color: var(--scripture-line-number-color, #8b949e);
 }
 
 .scripture-line-number-clickable[aria-pressed='true'] {
-  color: var(--foreground);
+  color: var(--scripture-line-number-color, #8b949e);
 }
 
 .scripture-line-number-clickable[data-diff='add'] {
@@ -1875,9 +1893,12 @@ html[data-scripture-panning] .scripture-node-controls {
 --------------------------------------------------------------------------- */
 
 .scripture-customize-body {
-  display: flex;
-  gap: 16px;
-  min-height: 420px;
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.6fr) minmax(14rem, 1fr) minmax(0, 1.45fr);
+  align-items: stretch;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 25rem;
   /* DialogContent is a CSS grid, and this sits inside a `display: contents`
      tab wrapper (see customize-dialog.tsx) -- meaning THIS element, not
      that wrapper, is the actual grid item. Grid items default to
@@ -1891,51 +1912,77 @@ html[data-scripture-panning] .scripture-node-controls {
 .scripture-customize-list {
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
-  gap: 4px;
-  width: 150px;
-  max-height: 480px;
+  gap: 0.25rem;
+  min-width: 0;
+  max-height: 30rem;
   overflow-y: auto;
 }
 
 .scripture-customize-form {
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
-  gap: 10px;
-  width: 260px;
-  max-height: 480px;
+  gap: 0.625rem;
+  min-width: 0;
+  max-height: 30rem;
   overflow-y: auto;
+}
+
+.scripture-customize-title-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.scripture-customize-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 
 .scripture-customize-color-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
+  gap: 0.5rem;
 }
 
 .scripture-customize-color-field {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: 0.375rem;
+  font-size: 0.75rem;
   color: var(--muted-foreground);
 }
 
 .scripture-customize-preview {
-  flex: 1;
+  width: 100%;
   min-width: 0;
   display: flex;
   align-items: flex-start;
-  justify-content: center;
-  padding: 20px;
+  justify-content: flex-start;
+  padding: 0;
   border-radius: var(--radius-md);
   overflow: auto;
   background: #1e1e1e;
 }
 
 .scripture-customize-preview-code {
+  min-width: 0;
+  overflow-x: auto;
   white-space: pre;
+}
+
+/* CodeChrome normally expands with its authored block. In this compact
+   editor preview it should instead fit the preview column and let long
+   sample lines scroll inside the code area. */
+.scripture-customize-preview > .scripture-code-chrome {
+  width: 100%;
+  min-width: 0;
+}
+
+.scripture-customize-preview .scripture-code-body {
+  padding: 0.75rem;
 }
 
 /* ---------------------------------------------------------------------------

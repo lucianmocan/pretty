@@ -56,7 +56,10 @@ import {
   type GutterClickMode,
 } from '@/lib/yjs/layout-store'
 import { FONT_OPTIONS, DEFAULT_LANGUAGE } from '@/lib/presets'
-import { resolveThemeBackground } from '@/lib/presets/custom-syntax-themes'
+import {
+  resolveThemeBackground,
+  resolveThemeLineNumberForeground,
+} from '@/lib/presets/custom-syntax-themes'
 import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
@@ -970,6 +973,7 @@ export function InspectorPanel({
                 updateCodeProps(doc, node.id, {
                   theme,
                   themeBackground: resolveThemeBackground(theme),
+                  themeLineNumberForeground: resolveThemeLineNumberForeground(theme),
                 })
               }
               onCreateCustom={() => onOpenCustomize('syntax')}
