@@ -8,7 +8,6 @@ const keys = {
   theme: 'scripture:appearance-theme',
   density: 'scripture:appearance-density',
   motion: 'scripture:appearance-motion',
-  exportFormat: 'scripture:export-format',
   exportQuality: 'scripture:export-quality',
   exportMargin: 'scripture:export-margin',
   transparentExport: 'scripture:export-transparent-background',
@@ -20,8 +19,7 @@ export const UI_DENSITY_OPTIONS = ['comfortable', 'compact'] as const
 export type UiDensity = (typeof UI_DENSITY_OPTIONS)[number]
 export const MOTION_OPTIONS = ['system', 'full', 'reduced'] as const
 export type MotionPreference = (typeof MOTION_OPTIONS)[number]
-export const EXPORT_FORMAT_OPTIONS = ['pdf', 'png'] as const
-export type ExportFormat = (typeof EXPORT_FORMAT_OPTIONS)[number]
+export type ExportFormat = 'pdf' | 'png'
 export const EXPORT_QUALITY_OPTIONS = ['standard', 'high', 'maximum'] as const
 export type ExportQuality = (typeof EXPORT_QUALITY_OPTIONS)[number]
 export const EXPORT_MARGIN_OPTIONS = [0, 16, 32] as const
@@ -32,7 +30,6 @@ export type ExportMargin = number
 export const DEFAULT_APP_THEME: AppTheme = 'dark'
 export const DEFAULT_UI_DENSITY: UiDensity = 'comfortable'
 export const DEFAULT_MOTION: MotionPreference = 'system'
-export const DEFAULT_EXPORT_FORMAT: ExportFormat = 'pdf'
 export const DEFAULT_EXPORT_QUALITY: ExportQuality = 'standard'
 export const DEFAULT_EXPORT_MARGIN: ExportMargin = 32
 export const DEFAULT_TRANSPARENT_EXPORT = true
@@ -44,7 +41,6 @@ function option<T extends string>(value: unknown, options: readonly T[], fallbac
 export const normalizeAppTheme = (value: unknown) => option(value, APP_THEME_OPTIONS, DEFAULT_APP_THEME)
 export const normalizeUiDensity = (value: unknown) => option(value, UI_DENSITY_OPTIONS, DEFAULT_UI_DENSITY)
 export const normalizeMotionPreference = (value: unknown) => option(value, MOTION_OPTIONS, DEFAULT_MOTION)
-export const normalizeExportFormat = (value: unknown) => option(value, EXPORT_FORMAT_OPTIONS, DEFAULT_EXPORT_FORMAT)
 export const normalizeExportQuality = (value: unknown) => option(value, EXPORT_QUALITY_OPTIONS, DEFAULT_EXPORT_QUALITY)
 
 export function normalizeExportMargin(value: unknown): ExportMargin {
@@ -89,10 +85,6 @@ export const getMotionPreference = () => normalizeMotionPreference(stored(keys.m
 export const setMotionPreference = (value: MotionPreference) => setStored(keys.motion, normalizeMotionPreference(value))
 export const useMotionPreference = () => usePreference(getMotionPreference, DEFAULT_MOTION)
 
-export const getExportFormat = () => normalizeExportFormat(stored(keys.exportFormat))
-export const setExportFormat = (value: ExportFormat) => setStored(keys.exportFormat, normalizeExportFormat(value))
-export const useExportFormat = () => usePreference(getExportFormat, DEFAULT_EXPORT_FORMAT)
-
 export const getExportQuality = () => normalizeExportQuality(stored(keys.exportQuality))
 export const setExportQuality = (value: ExportQuality) => setStored(keys.exportQuality, normalizeExportQuality(value))
 export const useExportQuality = () => usePreference(getExportQuality, DEFAULT_EXPORT_QUALITY)
@@ -113,7 +105,6 @@ export function exportRasterScale(format: ExportFormat, quality: ExportQuality):
 
 export function getExportPreferences() {
   return {
-    format: getExportFormat(),
     quality: getExportQuality(),
     margin: getExportMargin(),
     transparentBackground: getTransparentExport(),

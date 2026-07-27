@@ -85,15 +85,12 @@ import {
   EXPORT_MARGIN_OPTIONS,
   MAX_EXPORT_MARGIN,
   MIN_EXPORT_MARGIN,
-  setExportFormat,
   setExportMargin,
   setExportQuality,
   setTransparentExport,
-  useExportFormat,
   useExportMargin,
   useExportQuality,
   useTransparentExport,
-  type ExportFormat,
   type ExportQuality,
 } from '@/lib/app-preferences'
 
@@ -521,7 +518,6 @@ export function InspectorPanel({
   exportError,
 }: InspectorPanelProps) {
   const { measureAll } = useGeometryRegistry()
-  const preferredExportFormat = useExportFormat()
   const exportQuality = useExportQuality()
   const exportMargin = useExportMargin()
   const transparentExport = useTransparentExport()
@@ -795,22 +791,6 @@ export function InspectorPanel({
                   same card onto a fixed paper size instead of resizing it to fill one.
                 </p>
                 <div className="scripture-inspector-stack">
-                  <Label>Preferred format</Label>
-                  <ToggleGroup
-                    type="single"
-                    variant="outline"
-                    size="sm"
-                    spacing={0}
-                    className="w-full"
-                    value={preferredExportFormat}
-                    onValueChange={(value) => value && setExportFormat(value as ExportFormat)}
-                    aria-label="Preferred export format"
-                  >
-                    <ToggleGroupItem value="pdf" className="flex-1">PDF</ToggleGroupItem>
-                    <ToggleGroupItem value="png" className="flex-1">PNG</ToggleGroupItem>
-                  </ToggleGroup>
-                </div>
-                <div className="scripture-inspector-stack">
                   <Label>Raster quality</Label>
                   <ToggleGroup
                     type="single"
@@ -852,7 +832,7 @@ export function InspectorPanel({
                 </div>
                 <div className="scripture-inspector-actions">
                   <Button
-                    variant={preferredExportFormat === 'pdf' ? 'default' : 'outline'}
+                    variant="default"
                     size="sm"
                     onClick={onExportPdf}
                     disabled={exporting !== null}
@@ -861,7 +841,7 @@ export function InspectorPanel({
                     {exporting === 'pdf' ? 'Exporting PDF…' : 'Export PDF'}
                   </Button>
                   <Button
-                    variant={preferredExportFormat === 'png' ? 'default' : 'outline'}
+                    variant="default"
                     size="sm"
                     onClick={onExportPng}
                     disabled={exporting !== null}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -9,14 +9,29 @@ import {
   Download,
   HardDrive,
   Languages,
+  Moon,
   MoveUpRight,
+  Sun,
 } from 'lucide-react'
 import { createDocument } from '@/lib/documents/manifest'
+import { setAppTheme, useAppTheme } from '@/lib/app-preferences'
 import { Button } from '@/components/ui/button'
 
 export default function PrettyHomePage() {
   const router = useRouter()
+  const theme = useAppTheme()
   const [creating, setCreating] = useState(false)
+  const [systemDark, setSystemDark] = useState(false)
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const updateSystemTheme = () => setSystemDark(media.matches)
+    updateSystemTheme()
+    media.addEventListener('change', updateSystemTheme)
+    return () => media.removeEventListener('change', updateSystemTheme)
+  }, [])
+
+  const isDark = theme === 'dark' || (theme === 'system' && systemDark)
 
   function handleNewProject() {
     if (creating) return
@@ -107,6 +122,15 @@ export default function PrettyHomePage() {
         <div>
           <p>Free and open source</p>
           <a href="https://github.com/lucianmocan/pretty/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0</a>
+          <button
+            type="button"
+            className="scripture-landing-theme-toggle"
+            onClick={() => setAppTheme(isDark ? 'light' : 'dark')}
+            aria-label={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+            title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+          >
+            {isDark ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
+          </button>
         </div>
       </footer>
     </div>

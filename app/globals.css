@@ -1922,20 +1922,73 @@ html[data-scripture-panning] .scripture-node-controls {
 --------------------------------------------------------------------------- */
 
 .scripture-landing {
-  --landing-bg: #090a0c;
-  --landing-surface: #111318;
-  --landing-surface-raised: #171a20;
-  --landing-line: rgba(255, 255, 255, 0.1);
-  --landing-soft-line: rgba(255, 255, 255, 0.065);
-  --landing-muted: #999da7;
+  --landing-bg: #f7f7f4;
+  --landing-surface: #ffffff;
+  --landing-line: rgba(18, 20, 25, 0.12);
+  --landing-foreground: #15171b;
+  --landing-heading-muted: #686d78;
+  --landing-muted: #5f6470;
+  --landing-subtle: #747985;
+  --landing-faint: #858a95;
+  --landing-dot: #b7bbc3;
+  --landing-hover: #090a0c;
+  --landing-focus: #30343b;
+  --landing-purple-wash: rgba(92, 106, 220, 0.09);
+  --landing-green-wash: rgba(52, 168, 105, 0.055);
+  --landing-privacy-bg: rgba(92, 106, 220, 0.075);
+  --landing-product-glow: rgba(92, 106, 220, 0.13);
+  --landing-product-border: rgba(18, 20, 25, 0.14);
+  --landing-product-bg: #e9eaed;
+  --landing-product-highlight: rgba(255, 255, 255, 0.8);
+  --landing-product-shadow: rgba(35, 38, 46, 0.25);
+  --landing-cta-wash: rgba(52, 168, 105, 0.08);
+  --landing-button-primary: #17191e;
+  --landing-button-primary-hover: #353942;
+  --landing-button-primary-foreground: #ffffff;
+  --landing-button-outline: rgba(255, 255, 255, 0.72);
+  --landing-button-outline-border: #b7bbc3;
+  --landing-button-outline-hover: #e4e5e8;
+  --landing-button-outline-hover-border: #8f949e;
+  --landing-button-shadow: rgba(18, 20, 25, 0.2);
   --landing-green: #9ee6b8;
   min-height: 100dvh;
   overflow: clip;
   background:
-    radial-gradient(circle at 72% 13%, rgba(116, 129, 255, 0.11), transparent 27rem),
-    radial-gradient(circle at 16% 28%, rgba(120, 255, 185, 0.05), transparent 24rem),
+    radial-gradient(circle at 72% 13%, var(--landing-purple-wash), transparent 27rem),
+    radial-gradient(circle at 16% 28%, var(--landing-green-wash), transparent 24rem),
     var(--landing-bg);
-  color: #f7f7f4;
+  color: var(--landing-foreground);
+}
+
+.dark .scripture-landing {
+  --landing-bg: #090a0c;
+  --landing-surface: #111318;
+  --landing-line: rgba(255, 255, 255, 0.1);
+  --landing-foreground: #f7f7f4;
+  --landing-heading-muted: #a9abb3;
+  --landing-muted: #999da7;
+  --landing-subtle: #777b85;
+  --landing-faint: #747883;
+  --landing-dot: #454952;
+  --landing-hover: #ffffff;
+  --landing-focus: #dfe1e6;
+  --landing-purple-wash: rgba(116, 129, 255, 0.11);
+  --landing-green-wash: rgba(120, 255, 185, 0.05);
+  --landing-privacy-bg: rgba(116, 129, 255, 0.075);
+  --landing-product-glow: rgba(116, 129, 255, 0.18);
+  --landing-product-border: rgba(255, 255, 255, 0.16);
+  --landing-product-bg: #15171b;
+  --landing-product-highlight: rgba(255, 255, 255, 0.08);
+  --landing-product-shadow: rgba(0, 0, 0, 0.85);
+  --landing-cta-wash: rgba(158, 230, 184, 0.06);
+  --landing-button-primary: #f1f1ee;
+  --landing-button-primary-hover: #d4d6da;
+  --landing-button-primary-foreground: #202227;
+  --landing-button-outline: rgba(255, 255, 255, 0.025);
+  --landing-button-outline-border: rgba(255, 255, 255, 0.15);
+  --landing-button-outline-hover: rgba(255, 255, 255, 0.12);
+  --landing-button-outline-hover-border: rgba(255, 255, 255, 0.28);
+  --landing-button-shadow: rgba(0, 0, 0, 0.45);
 }
 
 .scripture-landing a {
@@ -1957,6 +2010,7 @@ html[data-scripture-panning] .scripture-node-controls {
   display: inline-flex;
   align-items: center;
   width: fit-content;
+  color: var(--landing-foreground);
   font-family: var(--font-luckiest-guy), var(--font-geist-sans), sans-serif;
   font-size: 1.875rem;
   font-weight: 400;
@@ -1990,7 +2044,7 @@ html[data-scripture-panning] .scripture-node-controls {
 }
 
 .scripture-landing-nav-links a:hover {
-  color: #fff;
+  color: var(--landing-hover);
 }
 
 .scripture-github-mark {
@@ -2034,7 +2088,7 @@ html[data-scripture-panning] .scripture-node-controls {
 
 .scripture-hero-copy h1 span {
   display: block;
-  color: #a9abb3;
+  color: var(--landing-heading-muted);
 }
 
 .scripture-hero-copy > p {
@@ -2054,6 +2108,37 @@ html[data-scripture-panning] .scripture-node-controls {
 
 .scripture-hero-actions [data-slot='button'] {
   min-width: 10.25rem;
+  transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.scripture-hero-actions [data-slot='button']:hover {
+  transform: translateY(-1px);
+}
+
+.scripture-hero-actions [data-slot='button']:active {
+  transform: translateY(0);
+}
+
+.scripture-hero-actions [data-slot='button'][data-variant='default'] {
+  background: var(--landing-button-primary);
+  color: var(--landing-button-primary-foreground);
+}
+
+.scripture-hero-actions [data-slot='button'][data-variant='default']:hover {
+  background: var(--landing-button-primary-hover);
+  box-shadow: 0 0.375rem 1.125rem -0.5rem var(--landing-button-shadow);
+}
+
+.scripture-hero-actions [data-slot='button'][data-variant='outline'] {
+  border-color: var(--landing-button-outline-border);
+  background: var(--landing-button-outline);
+  color: var(--landing-foreground);
+}
+
+.scripture-hero-actions [data-slot='button'][data-variant='outline']:hover {
+  border-color: var(--landing-button-outline-hover-border);
+  background: var(--landing-button-outline-hover);
+  color: var(--landing-foreground);
 }
 
 .scripture-hero-privacy {
@@ -2066,13 +2151,13 @@ html[data-scripture-panning] .scripture-node-controls {
   padding: 0.6875rem 0.8125rem;
   border: 0;
   border-radius: 0.625rem;
-  background: rgba(116, 129, 255, 0.075);
+  background: var(--landing-privacy-bg);
   box-shadow: none;
   font-size: 0.6875rem;
 }
 
 .scripture-hero-privacy strong {
-  color: #fff;
+  color: var(--landing-foreground);
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -2082,7 +2167,7 @@ html[data-scripture-panning] .scripture-node-controls {
   display: inline-flex;
   align-items: center;
   gap: 0.4375rem;
-  color: #777b85;
+  color: var(--landing-subtle);
 }
 
 .scripture-hero-local-note svg {
@@ -2095,7 +2180,7 @@ html[data-scripture-panning] .scripture-node-controls {
   align-items: center;
   gap: 0.5625rem;
   margin-top: 0.125rem;
-  color: #747883;
+  color: var(--landing-faint);
   font-size: 0.625rem;
 }
 
@@ -2114,7 +2199,7 @@ html[data-scripture-panning] .scripture-node-controls {
   width: 0.125rem;
   height: 0.125rem;
   border-radius: 50%;
-  background: #454952;
+  background: var(--landing-dot);
 }
 
 .scripture-product-stage {
@@ -2127,7 +2212,7 @@ html[data-scripture-panning] .scripture-node-controls {
   position: absolute;
   inset: 16% 8% 3%;
   border-radius: 50%;
-  background: rgba(116, 129, 255, 0.18);
+  background: var(--landing-product-glow);
   filter: blur(4.375rem);
   pointer-events: none;
 }
@@ -2136,12 +2221,12 @@ html[data-scripture-panning] .scripture-node-controls {
   position: relative;
   width: 100%;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--landing-product-border);
   border-radius: 0.75rem;
-  background: #15171b;
+  background: var(--landing-product-bg);
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.08) inset,
-    0 2.25rem 5.625rem -1.5rem rgba(0, 0, 0, 0.85);
+    0 1px 0 var(--landing-product-highlight) inset,
+    0 2.25rem 5.625rem -1.5rem var(--landing-product-shadow);
   transform: rotateY(-3deg) rotateX(0.75deg);
   transform-origin: center left;
 }
@@ -2177,7 +2262,7 @@ html[data-scripture-panning] .scripture-node-controls {
   border: 1px solid var(--landing-line);
   border-radius: 0.75rem;
   background:
-    linear-gradient(110deg, rgba(158, 230, 184, 0.06), transparent 42%),
+    linear-gradient(110deg, var(--landing-cta-wash), transparent 42%),
     var(--landing-surface);
 }
 
@@ -2197,28 +2282,54 @@ html[data-scripture-panning] .scripture-node-controls {
 
 .scripture-landing-footer p {
   margin: 0;
-  color: #666a74;
+  color: var(--landing-subtle);
   font-size: 0.6875rem;
   text-align: center;
 }
 
 .scripture-landing-footer > div {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 1.25rem;
 }
 
 .scripture-landing-footer > div a {
-  color: #858994;
+  color: var(--landing-faint);
   font-size: 0.6875rem;
 }
 
 .scripture-landing-footer > div a:hover {
-  color: #fff;
+  color: var(--landing-hover);
+}
+
+.scripture-landing-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.625rem;
+  height: 1.625rem;
+  margin-left: -0.25rem;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--landing-faint);
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.scripture-landing-theme-toggle:hover {
+  background: var(--landing-button-outline-hover);
+  color: var(--landing-hover);
+}
+
+.scripture-landing-theme-toggle svg {
+  width: 0.8125rem;
+  height: 0.8125rem;
 }
 
 .scripture-landing :is(a, button):focus-visible {
-  outline: 2px solid #dfe1e6;
+  outline: 2px solid var(--landing-focus);
   outline-offset: 3px;
 }
 
@@ -2425,7 +2536,7 @@ html[data-scripture-panning] .scripture-node-controls {
   font-family: var(--font-luckiest-guy), var(--font-geist-sans), sans-serif;
   font-size: 1.5rem;
   font-weight: 400;
-  color: #fff;
+  color: var(--foreground);
   margin: 0;
   letter-spacing: 0;
   line-height: 1;
