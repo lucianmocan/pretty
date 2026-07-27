@@ -7,6 +7,7 @@ import {
   withSyntaxRanges,
 } from '../lib/tiptap/syntax-document.ts'
 import { syntaxStyleRanges } from '../lib/shiki/token-ranges.ts'
+import { codeLineFontSizes } from '../lib/tiptap/line-font-sizes.ts'
 
 const token = (
   content: string,
@@ -114,4 +115,21 @@ test('builds an export snapshot without mutating text or authored marks', () => 
     .map((node) => node.text)
     .join('')
   assert.equal(boldText, 'const ')
+})
+
+test('matches each gutter line to the largest code font size on that line', () => {
+  const document = {
+    type: 'doc',
+    content: [{
+      type: 'annotatedCodeBlock',
+      content: [
+        { type: 'text', text: 'small ' },
+        { type: 'text', text: 'large', marks: [{ type: 'format', attrs: { fontSize: '22px' } }] },
+        { type: 'text', text: '\ndefault\n' },
+        { type: 'text', text: 'compact', marks: [{ type: 'format', attrs: { fontSize: '10px' } }] },
+      ],
+    }],
+  }
+
+  assert.deepEqual(codeLineFontSizes(document), [22, 14, 10])
 })

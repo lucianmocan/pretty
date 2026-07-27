@@ -32,6 +32,7 @@ import {
   useTabSize,
 } from '@/lib/editor-preferences'
 import { StaticBlockEditor } from './static-block-editor'
+import { codeLineFontSizes } from '@/lib/tiptap/line-font-sizes'
 
 const RETOKENIZE_DEBOUNCE_MS = 140
 const RETOKENIZE_RETRY_MS = 900
@@ -448,11 +449,13 @@ function InteractiveBlockEditor({
       return {
         lineCount: text.split('\n').length,
         isEmpty: text.trim().length === 0,
+        lineFontSizes: currentEditor ? codeLineFontSizes(currentEditor.getJSON()) : [],
       }
     },
   })
   const lineCount = renderedEditorState?.lineCount ?? 1
   const isEmpty = renderedEditorState?.isEmpty ?? true
+  const lineFontSizes = renderedEditorState?.lineFontSizes ?? []
 
   if (!synced) {
     return <div className="scripture-editor-loading">Loading…</div>
@@ -504,6 +507,7 @@ function InteractiveBlockEditor({
       showLineNumbers={showLineNumbers}
       lineNumberColor={resolveThemeLineNumberForeground(theme)}
       lineCount={lineCount}
+      lineFontSizes={lineFontSizes}
       startLineNumber={startLineNumber}
       ligatures={ligatures}
       lineHeight={lineHeight}

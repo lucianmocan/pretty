@@ -6,6 +6,7 @@ import { fontCssVar } from '@/lib/presets'
 import { rangesToSet } from '@/lib/layout/line-ranges'
 import { cn } from '@/lib/utils'
 import type { ChromeStyle, ChromeIconKey, CustomChromeStyle } from '@/lib/layout/types'
+import { DEFAULT_CODE_FONT_SIZE } from '@/lib/tiptap/line-font-sizes'
 
 // Exported for components/ui/chrome-style-picker.tsx's own mini swatch
 // previews of saved custom chrome styles -- same icon set, no reason to
@@ -19,13 +20,6 @@ export const CUSTOM_CHROME_ICONS: Record<ChromeIconKey, LucideIcon | null> = {
   braces: Braces,
 }
 
-// Matches .scripture-code-editor's fixed font-size in app/globals.css --
-// with an explicit numeric line-height, row height in px is deterministic
-// (unitless line-height is always "this number times font-size", not an
-// approximation), so highlight/diff/trim overlays can be positioned by
-// arithmetic instead of measuring rendered DOM rects.
-const CODE_FONT_SIZE_PX = 14
-
 interface CodeChromeProps {
   fontFamily: string
   filename: string
@@ -33,6 +27,7 @@ interface CodeChromeProps {
   showLineNumbers: boolean
   lineNumberColor?: string
   lineCount: number
+  lineFontSizes?: number[]
   startLineNumber: number
   ligatures: boolean
   lineHeight: number
@@ -140,6 +135,7 @@ export function CodeChrome({
   showLineNumbers,
   lineNumberColor = '#8b949e',
   lineCount,
+  lineFontSizes = [],
   startLineNumber,
   ligatures,
   lineHeight,
@@ -165,11 +161,20 @@ export function CodeChrome({
     '--scripture-line-number-color': lineNumberColor,
   } as CSSProperties
 
-  const rowHeight = lineHeight * CODE_FONT_SIZE_PX
   const highlightSet = rangesToSet(highlightLines)
   const trimmedSet = rangesToSet(trimRanges)
   const showTrimCovers = trimRanges.length > 0 && !revealed
   const lineNumbers = Array.from({ length: Math.max(lineCount, 1) }, (_, i) => i + 1)
+  let nextLineTop = 0
+  const lineMetrics = lineNumbers.map((_, index) => {
+    const fontSize = lineFontSizes[index] ?? DEFAULT_CODE_FONT_SIZE
+    // ProseMirror's 14px block strut remains the minimum line-box height
+    // even when every glyph on a line is formatted smaller.
+    const height = lineHeight * Math.max(fontSize, DEFAULT_CODE_FONT_SIZE)
+    const metric = { fontSize, height, top: nextLineTop }
+    nextLineTop += height
+    return metric
+  })
 
   return (
     <div className="scripture-code-chrome" style={style}>
@@ -189,6 +194,7 @@ export function CodeChrome({
             }}
           >
             {lineNumbers.map((lineNumber) => {
+              const metric = lineMetrics[lineNumber - 1]
               const displayNumber = lineNumber - 1 + startLineNumber
               const diff = diffLines[lineNumber]
               const highlighted = highlightSet.has(lineNumber)
@@ -210,11 +216,17 @@ export function CodeChrome({
                   data-highlighted={highlighted || undefined}
                   data-diff={diff}
                   data-trimmed={trimmed || undefined}
+                  style={{ fontSize: metric.fontSize, lineHeight: `${metric.height}px` }}
                 >
                   {displayNumber}
                 </button>
               ) : (
-                <div key={lineNumber}>{displayNumber}</div>
+                <div
+                  key={lineNumber}
+                  style={{ fontSize: metric.fontSize, lineHeight: `${metric.height}px` }}
+                >
+                  {displayNumber}
+                </div>
               )
             })}
           </div>
@@ -224,6 +236,7 @@ export function CodeChrome({
             {lineNumbers.map((lineNumber) => {
               const diff = diffLines[lineNumber]
               const isHighlighted = highlightSet.has(lineNumber)
+              const metric = lineMetrics[lineNumber - 1]
               if (!diff && !isHighlighted) return null
               return (
                 <div
@@ -234,7 +247,7 @@ export function CodeChrome({
                     diff === 'add' && 'scripture-code-row-add',
                     diff === 'remove' && 'scripture-code-row-remove'
                   )}
-                  style={{ top: (lineNumber - 1) * rowHeight, height: rowHeight }}
+                  style={{ top: metric.top, height: metric.height }}
                 />
               )
             })}
@@ -245,7 +258,12 @@ export function CodeChrome({
                 key={`${start}-${end}`}
                 type="button"
                 className="scripture-code-trim"
-                style={{ top: (start - 1) * rowHeight, height: (end - start + 1) * rowHeight }}
+                style={{
+                  top: lineMetrics[start - 1]?.top ?? 0,
+                  height: lineMetrics
+                    .slice(start - 1, end)
+                    .reduce((height, metric) => height + metric.height, 0),
+                }}
                 onClick={() => setRevealed(true)}
               >
                 ⋯ {end - start + 1} line{end - start + 1 === 1 ? '' : 's'} hidden

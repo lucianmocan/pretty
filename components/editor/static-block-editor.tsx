@@ -26,6 +26,7 @@ import {
   subscribeToCustomSyntaxThemes,
 } from '@/lib/presets/custom-syntax-themes'
 import type { SyntaxStyleRange } from '@/lib/shiki/token-types'
+import { codeLineFontSizes } from '@/lib/tiptap/line-font-sizes'
 
 const staticExtensions = baseExtensions()
 
@@ -198,6 +199,7 @@ export const StaticBlockEditor = memo(function StaticBlockEditor({
       showLineNumbers={showLineNumbers}
       lineNumberColor={resolveThemeLineNumberForeground(theme)}
       lineCount={text.split('\n').length}
+      lineFontSizes={codeLineFontSizes(document)}
       startLineNumber={startLineNumber}
       ligatures={ligatures}
       lineHeight={lineHeight}

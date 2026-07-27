@@ -412,7 +412,7 @@ html[data-scripture-reduced-motion='true'] *::after {
 .scripture-code-editor {
   margin: 0;
   font-family: var(--scripture-code-font, var(--font-geist-mono)), ui-monospace, monospace;
-  font-size: 14px;
+  font-size: var(--scripture-code-font-size, 14px);
   line-height: var(--scripture-code-line-height, 1.65);
   letter-spacing: var(--scripture-code-letter-spacing, normal);
   outline: none;
@@ -539,7 +539,7 @@ html[data-scripture-reduced-motion='true'] *::after {
 
 .scripture-line-numbers {
   font-family: var(--scripture-code-font, var(--font-geist-mono)), ui-monospace, monospace;
-  font-size: 14px;
+  font-size: var(--scripture-code-font-size, 14px);
   line-height: var(--scripture-code-line-height, 1.65);
   color: var(--scripture-line-number-color, #8b949e);
   text-align: right;
@@ -586,11 +586,9 @@ html[data-scripture-reduced-motion='true'] *::after {
   box-shadow: inset 2px 0 #f87171;
 }
 
-/* Highlight/diff row backgrounds -- positioned by arithmetic (line index *
-   row height in px, computed from the block's own numeric line-height and
-   the fixed 14px font-size), not by measuring rendered DOM rects, so this
-   works identically in the live editor and the server-rendered print route.
-   See components/editor/code-chrome.tsx. */
+/* Highlight/diff row backgrounds -- positioned from the per-line font
+   metrics computed in CodeChrome, so authored font-size marks keep the
+   gutter and overlays aligned in live editing and exported output. */
 /* z-index, not just position: absolute -- .scripture-editor-wrapper (the
    real Tiptap content, rendered as a DOM sibling right after this) is ALSO
    position: relative. Two positioned siblings with z-index: auto stack in

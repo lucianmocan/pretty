@@ -21,6 +21,7 @@ import { blockFragmentName } from '@/lib/yjs/doc-store'
 import { ROOT_ID } from '@/lib/yjs/layout-store'
 import type { SyntaxStyleRange } from '@/lib/shiki/token-types'
 import { plainTextFromDocument, withSyntaxRanges } from '@/lib/tiptap/syntax-document'
+import { codeLineFontSizes } from '@/lib/tiptap/line-font-sizes'
 
 export type ExportSyntaxSnapshots = Record<string, SyntaxStyleRange[]>
 
@@ -133,6 +134,7 @@ function renderNode(
             node.themeLineNumberForeground ?? resolveThemeLineNumberForeground(node.theme)
           }
           lineCount={lineCount}
+          lineFontSizes={codeLineFontSizes(docJSON)}
           startLineNumber={node.startLineNumber ?? 1}
           ligatures={node.ligatures ?? true}
           lineHeight={node.lineHeight ?? 1.65}
