@@ -31,6 +31,12 @@ import type {
   ChildLayout,
   PageSize,
 } from '@/lib/layout/types'
+import {
+  DEFAULT_CANVAS_HEIGHT,
+  DEFAULT_CANVAS_WIDTH,
+  DEFAULT_CODE_BLOCK_HEIGHT,
+  DEFAULT_CODE_BLOCK_WIDTH,
+} from '@/lib/layout/types'
 import { findNode, findParent, findFirstByKind, collectByKind } from '@/lib/layout/tree-utils'
 import { alignNodes, distributeNodes, type PositionedNode, type AlignEdge } from '@/lib/layout/align-distribute'
 import { listStylePresets, saveStylePreset, deleteStylePreset, type StylePreset } from '@/lib/presets/style-presets'
@@ -195,6 +201,18 @@ function InspectorCard({
 function SizeSection({ node, docId }: { node: LayoutNode; docId: string }) {
   const { doc } = getYDoc(docId)
   const hasCustomSize = node.width != null || node.height != null
+  const autoWidth =
+    node.kind === 'code'
+      ? DEFAULT_CODE_BLOCK_WIDTH
+      : node.kind === 'frame' && node.childLayout === 'canvas'
+        ? DEFAULT_CANVAS_WIDTH
+        : 0
+  const autoHeight =
+    node.kind === 'code'
+      ? DEFAULT_CODE_BLOCK_HEIGHT
+      : node.kind === 'frame' && node.childLayout === 'canvas'
+        ? DEFAULT_CANVAS_HEIGHT
+        : 0
   return (
     <div className="scripture-inspector-section">
       <h3>Size</h3>
@@ -202,14 +220,14 @@ function SizeSection({ node, docId }: { node: LayoutNode; docId: string }) {
         <IconField
           icon={<MoveHorizontal size={14} />}
           title="Width"
-          value={node.width ?? 0}
+          value={node.width ?? autoWidth}
           min={MIN_NODE_SIZE}
           onChange={(width) => updateNodeSize(doc, node.id, { width })}
         />
         <IconField
           icon={<MoveVertical size={14} />}
           title="Height"
-          value={node.height ?? 0}
+          value={node.height ?? autoHeight}
           min={MIN_NODE_SIZE}
           onChange={(height) => updateNodeSize(doc, node.id, { height })}
         />

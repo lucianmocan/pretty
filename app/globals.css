@@ -13,6 +13,15 @@
 --------------------------------------------------------------------------- */
 
 :root {
+  --scripture-ui-scale: 1;
+  --scripture-ui-rem: 16px;
+  /* Content-space defaults for auto-sized authoring surfaces. These stay in
+     px intentionally: the canvas has its own zoom model, independent of the
+     surrounding UI's responsive rem scale. */
+  --scripture-default-canvas-width: 1200px;
+  --scripture-default-canvas-height: 800px;
+  --scripture-default-code-width: 640px;
+  --scripture-default-code-height: 360px;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -150,6 +159,9 @@
   }
   html {
     @apply font-sans;
+    /* rem-based primitives and portals scale together without introducing a
+       transformed coordinate system around the interactive canvas. */
+    font-size: var(--scripture-ui-rem);
   }
 }
 
@@ -163,31 +175,39 @@
   align-items: center;
   flex: 1;
   width: 100%;
-  padding: 40px 24px 96px;
+  padding: 2.5rem 1.5rem 6rem;
   /* Same dot-grid as .scripture-canvas-area -- a flat, empty background
      behind a short document list on a wide viewport reads as blank/unstyled;
      this ties the dashboard visually to the editor's own canvas instead of
      leaving the surrounding space looking like an unfinished void. */
   background-color: var(--card);
   background-image: radial-gradient(var(--border) 1px, transparent 1px);
-  background-size: 22px 22px;
+  background-size: 1.375rem 1.375rem;
 }
 
 .scripture-error-text {
   color: var(--destructive);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 /* ---------------------------------------------------------------------------
    Canvas + card + layout tree
 --------------------------------------------------------------------------- */
 
-.scripture-canvas-area {
+.scripture-canvas-stage {
   position: relative;
   flex: 1;
   min-width: 0;
   height: 100%;
+  overflow: hidden;
+}
+
+.scripture-canvas-area {
+  width: 100%;
+  height: 100%;
   overflow: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   display: flex;
   /* `safe` -- once zoomed in enough that the card exceeds the viewport,
      plain `center` alignment on an overflow:auto flex container is a known
@@ -196,10 +216,14 @@
      case, keeping the whole card scrollable into view either way. */
   justify-content: safe center;
   align-items: safe center;
-  padding: 56px;
+  padding: 3.5rem;
   background-color: var(--card);
   background-image: radial-gradient(var(--border) 1px, transparent 1px);
   background-size: 22px 22px;
+}
+
+.scripture-canvas-area::-webkit-scrollbar {
+  display: none;
 }
 
 .scripture-canvas-area.is-pan-ready {
@@ -209,6 +233,39 @@
 .scripture-canvas-area[data-panning='true'] {
   cursor: grabbing;
   user-select: none;
+}
+
+.scripture-pan-hint {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  z-index: 30;
+  padding: 0.4375rem 0.625rem;
+  transform: translateX(-50%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--popover) 92%, transparent);
+  color: var(--muted-foreground);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(0.375rem);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.scripture-pan-hint kbd {
+  display: inline-flex;
+  min-width: 2.75rem;
+  justify-content: center;
+  margin-inline: 0.1875rem;
+  padding: 0.0625rem 0.3125rem;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), sans-serif;
+  font-size: 0.6875rem;
 }
 
 /* Scaled to `zoom` via a CSS transform on the INNER element -- this outer
@@ -229,13 +286,13 @@
 
 .scripture-zoom-controls {
   position: absolute;
-  right: 16px;
-  bottom: 16px;
+  right: 1rem;
+  bottom: 1rem;
   z-index: 30;
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 3px;
+  gap: 0.125rem;
+  padding: 0.1875rem;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--popover);
@@ -243,13 +300,13 @@
 }
 
 .scripture-zoom-percent {
-  min-width: 44px;
-  padding: 4px 6px;
+  min-width: 2.75rem;
+  padding: 0.25rem 0.375rem;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: 0.75rem;
   text-align: center;
   cursor: pointer;
 }
@@ -260,9 +317,9 @@
 }
 
 .scripture-zoom-controls-divider {
-  width: 1px;
-  height: 20px;
-  margin: 0 2px;
+  width: 0.0625rem;
+  height: 1.25rem;
+  margin: 0 0.125rem;
   background: var(--border);
 }
 
@@ -272,12 +329,12 @@
 .scripture-canvas-toolbar {
   position: absolute;
   left: 50%;
-  bottom: 16px;
+  bottom: 1rem;
   z-index: 30;
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 4px;
+  gap: 0.125rem;
+  padding: 0.25rem;
   transform: translateX(-50%);
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
@@ -320,12 +377,12 @@
    Inspector's Size fields) still wins via sizeStyle()'s inline styles. */
 .scripture-frame-canvas.scripture-auto-width,
 .scripture-frame-canvas.scripture-auto-width > .scripture-frame-content {
-  min-width: 640px;
+  min-width: var(--scripture-default-canvas-width);
 }
 
 .scripture-frame-canvas.scripture-auto-height,
 .scripture-frame-canvas.scripture-auto-height > .scripture-frame-content {
-  min-height: 400px;
+  min-height: var(--scripture-default-canvas-height);
 }
 
 .scripture-code-editor {
@@ -622,6 +679,18 @@
   min-height: 1.5em;
 }
 
+/* A new code block should look like an editor, not a one-line label. Keep
+   these as minimums only: content can still grow the block naturally, and
+   an explicit resize removes the matching auto-size class so even a smaller
+   user-selected width/height remains possible. */
+.scripture-code-leaf.scripture-auto-width {
+  min-width: var(--scripture-default-code-width);
+}
+
+.scripture-code-leaf.scripture-auto-height {
+  min-height: var(--scripture-default-code-height);
+}
+
 /* Hover/selection chrome is an inset pseudo-element instead of replacing the
    node's box-shadow. This preserves the root card's natural shadow, follows
    each node's radius, never changes layout, and stays one screen pixel thick
@@ -914,14 +983,23 @@ html[data-scripture-moving] * {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 0.625rem;
   border: 1.5px dashed var(--border);
   border-radius: var(--radius-sm);
-  padding: 24px;
-  font-size: 13px;
+  padding: 1.5rem;
+  font-size: 0.8125rem;
   color: var(--muted-foreground);
-  min-width: 200px;
+  min-width: 12.5rem;
   text-align: center;
+}
+
+/* Canvas children are out of flow, so the empty-state card is free to sit in
+   the middle of the new artboard instead of looking stranded in its corner. */
+.scripture-frame-canvas > .scripture-frame-content > .scripture-empty-frame {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .scripture-image-empty {
@@ -951,9 +1029,103 @@ html[data-scripture-moving] * {
   border-radius: var(--radius-sm);
   background: var(--popover);
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
   pointer-events: auto;
   transform: translateX(-50%);
   z-index: 60;
+}
+
+html[data-scripture-moving] .scripture-node-controls,
+html[data-scripture-panning] .scripture-node-controls {
+  display: none;
+}
+
+.scripture-node-menu {
+  z-index: 80;
+  min-width: 10rem;
+  padding: 0.25rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--shadow-md);
+  font-size: 0.75rem;
+}
+
+.scripture-node-menu.is-compact {
+  min-width: 6rem;
+}
+
+.scripture-node-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: default;
+  user-select: none;
+}
+
+.scripture-node-menu-item[data-highlighted] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.scripture-node-menu-item.is-destructive {
+  color: var(--destructive);
+}
+
+.scripture-node-menu-item.is-destructive[data-highlighted] {
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+  color: var(--destructive);
+}
+
+.scripture-node-menu-item svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.scripture-node-menu-shortcut {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 0.625rem;
+}
+
+.scripture-node-menu-separator {
+  height: 1px;
+  margin: 0.25rem -0.25rem;
+  background: var(--border);
+}
+
+.scripture-delete-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 4.5rem;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-height: 2.25rem;
+  padding: 0.5rem 0.75rem;
+  transform: translateX(-50%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--shadow-md);
+  font-size: 0.75rem;
+}
+
+.scripture-delete-toast button {
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: inherit;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .scripture-editor-loading {
@@ -1089,12 +1261,12 @@ html[data-scripture-moving] * {
 .scripture-toolbar {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 0.875rem;
   flex-wrap: wrap;
   width: 100%;
-  height: 44px;
+  height: 2.75rem;
   flex-shrink: 0;
-  padding: 0 20px;
+  padding: 0 1.25rem;
   border-bottom: 0;
   background: var(--card);
 }
@@ -1112,13 +1284,13 @@ html[data-scripture-moving] * {
 .scripture-search-panel {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
 }
 
 .scripture-search-count {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted-foreground);
-  min-width: 32px;
+  min-width: 2rem;
   text-align: center;
 }
 
@@ -1139,29 +1311,34 @@ html[data-scripture-moving] * {
 .scripture-app-menubar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 0.625rem;
   flex-shrink: 0;
-  height: 44px;
-  padding: 0 10px;
+  height: 2.75rem;
+  padding: 0 0.625rem;
   border-bottom: 1px solid var(--border);
   background: var(--card);
   font-family: var(--font-geist-sans), sans-serif;
 }
 
 .scripture-app-menubar [data-slot='input'] {
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .scripture-home-link {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 1.75rem;
+  height: 1.75rem;
   border-radius: var(--radius-sm);
   color: var(--muted-foreground);
   flex-shrink: 0;
   transition: background 0.12s, color 0.12s;
+}
+
+.scripture-home-link svg {
+  width: 1rem;
+  height: 1rem;
 }
 
 .scripture-home-link:hover {
@@ -1172,15 +1349,15 @@ html[data-scripture-moving] * {
 .scripture-save-status {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 0.25rem;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 0.6875rem;
   white-space: nowrap;
 }
 
 .scripture-save-status svg {
-  width: 12px;
-  height: 12px;
+  width: 0.75rem;
+  height: 0.75rem;
 }
 
 .scripture-save-status-spinner {
@@ -1197,13 +1374,13 @@ html[data-scripture-moving] * {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 32px;
-  padding: 5px 12px;
+  gap: 0.5rem;
+  min-height: 2rem;
+  padding: 0.3125rem 0.75rem;
   border-bottom: 1px solid color-mix(in srgb, var(--destructive) 45%, var(--border));
   background: color-mix(in srgb, var(--destructive) 10%, var(--card));
   color: var(--destructive);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .scripture-operation-error button {
@@ -1211,7 +1388,7 @@ html[data-scripture-moving] * {
   background: transparent;
   color: inherit;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 1rem;
 }
 
 .scripture-workspace {
@@ -1219,15 +1396,15 @@ html[data-scripture-moving] * {
   flex: 1;
   min-height: 0;
   width: 100%;
-  min-width: 1100px;
+  min-width: 68.75rem;
 }
 
 .scripture-layers-panel {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: 240px;
-  min-width: 240px;
+  width: 15rem;
+  min-width: 15rem;
   height: 100%;
   border-right: 1px solid var(--border);
   background: var(--card);
@@ -1237,10 +1414,10 @@ html[data-scripture-moving] * {
 .scripture-panel-resize-handle {
   position: absolute;
   top: 0;
-  right: -3px;
+  right: -0.1875rem;
   bottom: 0;
   z-index: 4;
-  width: 6px;
+  width: 0.375rem;
   cursor: col-resize;
 }
 
@@ -1249,10 +1426,10 @@ html[data-scripture-moving] * {
 }
 
 .scripture-layers-panel.is-collapsed {
-  width: 40px;
-  min-width: 40px;
+  width: 2.5rem;
+  min-width: 2.5rem;
   align-items: center;
-  padding-top: 8px;
+  padding-top: 0.5rem;
 }
 
 .scripture-panel-heading,
@@ -1264,18 +1441,18 @@ html[data-scripture-moving] * {
 }
 
 .scripture-panel-heading {
-  height: 38px;
-  padding: 0 8px 0 12px;
+  height: 2.375rem;
+  padding: 0 0.5rem 0 0.75rem;
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
 .scripture-layers-section {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px;
+  gap: 0.25rem;
+  padding: 0.5rem;
   border-bottom: 1px solid var(--border);
 }
 
@@ -1286,13 +1463,13 @@ html[data-scripture-moving] * {
 }
 
 .scripture-section-heading {
-  height: 24px;
-  padding-left: 4px;
+  height: 1.5rem;
+  padding-left: 0.25rem;
 }
 
 .scripture-section-heading h2 {
   margin: 0;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1301,29 +1478,29 @@ html[data-scripture-moving] * {
 
 .scripture-section-heading > svg,
 .scripture-section-heading-actions > svg {
-  width: 13px;
-  height: 13px;
-  margin-right: 6px;
+  width: 0.8125rem;
+  height: 0.8125rem;
+  margin-right: 0.375rem;
   color: var(--muted-foreground);
 }
 
 .scripture-section-heading-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0.125rem;
 }
 
 .scripture-section-heading-actions > svg {
-  margin-right: 6px;
+  margin-right: 0.375rem;
   color: var(--muted-foreground);
 }
 
 .scripture-sidebar-search {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin: 2px 0 7px;
-  padding: 8px;
+  gap: 0.5rem;
+  margin: 0.125rem 0 0.4375rem;
+  padding: 0.5rem;
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--muted) 68%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 65%, transparent);
@@ -1331,17 +1508,17 @@ html[data-scripture-moving] * {
 
 .scripture-property-panel .scripture-inspector-row label {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: 0.75rem;
   cursor: default;
 }
 
 .scripture-property-panel [data-slot='input'],
 .scripture-property-panel [data-slot='button'] {
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .scripture-property-panel [data-slot='input'] {
-  height: 28px;
+  height: 1.75rem;
   min-width: 0;
 }
 
@@ -1362,7 +1539,7 @@ html[data-scripture-moving] * {
 .scripture-layer-row {
   display: flex;
   align-items: center;
-  min-height: 28px;
+  min-height: 1.75rem;
   border-radius: var(--radius-sm);
   color: var(--muted-foreground);
 }
@@ -1390,19 +1567,19 @@ html[data-scripture-moving] * {
 .scripture-page-row-label {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 0.4375rem;
   flex: 1;
   min-width: 0;
-  height: 28px;
-  padding: 0 6px;
-  font-size: 12px;
+  height: 1.75rem;
+  padding: 0 0.375rem;
+  font-size: 0.75rem;
   text-align: left;
 }
 
 .scripture-page-row-label svg,
 .scripture-layer-row > svg {
-  width: 13px;
-  height: 13px;
+  width: 0.8125rem;
+  height: 0.8125rem;
   flex-shrink: 0;
 }
 
@@ -1410,24 +1587,24 @@ html[data-scripture-moving] * {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 24px;
+  width: 1.125rem;
+  height: 1.5rem;
   padding: 0;
   flex-shrink: 0;
 }
 
 .scripture-layer-disclosure svg {
-  width: 12px;
-  height: 12px;
+  width: 0.75rem;
+  height: 0.75rem;
 }
 
 .scripture-layer-label {
   flex: 1;
   min-width: 0;
-  height: 28px;
-  padding: 0 6px;
+  height: 1.75rem;
+  padding: 0 0.375rem;
   overflow: hidden;
-  font-size: 12px;
+  font-size: 0.75rem;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1436,21 +1613,21 @@ html[data-scripture-moving] * {
 .scripture-layer-label-input {
   flex: 1;
   min-width: 0;
-  height: 22px;
-  margin: 2px 5px;
-  padding: 0 5px;
+  height: 1.375rem;
+  margin: 0.125rem 0.3125rem;
+  padding: 0 0.3125rem;
   border: 1px solid var(--ring);
-  border-radius: 3px;
+  border-radius: 0.1875rem;
   background: var(--background);
   color: var(--foreground);
-  font-size: 12px;
+  font-size: 0.75rem;
   outline: none;
 }
 
 .scripture-panel-error {
-  margin: 4px;
+  margin: 0.25rem;
   color: var(--destructive);
-  font-size: 11px;
+  font-size: 0.6875rem;
   line-height: 1.4;
 }
 
@@ -1462,18 +1639,23 @@ html[data-scripture-moving] * {
   background: color-mix(in srgb, var(--ring) 12%, transparent);
 }
 
-/* Docked flush against .scripture-canvas-area (no gap, Figma-style) --
+/* Docked flush against .scripture-canvas-stage (no gap, Figma-style) --
    overrides the shadcn Card's own default rounded/all-sides-border/shadow
    chrome with a plain left divider instead, since a floating rounded card
    butted directly against the canvas with zero margin reads as a mistake,
    not a sidebar. Same specificity as Card's utility classes and defined
    later in this stylesheet, so it wins the cascade tie. */
 .scripture-inspector {
-  width: 272px;
+  position: relative;
+  z-index: 31;
+  width: 17rem;
+  height: 100%;
+  min-height: 0;
   flex-shrink: 0;
-  font-size: 13px;
-  align-self: stretch;
+  font-size: 0.8125rem;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   border-radius: 0;
   border: none;
   border-left: 1px solid var(--border);
@@ -1484,8 +1666,8 @@ html[data-scripture-moving] * {
 .scripture-inspector-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px 0;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
 }
 
 /* Inspector sections are separated by whitespace, not repeated horizontal
@@ -1501,27 +1683,27 @@ html[data-scripture-moving] * {
 
 .scripture-inspector h3 {
   position: sticky;
-  top: -12px;
+  top: -0.75rem;
   z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--muted-foreground);
   margin: 0;
-  padding: 4px 0;
+  padding: 0.25rem 0;
   background: var(--card);
   cursor: pointer;
 }
 
 .scripture-inspector h3::after {
   content: '';
-  width: 6px;
-  height: 6px;
-  margin-right: 3px;
+  width: 0.375rem;
+  height: 0.375rem;
+  margin-right: 0.1875rem;
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   transform: rotate(45deg) translate(-1px, -1px);
@@ -1546,8 +1728,8 @@ html[data-scripture-moving] * {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  min-height: 26px;
+  gap: 0.5rem;
+  min-height: 1.625rem;
 }
 
 /* font-size explicit, not inherited -- shadcn's Label component carries its
@@ -1561,7 +1743,7 @@ html[data-scripture-moving] * {
 .scripture-inspector-row label {
   color: var(--muted-foreground);
   cursor: default;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 /* Label-above-control layout for the flex-property rows (Direction/Align/
@@ -1570,11 +1752,11 @@ html[data-scripture-moving] * {
 .scripture-inspector-stack {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0.375rem;
 }
 
 .scripture-inspector-stack label {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted-foreground);
 }
 
@@ -1600,7 +1782,7 @@ html[data-scripture-moving] * {
 .scripture-inspector [data-slot='toggle-group-item'],
 .scripture-inspector [data-slot='select-trigger'],
 .scripture-inspector [data-slot='select-value'] {
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 
@@ -1616,26 +1798,26 @@ html[data-scripture-moving] * {
 
 .field-with-icon svg {
   position: absolute;
-  left: 8px;
+  left: 0.5rem;
   color: var(--muted-foreground);
   pointer-events: none;
 }
 
 .field-with-icon input {
-  padding-left: 26px;
+  padding-left: 1.625rem;
 }
 
 .scripture-inspector-hint {
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted-foreground);
-  margin: -4px 0 0;
+  margin: -0.25rem 0 0;
   line-height: 1.4;
 }
 
 .scripture-inspector-actions {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0.375rem;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1737,8 +1919,8 @@ html[data-scripture-moving] * {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: min(1280px, calc(100% - 48px));
-  min-height: 66px;
+  width: min(80rem, calc(100% - 3rem));
+  min-height: 4.125rem;
   margin: 0 auto;
 }
 
@@ -1747,7 +1929,7 @@ html[data-scripture-moving] * {
   align-items: center;
   width: fit-content;
   font-family: var(--font-luckiest-guy), var(--font-geist-sans), sans-serif;
-  font-size: 30px;
+  font-size: 1.875rem;
   font-weight: 400;
   letter-spacing: 0;
   line-height: 1;
@@ -1762,19 +1944,19 @@ html[data-scripture-moving] * {
 .scripture-landing-nav-links {
   align-self: center;
   justify-content: flex-end;
-  gap: 28px;
+  gap: 1.75rem;
   margin-top: 0;
-  transform: translateY(-7px);
+  transform: translateY(-0.4375rem);
 }
 
 .scripture-landing-nav-links a {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
   color: var(--landing-muted);
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 500;
-  line-height: 18px;
+  line-height: 1.125rem;
   transition: color 140ms ease;
 }
 
@@ -1783,8 +1965,8 @@ html[data-scripture-moving] * {
 }
 
 .scripture-github-mark {
-  width: 18px;
-  height: 18px;
+  width: 1.125rem;
+  height: 1.125rem;
   background: currentColor;
   mask: url('/github-mark.svg') center / contain no-repeat;
 }
@@ -1796,13 +1978,13 @@ html[data-scripture-moving] * {
 
 .scripture-landing-hero {
   display: grid;
-  grid-template-columns: minmax(370px, 0.84fr) minmax(580px, 1.16fr);
+  grid-template-columns: minmax(23.125rem, 0.84fr) minmax(36.25rem, 1.16fr);
   align-items: center;
-  gap: clamp(42px, 5vw, 86px);
-  width: min(1280px, calc(100% - 48px));
-  min-height: min(790px, calc(100dvh - 66px));
+  gap: clamp(2.625rem, 5vw, 5.375rem);
+  width: min(80rem, calc(100% - 3rem));
+  min-height: min(49.375rem, calc(100dvh - 4.125rem));
   margin: 0 auto;
-  padding: 82px 0 96px;
+  padding: 5.125rem 0 6rem;
 }
 
 .scripture-hero-copy {
@@ -1811,10 +1993,10 @@ html[data-scripture-moving] * {
 }
 
 .scripture-hero-copy h1 {
-  max-width: 660px;
-  margin: 0 0 22px;
+  max-width: 41.25rem;
+  margin: 0 0 1.375rem;
   font-family: var(--font-luckiest-guy), var(--font-geist-sans), sans-serif;
-  font-size: clamp(50px, 5.6vw, 82px);
+  font-size: clamp(3.125rem, 5.6vw, 5.125rem);
   font-weight: 400;
   letter-spacing: 0;
   line-height: 0.96;
@@ -1827,42 +2009,42 @@ html[data-scripture-moving] * {
 }
 
 .scripture-hero-copy > p {
-  max-width: 580px;
+  max-width: 36.25rem;
   margin: 0;
   color: var(--landing-muted);
-  font-size: 17px;
+  font-size: 1.0625rem;
   line-height: 1.65;
 }
 
 .scripture-hero-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 32px;
+  gap: 0.625rem;
+  margin-top: 2rem;
 }
 
 .scripture-hero-actions [data-slot='button'] {
-  min-width: 164px;
+  min-width: 10.25rem;
 }
 
 .scripture-hero-privacy {
   display: flex;
   align-items: flex-start;
   flex-direction: column;
-  gap: 4px;
+  gap: 0.25rem;
   width: fit-content;
-  margin-top: 18px;
-  padding: 11px 13px;
+  margin-top: 1.125rem;
+  padding: 0.6875rem 0.8125rem;
   border: 0;
-  border-radius: 10px;
+  border-radius: 0.625rem;
   background: rgba(116, 129, 255, 0.075);
   box-shadow: none;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 .scripture-hero-privacy strong {
   color: #fff;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
@@ -1870,38 +2052,38 @@ html[data-scripture-moving] * {
 .scripture-hero-local-note {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 0.4375rem;
   color: #777b85;
 }
 
 .scripture-hero-local-note svg {
-  width: 13px;
-  height: 13px;
+  width: 0.8125rem;
+  height: 0.8125rem;
 }
 
 .scripture-hero-facts {
   display: flex;
   align-items: center;
-  gap: 9px;
-  margin-top: 2px;
+  gap: 0.5625rem;
+  margin-top: 0.125rem;
   color: #747883;
-  font-size: 10px;
+  font-size: 0.625rem;
 }
 
 .scripture-hero-facts span {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 0.3125rem;
 }
 
 .scripture-hero-facts svg {
-  width: 12px;
-  height: 12px;
+  width: 0.75rem;
+  height: 0.75rem;
 }
 
 .scripture-hero-facts i {
-  width: 2px;
-  height: 2px;
+  width: 0.125rem;
+  height: 0.125rem;
   border-radius: 50%;
   background: #454952;
 }
@@ -1909,7 +2091,7 @@ html[data-scripture-moving] * {
 .scripture-product-stage {
   position: relative;
   width: 100%;
-  perspective: 1400px;
+  perspective: 87.5rem;
 }
 
 .scripture-product-glow {
@@ -1917,7 +2099,7 @@ html[data-scripture-moving] * {
   inset: 16% 8% 3%;
   border-radius: 50%;
   background: rgba(116, 129, 255, 0.18);
-  filter: blur(70px);
+  filter: blur(4.375rem);
   pointer-events: none;
 }
 
@@ -1926,11 +2108,11 @@ html[data-scripture-moving] * {
   width: 100%;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 12px;
+  border-radius: 0.75rem;
   background: #15171b;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.08) inset,
-    0 36px 90px -24px rgba(0, 0, 0, 0.85);
+    0 2.25rem 5.625rem -1.5rem rgba(0, 0, 0, 0.85);
   transform: rotateY(-3deg) rotateX(0.75deg);
   transform-origin: center left;
 }
@@ -1943,14 +2125,14 @@ html[data-scripture-moving] * {
 
 .scripture-landing-cta,
 .scripture-landing-footer {
-  width: min(1180px, calc(100% - 48px));
+  width: min(73.75rem, calc(100% - 3rem));
   margin-inline: auto;
 }
 
 .scripture-landing-cta h2 {
   margin: 0;
   font-family: var(--font-luckiest-guy), var(--font-geist-sans), sans-serif;
-  font-size: clamp(38px, 4vw, 58px);
+  font-size: clamp(2.375rem, 4vw, 3.625rem);
   font-weight: 400;
   letter-spacing: 0;
   line-height: 0.98;
@@ -1961,17 +2143,17 @@ html[data-scripture-moving] * {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 92px;
-  padding: 64px;
+  margin-bottom: 5.75rem;
+  padding: 4rem;
   border: 1px solid var(--landing-line);
-  border-radius: 12px;
+  border-radius: 0.75rem;
   background:
     linear-gradient(110deg, rgba(158, 230, 184, 0.06), transparent 42%),
     var(--landing-surface);
 }
 
 .scripture-landing-cta h2 {
-  max-width: 760px;
+  max-width: 47.5rem;
   text-align: center;
 }
 
@@ -1979,27 +2161,27 @@ html[data-scripture-moving] * {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
-  gap: 28px;
-  min-height: 108px;
+  gap: 1.75rem;
+  min-height: 6.75rem;
   border-top: 1px solid var(--landing-line);
 }
 
 .scripture-landing-footer p {
   margin: 0;
   color: #666a74;
-  font-size: 11px;
+  font-size: 0.6875rem;
   text-align: center;
 }
 
 .scripture-landing-footer > div {
   display: flex;
   justify-content: flex-end;
-  gap: 20px;
+  gap: 1.25rem;
 }
 
 .scripture-landing-footer > div a {
   color: #858994;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 .scripture-landing-footer > div a:hover {
@@ -2014,19 +2196,19 @@ html[data-scripture-moving] * {
 @media (max-width: 1050px) {
   .scripture-landing-hero {
     grid-template-columns: 1fr;
-    padding-top: 90px;
+    padding-top: 5.625rem;
   }
 
   .scripture-hero-copy {
-    max-width: 760px;
+    max-width: 47.5rem;
   }
 
   .scripture-hero-copy h1 {
-    font-size: clamp(58px, 9vw, 82px);
+    font-size: clamp(3.625rem, 9vw, 5.125rem);
   }
 
   .scripture-product-stage {
-    width: min(760px, 100%);
+    width: min(47.5rem, 100%);
     margin-inline: auto;
   }
 
@@ -2041,15 +2223,15 @@ html[data-scripture-moving] * {
   .scripture-landing-hero,
   .scripture-landing-cta,
   .scripture-landing-footer {
-    width: min(100% - 32px, 1180px);
+    width: min(100% - 2rem, 73.75rem);
   }
 
   .scripture-landing-nav {
-    min-height: 60px;
+    min-height: 3.75rem;
   }
 
   .scripture-landing-logo {
-    font-size: 28px;
+    font-size: 1.75rem;
   }
 
   .scripture-landing-nav-links {
@@ -2058,35 +2240,35 @@ html[data-scripture-moving] * {
   }
 
   .scripture-landing-nav-links a {
-    font-size: 14px;
+    font-size: 0.875rem;
   }
 
   .scripture-github-mark {
-    width: 17px;
-    height: 17px;
+    width: 1.0625rem;
+    height: 1.0625rem;
   }
 
   .scripture-landing-hero {
-    gap: 44px;
+    gap: 2.75rem;
     min-height: auto;
-    padding: 54px 0 64px;
+    padding: 3.375rem 0 4rem;
   }
 
   .scripture-hero-copy h1 {
-    margin-bottom: 18px;
-    font-size: clamp(48px, 15vw, 68px);
+    margin-bottom: 1.125rem;
+    font-size: clamp(3rem, 15vw, 4.25rem);
     line-height: 0.93;
   }
 
   .scripture-hero-copy > p {
-    font-size: 15px;
+    font-size: 0.9375rem;
     line-height: 1.55;
   }
 
   .scripture-hero-actions {
     align-items: stretch;
     flex-direction: column;
-    margin-top: 26px;
+    margin-top: 1.625rem;
   }
 
   .scripture-hero-actions [data-slot='button'] {
@@ -2095,8 +2277,8 @@ html[data-scripture-moving] * {
 
   .scripture-hero-privacy {
     width: 100%;
-    margin-top: 16px;
-    padding: 12px 13px;
+    margin-top: 1rem;
+    padding: 0.75rem 0.8125rem;
   }
 
   .scripture-hero-local-note {
@@ -2105,23 +2287,23 @@ html[data-scripture-moving] * {
   }
 
   .scripture-hero-local-note svg {
-    margin-top: 1px;
+    margin-top: 0.0625rem;
   }
 
   .scripture-hero-facts {
     flex-wrap: nowrap;
-    gap: 6px 8px;
+    gap: 0.375rem 0.5rem;
     line-height: 1.4;
   }
 
   .scripture-product-glow {
     inset: 12% 2% 0;
-    filter: blur(44px);
+    filter: blur(2.75rem);
   }
 
   .scripture-product-screenshot {
     aspect-ratio: 1.28;
-    border-radius: 10px;
+    border-radius: 0.625rem;
   }
 
   .scripture-product-screenshot img {
@@ -2132,21 +2314,21 @@ html[data-scripture-moving] * {
   }
 
   .scripture-landing-cta {
-    margin-bottom: 56px;
-    padding: 38px 22px;
+    margin-bottom: 3.5rem;
+    padding: 2.375rem 1.375rem;
   }
 
   .scripture-landing-cta h2 {
-    font-size: clamp(36px, 11vw, 48px);
+    font-size: clamp(2.25rem, 11vw, 3rem);
   }
 
   .scripture-landing-footer {
     display: grid;
     grid-template-columns: 1fr auto;
     align-items: center;
-    gap: 12px;
+    gap: 0.75rem;
     min-height: auto;
-    padding: 28px 0 34px;
+    padding: 1.75rem 0 2.125rem;
   }
 
   .scripture-landing-footer p {
@@ -2156,7 +2338,7 @@ html[data-scripture-moving] * {
 
   .scripture-landing-footer > div {
     justify-content: flex-end;
-    gap: 12px;
+    gap: 0.75rem;
   }
 }
 
@@ -2165,16 +2347,16 @@ html[data-scripture-moving] * {
   .scripture-landing-hero,
   .scripture-landing-cta,
   .scripture-landing-footer {
-    width: calc(100% - 24px);
+    width: calc(100% - 1.5rem);
   }
 
   .scripture-landing-hero {
-    gap: 38px;
-    padding-top: 44px;
+    gap: 2.375rem;
+    padding-top: 2.75rem;
   }
 
   .scripture-hero-copy h1 {
-    font-size: clamp(46px, 16vw, 60px);
+    font-size: clamp(2.875rem, 16vw, 3.75rem);
   }
 
   .scripture-product-screenshot {
@@ -2194,14 +2376,14 @@ html[data-scripture-moving] * {
   @keyframes scripture-product-enter {
     from {
       opacity: 0;
-      transform: translateY(18px) rotateY(-3deg) rotateX(0.75deg);
+      transform: translateY(1.125rem) rotateY(-3deg) rotateX(0.75deg);
     }
   }
 
   @keyframes scripture-hero-enter {
     from {
       opacity: 0;
-      transform: translateY(10px);
+      transform: translateY(0.625rem);
     }
   }
 }
@@ -2212,7 +2394,7 @@ html[data-scripture-moving] * {
 
 .scripture-dashboard-title {
   font-family: var(--font-luckiest-guy), var(--font-geist-sans), sans-serif;
-  font-size: 24px;
+  font-size: 1.5rem;
   font-weight: 400;
   color: #fff;
   margin: 0;
@@ -2226,41 +2408,41 @@ html[data-scripture-moving] * {
      sibling using a normal font (e.g. the Feedback button). Nudged down to
      compensate for the font itself, not a flex/alignment bug. */
   position: relative;
-  top: 3px;
+  top: 0.1875rem;
 }
 
 .scripture-dashboard-shell .scripture-page {
-  padding: 32px 24px 80px;
+  padding: 2rem 1.5rem 5rem;
 }
 
 .scripture-dashboard-main {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 1040px;
+  max-width: 65rem;
 }
 
 .scripture-dashboard-overview {
   display: flex;
   align-items: flex-start;
-  gap: 8px 20px;
+  gap: 0.5rem 1.25rem;
   flex-wrap: wrap;
   width: 100%;
-  padding: 8px 0;
+  padding: 0.5rem 0;
   border-bottom: 0;
 }
 
 .scripture-dashboard-heading {
   display: flex;
   flex: 1;
-  min-width: 280px;
+  min-width: 17.5rem;
   flex-direction: column;
-  gap: 4px;
+  gap: 0.25rem;
 }
 
 .scripture-dashboard-eyebrow {
   color: var(--muted-foreground);
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -2268,7 +2450,7 @@ html[data-scripture-moving] * {
 
 .scripture-dashboard-heading h2 {
   margin: 0;
-  font-size: 24px;
+  font-size: 1.5rem;
   font-weight: 620;
   letter-spacing: -0.025em;
 }
@@ -2276,51 +2458,51 @@ html[data-scripture-moving] * {
 .scripture-dashboard-heading p {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .scripture-dashboard-stats {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
   flex-basis: 100%;
 }
 
 .scripture-dashboard-stats span {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  min-height: 24px;
-  padding: 3px 8px;
-  border-radius: 999px;
+  gap: 0.3125rem;
+  min-height: 1.5rem;
+  padding: 0.1875rem 0.5rem;
+  border-radius: 62.4375rem;
   background: color-mix(in srgb, var(--muted) 70%, transparent);
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 .scripture-dashboard-stats svg {
-  width: 12px;
-  height: 12px;
+  width: 0.75rem;
+  height: 0.75rem;
 }
 
 .scripture-dashboard-content {
   display: flex;
   flex-direction: column;
-  gap: 30px;
+  gap: 1.875rem;
   width: 100%;
-  padding-top: 12px;
+  padding-top: 0.75rem;
 }
 
 .scripture-dashboard-loading {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 0.5625rem;
   width: 100%;
-  padding-top: 32px;
+  padding-top: 2rem;
 }
 
 .scripture-dashboard-loading div {
-  height: 42px;
+  height: 2.625rem;
   border-radius: var(--radius-md);
   background: linear-gradient(90deg, var(--muted), var(--accent), var(--muted));
   background-size: 220% 100%;
@@ -2329,7 +2511,7 @@ html[data-scripture-moving] * {
 
 .scripture-dashboard-loading div:first-child {
   width: 46%;
-  height: 86px;
+  height: 5.375rem;
 }
 
 @keyframes scripture-dashboard-loading {
@@ -2343,8 +2525,8 @@ html[data-scripture-moving] * {
   flex-direction: column;
   align-items: center;
   width: 100%;
-  margin-top: 32px;
-  padding: 48px 24px;
+  margin-top: 2rem;
+  padding: 3rem 1.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--card) 88%, transparent);
@@ -2352,31 +2534,31 @@ html[data-scripture-moving] * {
 }
 
 .scripture-dashboard-empty h3 {
-  margin: 18px 0 5px;
-  font-size: 16px;
+  margin: 1.125rem 0 0.3125rem;
+  font-size: 1rem;
   font-weight: 600;
 }
 
 .scripture-dashboard-empty > p {
-  max-width: 430px;
-  margin: 0 0 18px;
+  max-width: 26.875rem;
+  margin: 0 0 1.125rem;
   color: var(--muted-foreground);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.55;
 }
 
 .scripture-empty-preview {
   display: flex;
   align-items: center;
-  gap: 14px;
-  width: 210px;
-  height: 88px;
-  padding: 16px;
+  gap: 0.875rem;
+  width: 13.125rem;
+  height: 5.5rem;
+  padding: 1rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background-color: var(--background);
   background-image: radial-gradient(color-mix(in srgb, var(--border) 75%, transparent) 1px, transparent 1px);
-  background-size: 14px 14px;
+  background-size: 0.875rem 0.875rem;
   box-shadow: var(--shadow-md);
 }
 
@@ -2386,8 +2568,8 @@ html[data-scripture-moving] * {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
+  width: 2rem;
+  height: 2rem;
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--ring) 16%, var(--muted));
   color: var(--foreground);
@@ -2395,8 +2577,8 @@ html[data-scripture-moving] * {
 
 .scripture-empty-preview-icon svg,
 .scripture-doc-card-preview-icon svg {
-  width: 15px;
-  height: 15px;
+  width: 0.9375rem;
+  height: 0.9375rem;
 }
 
 .scripture-empty-preview-lines,
@@ -2404,15 +2586,15 @@ html[data-scripture-moving] * {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 7px;
+  gap: 0.4375rem;
 }
 
 .scripture-empty-preview-lines i,
 .scripture-doc-card-code i {
   display: block;
   width: 78%;
-  height: 3px;
-  border-radius: 99px;
+  height: 0.1875rem;
+  border-radius: 6.1875rem;
   background: color-mix(in srgb, var(--muted-foreground) 35%, transparent);
 }
 
@@ -2430,15 +2612,15 @@ html[data-scripture-moving] * {
 .scripture-dashboard-local-note {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  margin-top: 14px;
+  gap: 0.3125rem;
+  margin-top: 0.875rem;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 .scripture-dashboard-local-note svg {
-  width: 12px;
-  height: 12px;
+  width: 0.75rem;
+  height: 0.75rem;
 }
 
 .scripture-doc-grid {
@@ -2447,8 +2629,8 @@ html[data-scripture-moving] * {
   padding: 0;
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(16.25rem, 1fr));
+  gap: 0.75rem;
 }
 
 /* Wraps the Pinned cards grid and the All-documents list below it -- each
@@ -2456,12 +2638,12 @@ html[data-scripture-moving] * {
 .scripture-doc-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0.625rem;
   width: 100%;
 }
 
 .scripture-doc-section-title {
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -2472,20 +2654,20 @@ html[data-scripture-moving] * {
 .scripture-doc-section-heading {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 0.4375rem;
 }
 
 .scripture-doc-section-heading > span {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 999px;
+  min-width: 1.125rem;
+  height: 1.125rem;
+  padding: 0 0.3125rem;
+  border-radius: 62.4375rem;
   background: var(--muted);
   color: var(--muted-foreground);
-  font-size: 10px;
+  font-size: 0.625rem;
 }
 
 .scripture-doc-card {
@@ -2495,7 +2677,7 @@ html[data-scripture-moving] * {
 }
 
 .scripture-doc-card:hover {
-  transform: translateY(-1px);
+  transform: translateY(-0.0625rem);
   box-shadow: var(--shadow-md);
 }
 
@@ -2509,7 +2691,7 @@ html[data-scripture-moving] * {
   border-bottom: 1px solid var(--border);
   background-color: color-mix(in srgb, var(--background) 82%, var(--card));
   background-image: radial-gradient(color-mix(in srgb, var(--border) 62%, transparent) 1px, transparent 1px);
-  background-size: 15px 15px;
+  background-size: 0.9375rem 0.9375rem;
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -2530,24 +2712,24 @@ html[data-scripture-moving] * {
 .scripture-doc-card-preview-fallback {
   display: flex;
   align-items: center;
-  gap: 13px;
+  gap: 0.8125rem;
   width: 100%;
   height: 100%;
-  padding: 16px;
+  padding: 1rem;
 }
 
 .scripture-doc-card-content {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 7px 10px;
-  padding: 11px 12px 10px;
+  gap: 0.4375rem 0.625rem;
+  padding: 0.6875rem 0.75rem 0.625rem;
 }
 
 .scripture-doc-card-name {
   min-width: 0;
   overflow: hidden;
   color: var(--foreground);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 550;
   text-align: left;
   text-overflow: ellipsis;
@@ -2562,14 +2744,14 @@ html[data-scripture-moving] * {
   display: flex;
   grid-column: 1;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 .scripture-doc-card-meta span + span::before {
   content: '·';
-  margin-right: 6px;
+  margin-right: 0.375rem;
 }
 
 .scripture-doc-card-actions {
@@ -2578,52 +2760,52 @@ html[data-scripture-moving] * {
   grid-row: 1 / span 2;
   align-items: center;
   align-self: center;
-  gap: 1px;
+  gap: 0.0625rem;
 }
 
 .scripture-doc-browser-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 1rem;
 }
 
 .scripture-doc-search {
   position: relative;
-  width: min(320px, 48%);
+  width: min(20rem, 48%);
 }
 
 .scripture-doc-search > svg {
   position: absolute;
   top: 50%;
-  left: 9px;
+  left: 0.5625rem;
   z-index: 1;
-  width: 13px;
-  height: 13px;
+  width: 0.8125rem;
+  height: 0.8125rem;
   transform: translateY(-50%);
   color: var(--muted-foreground);
   pointer-events: none;
 }
 
 .scripture-doc-search [data-slot='input'] {
-  height: 30px;
-  padding-right: 30px;
-  padding-left: 29px;
-  font-size: 12px;
+  height: 1.875rem;
+  padding-right: 1.875rem;
+  padding-left: 1.8125rem;
+  font-size: 0.75rem;
 }
 
 .scripture-doc-search [data-slot='button'] {
   position: absolute;
   top: 50%;
-  right: 3px;
+  right: 0.1875rem;
   transform: translateY(-50%);
 }
 
 .scripture-doc-indexing {
   align-self: flex-end;
-  margin-top: -6px;
+  margin-top: -0.375rem;
   color: var(--muted-foreground);
-  font-size: 10px;
+  font-size: 0.625rem;
 }
 
 /* The main "All documents" list -- a single bordered, full-width block
@@ -2645,9 +2827,9 @@ html[data-scripture-moving] * {
 .scripture-doc-list-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 44px;
-  padding: 7px 10px;
+  gap: 0.625rem;
+  min-height: 2.75rem;
+  padding: 0.4375rem 0.625rem;
   transition: background 0.12s;
 }
 
@@ -2663,7 +2845,7 @@ html[data-scripture-moving] * {
   flex: 1;
   min-width: 0;
   text-align: left;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -2674,8 +2856,8 @@ html[data-scripture-moving] * {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 1.75rem;
+  height: 1.75rem;
   flex-shrink: 0;
   border-radius: var(--radius-sm);
   background: var(--muted);
@@ -2683,8 +2865,8 @@ html[data-scripture-moving] * {
 }
 
 .scripture-doc-list-icon svg {
-  width: 13px;
-  height: 13px;
+  width: 0.8125rem;
+  height: 0.8125rem;
 }
 
 .scripture-doc-list-name:hover {
@@ -2692,22 +2874,22 @@ html[data-scripture-moving] * {
 }
 
 .scripture-doc-list-time {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted-foreground);
   flex-shrink: 0;
 }
 
 .scripture-doc-list-pages {
-  min-width: 54px;
+  min-width: 3.375rem;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 0.6875rem;
   text-align: right;
 }
 
 .scripture-doc-list-actions {
   display: flex;
   align-items: center;
-  gap: 1px;
+  gap: 0.0625rem;
   opacity: 0.35;
   transition: opacity 120ms ease;
 }
@@ -2721,8 +2903,8 @@ html[data-scripture-moving] * {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
-  padding: 30px 16px;
+  gap: 0.4375rem;
+  padding: 1.875rem 1rem;
   border: 1px dashed var(--border);
   border-radius: var(--radius-md);
   color: var(--muted-foreground);
@@ -2730,20 +2912,20 @@ html[data-scripture-moving] * {
 }
 
 .scripture-doc-no-results > svg {
-  width: 18px;
-  height: 18px;
+  width: 1.125rem;
+  height: 1.125rem;
 }
 
 .scripture-doc-no-results p {
   margin: 0;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .scripture-template-card {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 12px;
+  gap: 0.3125rem;
+  padding: 0.75rem;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--card);
@@ -2756,37 +2938,37 @@ html[data-scripture-moving] * {
   display: flex;
   align-items: stretch;
   justify-content: center;
-  gap: 4px;
-  height: 58px;
-  margin-bottom: 4px;
-  padding: 8px;
+  gap: 0.25rem;
+  height: 3.625rem;
+  margin-bottom: 0.25rem;
+  padding: 0.5rem;
   border-radius: var(--radius-sm);
   background-color: var(--background);
   background-image: radial-gradient(color-mix(in srgb, var(--border) 65%, transparent) 1px, transparent 1px);
-  background-size: 10px 10px;
+  background-size: 0.625rem 0.625rem;
   color: var(--muted-foreground);
 }
 
 .scripture-template-preview i {
   display: block;
   flex: 1;
-  max-width: 42px;
+  max-width: 2.625rem;
   border: 1px solid color-mix(in srgb, var(--ring) 28%, var(--border));
-  border-radius: 3px;
+  border-radius: 0.1875rem;
   background: color-mix(in srgb, var(--muted) 80%, transparent);
 }
 
 .scripture-template-preview svg {
-  width: 16px;
+  width: 1rem;
 }
 
 @media (max-width: 720px) {
   .scripture-dashboard-shell .scripture-page {
-    padding: 24px 16px 64px;
+    padding: 1.5rem 1rem 4rem;
   }
 
   .scripture-dashboard-overview {
-    gap: 14px;
+    gap: 0.875rem;
   }
 
   .scripture-dashboard-stats {
@@ -2807,7 +2989,7 @@ html[data-scripture-moving] * {
   }
 
   .scripture-doc-list-time {
-    max-width: 100px;
+    max-width: 6.25rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2825,12 +3007,12 @@ html[data-scripture-moving] * {
 }
 
 .scripture-template-card-name {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 500;
 }
 
 .scripture-template-card-description {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted-foreground);
 }
 
@@ -2843,4 +3025,57 @@ html[data-scripture-moving] * {
 .print-mode * {
   transition: none !important;
   animation: none !important;
+}
+
+/* Clean, non-interactive page copies used by the browser-native exporter.
+   They must remain laid out and paintable for SVG/canvas capture, so they
+   live far outside the viewport instead of using display:none. */
+.scripture-browser-export-surfaces {
+  position: fixed;
+  top: 0;
+  left: -100000px;
+  z-index: -1;
+  width: max-content;
+  pointer-events: none;
+  --radius: 10px;
+}
+
+.scripture-browser-export-page {
+  width: max-content;
+}
+
+/* Export preparation mounts full-size static copies of every page. Cover
+   that paint/layout work so the live workspace never appears to jump while
+   the browser rasterizes those copies. */
+.scripture-export-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+  backdrop-filter: blur(0.5rem);
+  cursor: progress;
+}
+
+.scripture-export-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--shadow-md);
+  font-size: 0.8125rem;
+  font-weight: 550;
+}
+
+.scripture-export-progress svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--muted-foreground);
+  animation: scripture-save-spin 800ms linear infinite;
 }

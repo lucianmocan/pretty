@@ -90,7 +90,7 @@ export default function PrettyHomePage() {
                 alt="The Pretty editor showing a before-and-after TypeScript composition"
                 width={2914}
                 height={1808}
-                sizes="(max-width: 1050px) calc(100vw - 48px), 58vw"
+                sizes="(max-width: 1050px) calc(100vw - 3rem), 58vw"
                 priority
               />
             </div>

@@ -4,16 +4,15 @@ import type { PageSize } from '@/lib/layout/types'
 interface CanvasRootProps {
   children: ReactNode
   printMode?: boolean
-  // Only meaningful in printMode -- app/api/export/route.ts reads these back
-  // as data-* attributes after navigating, to decide the PDF page format.
+  // Only meaningful in printMode -- the browser exporter reads these data-*
+  // attributes to decide the PDF page format.
   pageSize?: PageSize
   customPageWidthMm?: number
   customPageHeightMm?: number
 }
 
 /**
- * The bleed-gutter wrapper Playwright measures via #canvas-root (see
- * app/api/export/route.ts) -- padding here covers the root frame's shadow so
+ * The bleed-gutter wrapper captured via #canvas-root. Its padding covers the root frame's shadow so
  * it doesn't get clipped in the exported PDF. The root frame itself (styled
  * via frameStyle() + the .scripture-card class) supplies its own
  * background/padding/radius from the layout tree.

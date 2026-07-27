@@ -40,5 +40,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# scripture: locally saved documents (bridges browser session <-> Playwright export)
+# scripture: legacy local print/debug bridge data
 /.data/

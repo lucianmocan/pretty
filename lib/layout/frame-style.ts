@@ -3,9 +3,9 @@ import type { LayoutNode } from './types'
 
 /**
  * Pure data -> CSS mapping, the single source of truth for how a frame's
- * stored props become flexbox styling. Called identically by the live
- * interactive canvas (components/canvas/frame-node.tsx) and the print route,
- * so the two structures can never visually diverge. The root frame's shadow
+ * stored props become flexbox styling. The split outer/inner helpers below
+ * are called identically by the live canvas and the static export renderer,
+ * so both use the same sizing and positioning boxes. The root frame's shadow
  * treatment is a separate `.scripture-card` class the caller applies -- not
  * part of this data-driven style, since it's fixed chrome, not a stored prop.
  */
@@ -40,11 +40,10 @@ export function frameStyle(node: LayoutNode): CSSProperties {
 }
 
 /**
- * Editor-only split of sizeStyle()/frameStyle() into an OUTER, position-
- * hosting box vs an INNER content wrapper that owns scroll/clip. The print
- * route keeps using the unified sizeStyle()/frameStyle() above unchanged --
- * it has no floating chrome to protect, so a single div is fine there and
- * the split would just be needless divergence risk.
+ * Split sizeStyle()/frameStyle() into an OUTER, position-hosting box vs an
+ * INNER content wrapper that owns scroll/clip. The static export renderer
+ * mirrors this split because canvas-mode children must be positioned from
+ * the padded inner wrapper, exactly as they are in the live editor.
  *
  * The live editor (components/canvas/frame-node.tsx) DOES have floating
  * chrome deliberately positioned outside a node's own box (NodeControls,

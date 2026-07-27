@@ -75,10 +75,8 @@ export function CanvasToolbar({
   }
 
   return (
-    // stopPropagation -- this sits inside .scripture-canvas-area, whose own
-    // onClick resets selection to root on any click that reaches it. Without
-    // this, every toolbar click (tool switch, add-block) would bubble up and
-    // immediately undo whatever selection/editing state the click just set.
+    // Kept propagation-isolated from the surrounding canvas stage so this
+    // remains safe if the stage gains click-to-deselect behavior later.
     <div className="scripture-canvas-toolbar" onClick={(e) => e.stopPropagation()}>
       <ToolbarButton label="Add code block" onClick={() => handleAddBlock('code')}>
         <FileCode />

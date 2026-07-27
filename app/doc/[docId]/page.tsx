@@ -2,14 +2,16 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Plus } from 'lucide-react'
+import { LoaderCircle, Plus } from 'lucide-react'
 import { FrameNode } from '@/components/canvas/frame-node'
 import { CanvasRoot } from '@/components/canvas/canvas-root'
 import { InspectorPanel } from '@/components/canvas/inspector-panel'
 import { ZoomControls } from '@/components/canvas/zoom-controls'
 import { CanvasToolbar } from '@/components/canvas/canvas-toolbar'
 import { useLayoutTree } from '@/lib/use-layout-tree'
-import { getYDoc, encodeDocState, getUndoManager } from '@/lib/yjs/doc-store'
+import { getYDoc, getUndoManager } from '@/lib/yjs/doc-store'
+import { BrowserExportSurfaces } from '@/components/export/browser-export-surfaces'
+import { createBrowserExport, waitForExportSurfaces } from '@/lib/browser-export'
 import {
   moveNode,
   duplicateNode,
@@ -45,8 +47,8 @@ import { TEMPLATES, type Template } from '@/lib/templates'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 const ZOOM_MIN = 0.1
-const ZOOM_MAX = 4
-const ZOOM_STEP = 1.2
+const ZOOM_MAX = 2
+const ZOOM_STEP = 1.05
 
 function clampZoom(z: number) {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z))
@@ -58,6 +60,7 @@ export default function DocumentEditorPage() {
   const [pageIds, setPageIds] = useState<string[]>([])
   const [activePageId, setActivePageId] = useState<string | null>(null)
   const tree = useLayoutTree(activePageId)
+  const treeMounted = Boolean(tree)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   // Figma-style selection model, canvas-mode blocks only (flex-mode blocks
   // stay always-editable, as before -- there's no competing "drag the whole
@@ -69,11 +72,18 @@ export default function DocumentEditorPage() {
   const [exporting, setExporting] = useState<'pdf' | 'png' | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   const [operationError, setOperationError] = useState<string | null>(null)
+  const [deleteNotice, setDeleteNotice] = useState<{
+    count: number
+    deletedIds: string[]
+    imageSources: string[]
+  } | null>(null)
+  const pendingImageDeleteTimersRef = useRef(new Map<string, number>())
   const [saveState, setSaveState] = useState<'saving' | 'saved'>('saved')
   const [docName, setDocName] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [gutterClickMode, setGutterClickMode] = useState<GutterClickMode>('highlight')
   const [zoom, setZoom] = useState(1)
+  const zoomRef = useRef(1)
   const [customizeOpen, setCustomizeOpen] = useState(false)
   const [showStarterPicker, setShowStarterPicker] = useState(false)
   const [applyingTemplate, setApplyingTemplate] = useState(false)
@@ -87,16 +97,29 @@ export default function DocumentEditorPage() {
   // the scrollable canvas area's scroll bounds actually grow/shrink with
   // zoom (a `transform: scale()` alone doesn't affect layout/scroll size).
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null)
+  const naturalSizeRef = useRef<{ width: number; height: number } | null>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const canvasAreaRef = useRef<HTMLDivElement>(null)
+  const exportSurfaceRootRef = useRef<HTMLDivElement>(null)
   // Whether this page has already been auto-fit once -- without this guard,
   // the auto-fit effect below (keyed on naturalSize) would refight the
   // user's own manual zoom every time naturalSize changes (e.g. after
   // adding/resizing a block), not just on first load. Reset per page switch.
   const autoFitDoneRef = useRef(false)
+  // Fit mode follows changes to the available canvas area (window/browser
+  // scaling and sidebar resizing). Any explicit zoom action turns it off so
+  // the viewport never fights a scale the user chose manually.
+  const fitModeRef = useRef(true)
   const spacePressedRef = useRef(false)
   const [spacePressed, setSpacePressed] = useState(false)
   const activePanCleanupRef = useRef<(() => void) | null>(null)
+  const canvasOverflowsRef = useRef(false)
+  const [canvasOverflows, setCanvasOverflows] = useState(false)
+  const [panHintVisible, setPanHintVisible] = useState(false)
+
+  useEffect(() => {
+    zoomRef.current = zoom
+  }, [zoom])
 
   useEffect(() => {
     const meta = getDocumentMeta(docId)
@@ -162,11 +185,38 @@ export default function DocumentEditorPage() {
     const el = viewportRef.current
     if (!el) return
     const observer = new ResizeObserver(() => {
-      setNaturalSize({ width: el.offsetWidth, height: el.offsetHeight })
+      const size = { width: el.offsetWidth, height: el.offsetHeight }
+      naturalSizeRef.current = size
+      setNaturalSize(size)
     })
     observer.observe(el)
     return () => observer.disconnect()
   }, [activePageId, tree])
+
+  // Browser zoom and display outscaling both change the canvas area's CSS
+  // pixel dimensions. Keep a fitted canvas fitted when that happens, while
+  // leaving manually selected zoom levels untouched.
+  useEffect(() => {
+    const area = canvasAreaRef.current
+    if (!area || !tree) return
+    let frame: number | null = null
+    const observer = new ResizeObserver(() => {
+      if (!fitModeRef.current || !naturalSizeRef.current) return
+      if (frame != null) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        frame = null
+        if (fitModeRef.current) fitCanvasToViewport()
+      })
+    })
+    observer.observe(area)
+    return () => {
+      observer.disconnect()
+      if (frame != null) cancelAnimationFrame(frame)
+    }
+    // `tree` is intentionally reduced to a mounted/not-mounted signal: doc
+    // edits replace the tree object but must not retrigger viewport fitting.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePageId, Boolean(tree)])
 
   // React's JSX onWheel prop attaches wheel listeners as passive (the DOM's
   // own recommended default, for scroll-perf reasons) -- calling
@@ -177,14 +227,102 @@ export default function DocumentEditorPage() {
   useEffect(() => {
     const el = canvasAreaRef.current
     if (!el) return
+    let accumulatedZoomDelta = 0
+    let zoomFrame: number | null = null
+    let scrollFrame: number | null = null
+    let pointerX = 0
+    let pointerY = 0
     const onWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey && !e.metaKey) return
+      if (!e.ctrlKey && !e.metaKey) {
+        if (e.deltaX !== 0 || e.deltaY !== 0) setPanHintVisible(false)
+        return
+      }
       e.preventDefault()
-      setZoom((z) => clampZoom(e.deltaY > 0 ? z / ZOOM_STEP : z * ZOOM_STEP))
+      fitModeRef.current = false
+      pointerX = e.clientX
+      pointerY = e.clientY
+      // d3-zoom's battle-tested wheel normalization: account for the unit
+      // the browser reports, boost synthetic ctrl-wheel trackpad pinches,
+      // then apply the result as an exponent of two below.
+      accumulatedZoomDelta +=
+        -e.deltaY *
+        (e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 0.05 : e.deltaMode ? 1 : 0.002) *
+        (e.ctrlKey || e.metaKey ? 10 : 1)
+      if (zoomFrame != null) return
+      zoomFrame = requestAnimationFrame(() => {
+        const delta = accumulatedZoomDelta
+        accumulatedZoomDelta = 0
+        zoomFrame = null
+        // Exponential scaling makes equal trackpad movement feel equal at
+        // every zoom level. Small pinch deltas stay small instead of every
+        // wheel event causing the old fixed 20% jump.
+        const current = zoomRef.current
+        const next = clampZoom(current * 2 ** delta)
+        const scaleBox = viewportRef.current?.parentElement
+        const boxRect = scaleBox?.getBoundingClientRect()
+        const anchorX = boxRect ? (pointerX - boxRect.left) / current : 0
+        const anchorY = boxRect ? (pointerY - boxRect.top) / current : 0
+        zoomRef.current = next
+        setZoom(next)
+
+        // Preserve the canvas-space point under the gesture. This is the
+        // part that makes pinch zoom feel like Figma instead of making the
+        // document jump toward its transform origin on every update.
+        if (scaleBox && boxRect && next !== current) {
+          if (scrollFrame != null) cancelAnimationFrame(scrollFrame)
+          scrollFrame = requestAnimationFrame(() => {
+            scrollFrame = null
+            const nextRect = scaleBox.getBoundingClientRect()
+            el.scrollLeft += nextRect.left + anchorX * next - pointerX
+            el.scrollTop += nextRect.top + anchorY * next - pointerY
+          })
+        }
+      })
     }
     el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      if (zoomFrame != null) cancelAnimationFrame(zoomFrame)
+      if (scrollFrame != null) cancelAnimationFrame(scrollFrame)
+    }
   }, [activePageId, tree])
+
+  // The hint is useful only once the scaled canvas is larger than its
+  // viewport. Observe both boxes because either zoom/layout changes or a
+  // sidebar/window resize can cross that boundary.
+  useEffect(() => {
+    const area = canvasAreaRef.current
+    const scaleBox = area?.querySelector<HTMLElement>('.scripture-canvas-scale-box')
+    if (!area || !scaleBox) return
+    const updateOverflow = () => {
+      const next = area.scrollWidth > area.clientWidth + 1 || area.scrollHeight > area.clientHeight + 1
+      if (next === canvasOverflowsRef.current) return
+      canvasOverflowsRef.current = next
+      setCanvasOverflows(next)
+      setPanHintVisible(next)
+    }
+    updateOverflow()
+    const observer = new ResizeObserver(updateOverflow)
+    observer.observe(area)
+    observer.observe(scaleBox)
+    return () => observer.disconnect()
+  }, [activePageId, treeMounted])
+
+  useEffect(() => {
+    if (!panHintVisible) return
+    const timeout = window.setTimeout(() => setPanHintVisible(false), 5000)
+    return () => window.clearTimeout(timeout)
+  }, [panHintVisible])
+
+  useEffect(() => {
+    if (!deleteNotice) return
+    const timeout = window.setTimeout(() => setDeleteNotice(null), 5000)
+    return () => window.clearTimeout(timeout)
+  }, [deleteNotice])
+
+  useEffect(() => {
+    return () => activePanCleanupRef.current?.()
+  }, [])
 
   // One guarded keyboard dispatcher owns canvas-level shortcuts. Editors,
   // form fields, and dialogs keep their native key handling.
@@ -257,7 +395,7 @@ export default function DocumentEditorPage() {
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && !selectedIds.includes(ROOT_ID)) {
         e.preventDefault()
-        for (const id of selectedIds) handleRemove(id)
+        handleRemoveMany(selectedIds)
         return
       }
       if (e.key === 'Escape') {
@@ -369,19 +507,68 @@ export default function DocumentEditorPage() {
     setEditingId(null)
   }
 
-  function handleRemove(id: string) {
-    if (!activePageId) return
-    const node = tree ? findNode(tree, id) : null
-    if (node?.kind === 'image' && node.src) {
-      void deleteUploadedImage(node.src).catch((cause) => {
+  function queueImageDelete(src: string) {
+    if (pendingImageDeleteTimersRef.current.has(src)) return
+    const timeout = window.setTimeout(() => {
+      pendingImageDeleteTimersRef.current.delete(src)
+      void deleteUploadedImage(src).catch((cause) => {
         setOperationError(cause instanceof Error ? cause.message : 'The uploaded image could not be removed.')
       })
+    }, 5500)
+    pendingImageDeleteTimersRef.current.set(src, timeout)
+  }
+
+  function imageSources(node: ReturnType<typeof findNode>): string[] {
+    if (!node) return []
+    return [
+      ...(node.kind === 'image' && node.src ? [node.src] : []),
+      ...(node.children ?? []).flatMap((child) => imageSources(child)),
+    ]
+  }
+
+  function handleRemoveMany(ids: string[]) {
+    if (!activePageId || !tree) return
+    const removable = ids.filter((id) => id !== ROOT_ID && findNode(tree, id))
+    if (removable.length === 0) return
+    const removed = new Set(removable)
+    const first = findNode(tree, removable[0])
+    const parent = first ? findParent(tree, first.id) : null
+    const siblings = parent?.children ?? []
+    const index = siblings.findIndex((sibling) => sibling.id === first?.id)
+    const fallback =
+      siblings.slice(Math.max(0, index + 1)).find((sibling) => !removed.has(sibling.id)) ??
+      siblings.slice(0, Math.max(0, index)).reverse().find((sibling) => !removed.has(sibling.id)) ??
+      parent ??
+      tree
+
+    const queuedImageSources = removable.flatMap((id) => imageSources(findNode(tree, id)))
+    const undoManager = getUndoManager(activePageId)
+    undoManager.stopCapturing()
+    for (const id of removable) {
+      removeNode(getYDoc(activePageId).doc, id)
     }
-    removeNode(getYDoc(activePageId).doc, id)
-    setSelectedIds((prev) => {
-      const next = prev.filter((existing) => existing !== id)
-      return next.length > 0 ? next : [ROOT_ID]
-    })
+    for (const src of queuedImageSources) queueImageDelete(src)
+    undoManager.stopCapturing()
+    setSelectedIds([fallback.id])
+    setEditingId(null)
+    setDeleteNotice({ count: removable.length, deletedIds: removable, imageSources: queuedImageSources })
+  }
+
+  function handleRemove(id: string) {
+    handleRemoveMany([id])
+  }
+
+  function handleUndoDelete() {
+    if (!activePageId || !deleteNotice) return
+    for (const src of deleteNotice.imageSources) {
+      const timeout = pendingImageDeleteTimersRef.current.get(src)
+      if (timeout != null) window.clearTimeout(timeout)
+      pendingImageDeleteTimersRef.current.delete(src)
+    }
+    getUndoManager(activePageId).undo()
+    setSelectedIds(deleteNotice.deletedIds)
+    setEditingId(null)
+    setDeleteNotice(null)
   }
 
   function handleReorder(draggedId: string, targetId: string) {
@@ -410,12 +597,20 @@ export default function DocumentEditorPage() {
     const startY = e.clientY
     const startLeft = area.scrollLeft
     const startTop = area.scrollTop
+    let moved = false
     area.dataset.panning = 'true'
+    document.documentElement.dataset.scripturePanning = 'true'
     const onMove = (event: PointerEvent) => {
       if (event.pointerId !== pointerId) return
       event.preventDefault()
-      area.scrollLeft = startLeft - (event.clientX - startX)
-      area.scrollTop = startTop - (event.clientY - startY)
+      const dx = event.clientX - startX
+      const dy = event.clientY - startY
+      if (!moved && Math.hypot(dx, dy) >= 2) {
+        moved = true
+        setPanHintVisible(false)
+      }
+      area.scrollLeft = startLeft - dx
+      area.scrollTop = startTop - dy
     }
     const finishPointer = (event: PointerEvent) => {
       if (event.pointerId !== pointerId) return
@@ -432,6 +627,7 @@ export default function DocumentEditorPage() {
       window.removeEventListener('blur', finish)
       window.removeEventListener('keydown', onKeyDown)
       delete area.dataset.panning
+      delete document.documentElement.dataset.scripturePanning
       activePanCleanupRef.current = null
     }
     activePanCleanupRef.current = cleanup
@@ -455,12 +651,15 @@ export default function DocumentEditorPage() {
   }
 
   function handleZoomIn() {
+    fitModeRef.current = false
     setZoom((z) => clampZoom(z * ZOOM_STEP))
   }
   function handleZoomOut() {
+    fitModeRef.current = false
     setZoom((z) => clampZoom(z / ZOOM_STEP))
   }
   function handleZoomReset() {
+    fitModeRef.current = false
     setZoom(1)
   }
 
@@ -502,22 +701,23 @@ export default function DocumentEditorPage() {
     }
   }
 
-  // Fits the card to the available canvas area (leaving room for its own
-  // CSS padding, so the fitted card doesn't touch the very edge) and
-  // centers the scroll position on it. A flat 100% can look tiny on a large
-  // or high-DPI screen for an otherwise modest-sized card -- fitting scales
-  // to the actual viewport instead of a fixed percentage.
-  function handleRecenter() {
+  // Fits the card to the available canvas area and centers it. Read the real
+  // computed padding instead of mirroring a CSS constant so responsive
+  // spacing remains part of the fit calculation.
+  function fitCanvasToViewport() {
     const area = canvasAreaRef.current
-    if (!area || !naturalSize || naturalSize.width === 0 || naturalSize.height === 0) return
-    const CANVAS_PADDING = 56 // matches .scripture-canvas-area's own CSS padding
-    const availableWidth = area.clientWidth - CANVAS_PADDING * 2
-    const availableHeight = area.clientHeight - CANVAS_PADDING * 2
+    const size = naturalSizeRef.current
+    if (!area || !size || size.width === 0 || size.height === 0) return
+    const style = getComputedStyle(area)
+    const horizontalPadding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+    const verticalPadding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+    const availableWidth = area.clientWidth - horizontalPadding
+    const availableHeight = area.clientHeight - verticalPadding
     if (availableWidth <= 0 || availableHeight <= 0) return
-    // Capped at 1 -- a small or still-empty document (e.g. right after
-    // creation) shouldn't get blown up to fill the viewport, only large
-    // content should ever get scaled DOWN to fit.
-    setZoom(clampZoom(Math.min(1, availableWidth / naturalSize.width, availableHeight / naturalSize.height)))
+    // "Fit" may shrink an oversized canvas, but it must never silently turn
+    // into magnification. Authored dimensions should be shown at 100% on a
+    // roomy viewport; zooming above that is always an explicit user action.
+    setZoom(clampZoom(Math.min(1, availableWidth / size.width, availableHeight / size.height)))
     // Scroll centering needs the NEW zoom's layout to have actually
     // committed first (scrollWidth/Height below depend on it) -- a
     // requestAnimationFrame callback runs after React's render/commit but
@@ -530,52 +730,42 @@ export default function DocumentEditorPage() {
     })
   }
 
-  // Auto-fit once per page, the first time its natural size becomes known --
-  // replaces a flat, possibly-tiny-looking 100% default with a size that
-  // actually fills the available canvas area on load.
+  function handleRecenter() {
+    fitModeRef.current = true
+    fitCanvasToViewport()
+  }
+
+  // Auto-fit once per page, the first time its natural size becomes known.
+  // Large canvases shrink to remain visible; smaller ones stay at their
+  // authored 100% size rather than being unexpectedly magnified.
   useEffect(() => {
     autoFitDoneRef.current = false
+    fitModeRef.current = true
+    naturalSizeRef.current = null
   }, [activePageId])
 
   useEffect(() => {
-    if (autoFitDoneRef.current || !naturalSize) return
+    if (autoFitDoneRef.current || !naturalSizeRef.current) return
     autoFitDoneRef.current = true
-    handleRecenter()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    fitModeRef.current = true
+    fitCanvasToViewport()
   }, [naturalSize])
 
   async function handleExport(format: 'pdf' | 'png') {
     setExporting(format)
     setExportError(null)
     try {
-      // Every page is saved before export, in order -- the export route
-      // stitches them into one multi-page PDF (or, for PNG, renders just
-      // the first page -- a flat image can't be "multi-page") via
-      // app/api/export/route.ts.
-      for (const pageId of pageIds) {
-        const { doc } = getYDoc(pageId)
-        const data = encodeDocState(doc)
-        const saveRes = await fetch(`/api/documents/${pageId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data }),
-        })
-        if (!saveRes.ok) throw new Error(`Failed to save page (${saveRes.status})`)
-      }
-
-      const exportRes = await fetch(`/api/export?pages=${pageIds.join(',')}&format=${format}`)
-      if (!exportRes.ok) {
-        const message = await exportRes.text().catch(() => '')
-        throw new Error(message || `Failed to export (${exportRes.status})`)
-      }
-
-      const blob = await exportRes.blob()
+      // Export clean static page copies directly in this browser. This keeps
+      // the local-first document data in the same IndexedDB-backed session
+      // and avoids server-only Chromium/filesystem assumptions on hosts.
+      const surfaces = await waitForExportSurfaces(exportSurfaceRootRef, pageIds)
+      const blob = await createBrowserExport(surfaces, format)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
       a.download = `${docName || 'pretty'}.${format}`
       a.click()
-      URL.revokeObjectURL(url)
+      setTimeout(() => URL.revokeObjectURL(url), 0)
     } catch (err) {
       console.error(err)
       setExportError(err instanceof Error ? err.message : 'Export failed')
@@ -652,57 +842,59 @@ export default function DocumentEditorPage() {
               onSelectNode={handleSelect}
               onReorderNode={handleReorder}
             />
-            <div
-              ref={canvasAreaRef}
-              className={spacePressed ? 'scripture-canvas-area is-pan-ready' : 'scripture-canvas-area'}
-              onClick={() => handleSelectionChange([ROOT_ID])}
-              onPointerDownCapture={beginCanvasPan}
-              onAuxClick={(event) => event.preventDefault()}
-            >
+            <div className="scripture-canvas-stage">
               <div
-                className="scripture-canvas-scale-box"
-                style={
-                  naturalSize
-                    ? { width: naturalSize.width * zoom, height: naturalSize.height * zoom }
-                    : undefined
-                }
+                ref={canvasAreaRef}
+                className={spacePressed ? 'scripture-canvas-area is-pan-ready' : 'scripture-canvas-area'}
+                onClick={() => handleSelectionChange([ROOT_ID])}
+                onPointerDownCapture={beginCanvasPan}
+                onAuxClick={(event) => event.preventDefault()}
               >
                 <div
-                  ref={viewportRef}
-                  className="scripture-canvas-viewport"
+                  className="scripture-canvas-scale-box"
                   style={
-                    {
-                      transform: `scale(${zoom})`,
-                      // Selection/hover strokes live inside this transformed
-                      // tree. Counter-scale their local thickness so they
-                      // remain one physical screen pixel at every zoom.
-                      '--scripture-canvas-stroke': `${1 / Math.max(zoom, 0.01)}px`,
-                    } as CSSProperties
+                    naturalSize
+                      ? { width: naturalSize.width * zoom, height: naturalSize.height * zoom }
+                      : undefined
                   }
                 >
-                  <CanvasRoot>
-                    <FrameNode
-                      node={tree}
-                      docId={activePageId as string}
-                      selectedIds={selectedIds}
-                      onSelect={handleSelect}
-                      onSelectionChange={handleSelectionChange}
-                      onMove={handleMove}
-                      onDuplicate={handleDuplicate}
-                      onRemove={handleRemove}
-                      onReorder={handleReorder}
-                      onResizeNode={handleResizeNode}
-                      onRepositionNode={handleRepositionNode}
-                      parentChildLayout="flex"
-                      gutterClickMode={gutterClickMode}
-                      onGutterClick={handleGutterClick}
-                      zoom={zoom}
-                      editingId={editingId}
-                      onSetEditing={setEditingId}
-                      parentId={null}
-                      onAddBlockToFrame={handleAddBlockToFrame}
-                    />
-                  </CanvasRoot>
+                  <div
+                    ref={viewportRef}
+                    className="scripture-canvas-viewport"
+                    style={
+                      {
+                        transform: `scale(${zoom})`,
+                        // Selection/hover strokes live inside this transformed
+                        // tree. Counter-scale their local thickness so they
+                        // remain one physical screen pixel at every zoom.
+                        '--scripture-canvas-stroke': `${1 / Math.max(zoom, 0.01)}px`,
+                      } as CSSProperties
+                    }
+                  >
+                    <CanvasRoot>
+                      <FrameNode
+                        node={tree}
+                        docId={activePageId as string}
+                        selectedIds={selectedIds}
+                        onSelect={handleSelect}
+                        onSelectionChange={handleSelectionChange}
+                        onMove={handleMove}
+                        onDuplicate={handleDuplicate}
+                        onRemove={handleRemove}
+                        onReorder={handleReorder}
+                        onResizeNode={handleResizeNode}
+                        onRepositionNode={handleRepositionNode}
+                        parentChildLayout="flex"
+                        gutterClickMode={gutterClickMode}
+                        onGutterClick={handleGutterClick}
+                        zoom={zoom}
+                        editingId={editingId}
+                        onSetEditing={setEditingId}
+                        parentId={null}
+                        onAddBlockToFrame={handleAddBlockToFrame}
+                      />
+                    </CanvasRoot>
+                  </div>
                 </div>
               </div>
               <ZoomControls
@@ -719,6 +911,11 @@ export default function DocumentEditorPage() {
                 onSelectionChange={handleSelectionChange}
                 onSetEditing={setEditingId}
               />
+              {canvasOverflows && panHintVisible && (
+                <div className="scripture-pan-hint" role="status">
+                  Hold <kbd>Space</kbd> and drag to pan
+                </div>
+              )}
             </div>
             <InspectorPanel
               docId={activePageId as string}
@@ -739,6 +936,23 @@ export default function DocumentEditorPage() {
         )}
         </GeometryRegistryProvider>
       </EditorRegistryProvider>
+      {exporting && (
+        <>
+          <BrowserExportSurfaces pageIds={pageIds} rootRef={exportSurfaceRootRef} />
+          <div className="scripture-export-overlay" role="status" aria-live="polite" aria-busy="true">
+            <div className="scripture-export-progress">
+              <LoaderCircle aria-hidden="true" />
+              <span>Exporting {exporting.toUpperCase()}…</span>
+            </div>
+          </div>
+        </>
+      )}
+      {deleteNotice && (
+        <div className="scripture-delete-toast" role="status">
+          <span>{deleteNotice.count === 1 ? 'Layer deleted' : `${deleteNotice.count} layers deleted`}</span>
+          <button type="button" onClick={handleUndoDelete}>Undo</button>
+        </div>
+      )}
     </div>
   )
 }

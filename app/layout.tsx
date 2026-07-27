@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ViewportScaler } from "@/components/layout/viewport-scaler";
 import "./globals.css";
 
 const geistSans = localFont({
@@ -96,6 +97,7 @@ export default function RootLayout({
       className={`dark ${geistSans.variable} ${geistMono.variable} ${luckiestGuy.variable} ${jetbrainsMono.variable} ${firaCode.variable} ${ibmPlexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <ViewportScaler />
         <TooltipProvider>{children}</TooltipProvider>
       </body>
     </html>

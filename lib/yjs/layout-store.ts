@@ -4,6 +4,8 @@ import {
   DEFAULT_FRAME_PROPS,
   DEFAULT_ROOT_FRAME_PROPS,
   DEFAULT_CODE_BLOCK_PROPS,
+  DEFAULT_CODE_BLOCK_WIDTH,
+  DEFAULT_CODE_BLOCK_HEIGHT,
   DEFAULT_IMAGE_BLOCK_PROPS,
   type FrameProps,
   type CodeBlockProps,
@@ -247,8 +249,8 @@ function createLeafMap(kind: 'code' | 'text' | 'image', language?: string): { ma
   const map = new Y.Map<unknown>()
   map.set('id', id)
   map.set('kind', kind)
-  map.set('width', null)
-  map.set('height', null)
+  map.set('width', kind === 'code' ? DEFAULT_CODE_BLOCK_WIDTH : null)
+  map.set('height', kind === 'code' ? DEFAULT_CODE_BLOCK_HEIGHT : null)
   map.set('x', null)
   map.set('y', null)
   if (kind === 'code') {

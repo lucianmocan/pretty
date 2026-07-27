@@ -19,10 +19,8 @@ interface ZoomControlsProps {
  * panning, and can look tiny on a large/high-DPI display). */
 export function ZoomControls({ zoom, onZoomIn, onZoomOut, onReset, onRecenter }: ZoomControlsProps) {
   return (
-    // stopPropagation -- this sits inside .scripture-canvas-area, whose own
-    // onClick resets selection to root on any click that reaches it. Without
-    // this, clicking a zoom button would bubble up and immediately clear
-    // whatever was selected.
+    // Kept propagation-isolated from the surrounding canvas stage so this
+    // remains safe if the stage gains click-to-deselect behavior later.
     <div className="scripture-zoom-controls" onClick={(e) => e.stopPropagation()}>
       <Button variant="ghost" size="icon-xs" onClick={onZoomOut} aria-label="Zoom out">
         <Minus />

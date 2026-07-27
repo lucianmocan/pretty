@@ -229,12 +229,14 @@ export function LayersPanel({
     event.preventDefault()
     const startX = event.clientX
     const startWidth = panelWidth
+    const rootFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+    const uiScale = rootFontSize / 16
     const onMove = (moveEvent: PointerEvent) => {
-      const next = Math.min(360, Math.max(200, startWidth + moveEvent.clientX - startX))
+      const next = Math.min(360, Math.max(200, startWidth + (moveEvent.clientX - startX) / uiScale))
       setPanelWidth(next)
     }
     const onUp = (upEvent: PointerEvent) => {
-      const next = Math.min(360, Math.max(200, startWidth + upEvent.clientX - startX))
+      const next = Math.min(360, Math.max(200, startWidth + (upEvent.clientX - startX) / uiScale))
       localStorage.setItem(PANEL_WIDTH_KEY, String(next))
       cleanup()
     }
@@ -276,7 +278,7 @@ export function LayersPanel({
     <aside
       className="scripture-layers-panel"
       aria-label="Pages and layers"
-      style={{ width: panelWidth, minWidth: panelWidth }}
+      style={{ width: `${panelWidth / 16}rem`, minWidth: `${panelWidth / 16}rem` }}
     >
       <div className="scripture-panel-heading">
         <span>Pages & Layers</span>

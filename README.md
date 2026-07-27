@@ -75,7 +75,7 @@ Pretty is a Next.js App Router application written in TypeScript. Its editor com
 - Yjs with IndexedDB persistence for local-first documents
 - Shiki for syntax highlighting
 - Tailwind CSS and Radix-based UI components
-- Playwright for browser tests and export rendering
+- Browser-native SVG/canvas capture plus pdf-lib for hosted-safe exports
 
 ### Run it locally
 

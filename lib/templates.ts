@@ -1,4 +1,10 @@
-import { DEFAULT_CODE_BLOCK_PROPS, type FrameProps, type LayoutNode } from '@/lib/layout/types'
+import {
+  DEFAULT_CODE_BLOCK_HEIGHT,
+  DEFAULT_CODE_BLOCK_PROPS,
+  DEFAULT_CODE_BLOCK_WIDTH,
+  type FrameProps,
+  type LayoutNode,
+} from '@/lib/layout/types'
 
 export interface Template {
   id: string
@@ -9,7 +15,13 @@ export interface Template {
 }
 
 function codeChild(): LayoutNode {
-  return { id: crypto.randomUUID(), kind: 'code', ...DEFAULT_CODE_BLOCK_PROPS }
+  return {
+    id: crypto.randomUUID(),
+    kind: 'code',
+    width: DEFAULT_CODE_BLOCK_WIDTH,
+    height: DEFAULT_CODE_BLOCK_HEIGHT,
+    ...DEFAULT_CODE_BLOCK_PROPS,
+  }
 }
 
 /** Starter layouts offered when creating a new document -- each just seeds

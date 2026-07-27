@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { GripVertical, ChevronUp, ChevronDown, Copy, Trash2 } from 'lucide-react'
+import { ContextMenu as ContextMenuPrimitive, DropdownMenu as DropdownMenuPrimitive } from 'radix-ui'
+import { GripVertical, ChevronUp, ChevronDown, Copy, MoreHorizontal, Trash2 } from 'lucide-react'
 import type { ChildLayout, LayoutNode } from '@/lib/layout/types'
 import { frameOuterStyle, frameInnerStyle, outerBoxStyle, contentOverflowStyle } from '@/lib/layout/frame-style'
 import { snapPosition } from '@/lib/layout/canvas-snap'
@@ -109,8 +110,7 @@ function NodeControls({
   gripHandlers,
   showGrip,
   showReorderActions,
-  onPointerEnter,
-  onPointerLeave,
+  zoom,
 }: {
   id: string
   anchorRef: React.RefObject<HTMLElement | null>
@@ -126,11 +126,9 @@ function NodeControls({
   // reordering (a different interaction, not a position drag).
   showGrip: boolean
   showReorderActions: boolean
-  onPointerEnter: () => void
-  onPointerLeave: () => void
+  zoom: number
 }) {
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
-  const nativeDragRef = useRef(false)
 
   useEffect(() => {
     if (!visible) return
@@ -145,27 +143,30 @@ function NodeControls({
     window.addEventListener('scroll', update, true)
     const observer = new ResizeObserver(update)
     observer.observe(anchor)
+    const mutationObserver = new MutationObserver(update)
+    mutationObserver.observe(anchor, { attributes: true, attributeFilter: ['class', 'style'] })
     return () => {
       window.removeEventListener('resize', update)
       window.removeEventListener('scroll', update, true)
       observer.disconnect()
+      mutationObserver.disconnect()
     }
-  }, [anchorRef, visible])
+  }, [anchorRef, visible, zoom])
 
   if (!visible || !anchorRect) return null
+
+  const toolbarLeft = Math.max(72, Math.min(window.innerWidth - 72, anchorRect.left + anchorRect.width / 2))
+  const preferredTop = anchorRect.top >= 42 ? anchorRect.top - 34 : anchorRect.bottom + 6
+  const toolbarTop = Math.max(8, Math.min(window.innerHeight - 38, preferredTop))
 
   return createPortal(
     <div
       className="scripture-node-controls"
       style={{
-        top: Math.max(8, anchorRect.top - 30),
-        left: anchorRect.left + anchorRect.width / 2,
+        top: toolbarTop,
+        left: toolbarLeft,
       }}
       onClick={(e) => e.stopPropagation()}
-      onPointerEnter={onPointerEnter}
-      onPointerLeave={() => {
-        if (!nativeDragRef.current) onPointerLeave()
-      }}
     >
       {showGrip && (
         <Tooltip>
@@ -176,14 +177,7 @@ function NodeControls({
               aria-label="Drag to move"
               draggable={gripHandlers.draggable}
               onPointerDown={gripHandlers.onPointerDown}
-              onDragStart={(event) => {
-                nativeDragRef.current = true
-                gripHandlers.onDragStart?.(event)
-              }}
-              onDragEnd={() => {
-                nativeDragRef.current = false
-                onPointerLeave()
-              }}
+              onDragStart={gripHandlers.onDragStart}
             >
               <GripVertical />
             </Button>
@@ -219,31 +213,84 @@ function NodeControls({
         </TooltipTrigger>
         <TooltipContent>Duplicate</TooltipContent>
       </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon-xs" onClick={() => onRemove(id)} aria-label="Delete">
-            <Trash2 />
+      <DropdownMenuPrimitive.Root>
+        <DropdownMenuPrimitive.Trigger asChild>
+          <Button variant="ghost" size="icon-xs" aria-label="More actions" title="More actions">
+            <MoreHorizontal />
           </Button>
-        </TooltipTrigger>
-        <TooltipContent>Delete</TooltipContent>
-      </Tooltip>
+        </DropdownMenuPrimitive.Trigger>
+        <DropdownMenuPrimitive.Portal>
+          <DropdownMenuPrimitive.Content
+            className="scripture-node-menu is-compact"
+            align="end"
+            sideOffset={5}
+            collisionPadding={8}
+          >
+            <DropdownMenuPrimitive.Item
+              className="scripture-node-menu-item is-destructive"
+              onSelect={() => onRemove(id)}
+            >
+              <Trash2 />
+              Delete
+            </DropdownMenuPrimitive.Item>
+          </DropdownMenuPrimitive.Content>
+        </DropdownMenuPrimitive.Portal>
+      </DropdownMenuPrimitive.Root>
     </div>,
     document.body
   )
 }
 
+function NodeContextActions({
+  children,
+  enabled,
+  onOpen,
+  onDuplicate,
+  onRemove,
+}: {
+  children: React.ReactElement
+  enabled: boolean
+  onOpen: () => void
+  onDuplicate: () => void
+  onRemove: () => void
+}) {
+  if (!enabled) return children
+  return (
+    <ContextMenuPrimitive.Root onOpenChange={(open) => open && onOpen()}>
+      <ContextMenuPrimitive.Trigger asChild>{children}</ContextMenuPrimitive.Trigger>
+      <ContextMenuPrimitive.Portal>
+        <ContextMenuPrimitive.Content className="scripture-node-menu">
+          <ContextMenuPrimitive.Item className="scripture-node-menu-item" onSelect={onDuplicate}>
+            <Copy />
+            Duplicate
+            <span className="scripture-node-menu-shortcut">⌘D</span>
+          </ContextMenuPrimitive.Item>
+          <ContextMenuPrimitive.Separator className="scripture-node-menu-separator" />
+          <ContextMenuPrimitive.Item
+            className="scripture-node-menu-item is-destructive"
+            onSelect={onRemove}
+          >
+            <Trash2 />
+            Delete layer
+            <span className="scripture-node-menu-shortcut">⌫</span>
+          </ContextMenuPrimitive.Item>
+        </ContextMenuPrimitive.Content>
+      </ContextMenuPrimitive.Portal>
+    </ContextMenuPrimitive.Root>
+  )
+}
+
 /**
- * Recursive interactive renderer for the layout tree -- selection + hover
- * controls + drag-and-drop reordering + resize handles + canvas-mode
+ * Recursive interactive renderer for the layout tree -- selection controls,
+ * context actions, drag-and-drop reordering, resize handles, and canvas-mode
  * positioning all live here. The print route walks the same tree shape
  * separately (it has no interactivity) using the unified frameStyle()/
  * sizeStyle() on a single div; this component instead splits that into an
  * outer position-hosting box (frameOuterStyle/outerBoxStyle) and an inner
  * content wrapper that owns flex layout + scroll/clip
  * (frameInnerStyle/contentOverflowStyle) -- see those functions' doc
- * comments in lib/layout/frame-style.ts for why. Both derive from the same
- * underlying CSS values either way, so the two structures still can't
- * visually diverge.
+ * comments in lib/layout/frame-style.ts for why. The static export renderer
+ * mirrors the same outer/inner structure so its positioning cannot diverge.
  */
 export function FrameNode({
   node,
@@ -284,7 +331,6 @@ export function FrameNode({
   const canDragViaBody = isCanvasChild && !(needsEditGate && isEditing)
   const isOnlySelected = isSelected && selectedIds.length === 1
   const [isDragOver, setIsDragOver] = useState(false)
-  const [controlsVisible, setControlsVisible] = useState(false)
   // Optimistic preview during a resize/move drag -- committed to Yjs only on
   // release (see ResizeHandles / beginMoveDrag), so dragging doesn't spam
   // the undo stack on every pixel of motion.
@@ -323,7 +369,6 @@ export function FrameNode({
   // pointermove/pointerup listeners attached forever, later calling
   // onRepositionNode against a stale node id/closure.
   const activeDragCleanupRef = useRef<(() => void) | null>(null)
-  const controlsHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const activeMarqueeCleanupRef = useRef<(() => void) | null>(null)
   const { observe: observeGeometry } = useGeometryRegistry()
 
@@ -331,7 +376,6 @@ export function FrameNode({
     return () => {
       activeDragCleanupRef.current?.()
       activeMarqueeCleanupRef.current?.()
-      if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current)
     }
   }, [])
 
@@ -350,22 +394,9 @@ export function FrameNode({
     observeGeometry,
   ])
 
-  function showNodeControls() {
-    if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current)
-    controlsHideTimerRef.current = null
-    setControlsVisible(true)
-  }
-
-  function scheduleHideNodeControls() {
-    if (controlsHideTimerRef.current) clearTimeout(controlsHideTimerRef.current)
-    controlsHideTimerRef.current = setTimeout(() => {
-      controlsHideTimerRef.current = null
-      setControlsVisible(false)
-    }, 100)
-  }
-
   const isAutoWidth = renderedNode.width == null
   const isAutoHeight = renderedNode.height == null
+  const showSelectionControls = isOnlySelected && editingId !== node.id && !livePosition && !liveSize
 
   const canvasPositionStyle: React.CSSProperties | undefined =
     !isRoot && parentChildLayout === 'canvas'
@@ -725,7 +756,7 @@ export function FrameNode({
   if (node.kind === 'frame') {
     const children = node.children ?? []
     const childLayout = node.childLayout ?? 'flex'
-    return (
+    const frameElement = (
       <div
         ref={elementRef}
         data-node-id={node.id}
@@ -743,8 +774,6 @@ export function FrameNode({
           e.stopPropagation()
           onSelect(node.id, e.shiftKey)
         }}
-        onPointerEnter={showNodeControls}
-        onPointerLeave={scheduleHideNodeControls}
         onPointerDown={!isRoot && parentChildLayout === 'canvas' ? beginMoveDrag : undefined}
         {...dragTargetHandlers}
       >
@@ -752,15 +781,14 @@ export function FrameNode({
           <NodeControls
             id={node.id}
             anchorRef={elementRef}
-            visible={controlsVisible && !livePosition && !liveSize}
+            visible={showSelectionControls}
             onMove={onMove}
             onDuplicate={onDuplicate}
             onRemove={onRemove}
             gripHandlers={gripHandlers}
             showGrip={showGrip}
             showReorderActions={showReorderActions}
-            onPointerEnter={showNodeControls}
-            onPointerLeave={scheduleHideNodeControls}
+            zoom={zoom}
           />
         )}
         {/* Flex layout + scroll/clip live on this INNER wrapper, not the
@@ -840,14 +868,26 @@ export function FrameNode({
         {guideOverlay}
       </div>
     )
+    if (isRoot) return frameElement
+    return (
+      <NodeContextActions
+        enabled={editingId !== node.id}
+        onOpen={() => onSelect(node.id, false)}
+        onDuplicate={() => onDuplicate(node.id)}
+        onRemove={() => onRemove(node.id)}
+      >
+        {frameElement}
+      </NodeContextActions>
+    )
   }
 
-  return (
+  const leafElement = (
     <div
       ref={elementRef}
       data-node-id={node.id}
       className={classNames(
         'scripture-leaf',
+        node.kind === 'code' && 'scripture-code-leaf',
         isAutoWidth && 'scripture-auto-width',
         isAutoHeight && 'scripture-auto-height',
         isSelected && 'scripture-selected',
@@ -863,23 +903,20 @@ export function FrameNode({
         onSelect(node.id, e.shiftKey)
       }}
       onDoubleClick={needsEditGate ? handleDoubleClick : undefined}
-      onPointerEnter={showNodeControls}
-      onPointerLeave={scheduleHideNodeControls}
       onPointerDown={canDragViaBody ? beginMoveDrag : undefined}
       {...dragTargetHandlers}
     >
       <NodeControls
         id={node.id}
         anchorRef={elementRef}
-        visible={controlsVisible && !livePosition && !liveSize}
+        visible={showSelectionControls}
         onMove={onMove}
         onDuplicate={onDuplicate}
         onRemove={onRemove}
         gripHandlers={gripHandlers}
         showGrip={showGrip}
         showReorderActions={showReorderActions}
-        onPointerEnter={showNodeControls}
-        onPointerLeave={scheduleHideNodeControls}
+        zoom={zoom}
       />
       {/* Scroll/clip lives on this INNER wrapper, not the outer box above --
           see contentOverflowStyle's doc comment: NodeControls/resizeHandles
@@ -920,5 +957,15 @@ export function FrameNode({
       {resizeHandles}
       {guideOverlay}
     </div>
+  )
+  return (
+    <NodeContextActions
+      enabled={!isTextual || (needsEditGate && editingId !== node.id)}
+      onOpen={() => onSelect(node.id, false)}
+      onDuplicate={() => onDuplicate(node.id)}
+      onRemove={() => onRemove(node.id)}
+    >
+      {leafElement}
+    </NodeContextActions>
   )
 }

@@ -160,6 +160,14 @@ export interface CodeBlockProps {
   diffLines: Record<number, 'add' | 'remove'>
 }
 
+/* Real authored dimensions for newly created surfaces. Unlike the visual
+   auto-size floors in globals.css, the code-block values are persisted on a
+   new node so selection geometry and the Inspector never report 0 × 0. */
+export const DEFAULT_CANVAS_WIDTH = 1200
+export const DEFAULT_CANVAS_HEIGHT = 800
+export const DEFAULT_CODE_BLOCK_WIDTH = 640
+export const DEFAULT_CODE_BLOCK_HEIGHT = 360
+
 export const DEFAULT_CODE_BLOCK_PROPS: CodeBlockProps = {
   language: DEFAULT_LANGUAGE,
   theme: DEFAULT_THEME,
