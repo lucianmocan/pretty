@@ -1,9 +1,6 @@
 import { Mark, mergeAttributes } from '@tiptap/core'
 
-/**
- * Carries the color Shiki assigned a token at paste time. Baked in once, not
- * kept live in sync with edits -- see lib/tiptap/shiki-to-doc.ts.
- */
+/** Carries Shiki-owned presentation separately from user formatting marks. */
 export const SyntaxColorMark = Mark.create({
   name: 'syntaxColor',
 
@@ -11,8 +8,18 @@ export const SyntaxColorMark = Mark.create({
     return {
       color: {
         default: null,
+        rendered: false,
         parseHTML: (element) => element.style.color || null,
-        renderHTML: (attrs) => (attrs.color ? { style: `color: ${attrs.color}` } : {}),
+      },
+      bold: {
+        default: false,
+        rendered: false,
+        parseHTML: (element) => Number.parseInt(element.style.fontWeight, 10) >= 600,
+      },
+      italic: {
+        default: false,
+        rendered: false,
+        parseHTML: (element) => element.style.fontStyle === 'italic',
       },
     }
   },
@@ -21,7 +28,20 @@ export const SyntaxColorMark = Mark.create({
     return [{ tag: 'span[data-syntax-color]' }]
   },
 
-  renderHTML({ HTMLAttributes }) {
-    return ['span', mergeAttributes(HTMLAttributes, { 'data-syntax-color': '' }), 0]
+  renderHTML({ mark, HTMLAttributes }) {
+    const styles = [
+      mark.attrs.color ? `color: ${mark.attrs.color}` : '',
+      mark.attrs.bold ? 'font-weight: 700' : '',
+      mark.attrs.italic ? 'font-style: italic' : '',
+    ].filter(Boolean)
+
+    return [
+      'span',
+      mergeAttributes(HTMLAttributes, {
+        'data-syntax-color': '',
+        ...(styles.length ? { style: styles.join('; ') } : {}),
+      }),
+      0,
+    ]
   },
 })

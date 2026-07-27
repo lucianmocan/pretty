@@ -66,17 +66,14 @@ export const AnnotatedCodeBlock = Node.create<AnnotatedCodeBlockOptions>({
     }
   },
 
-  // Enter/Tab should behave like a code editor (insert characters in place),
-  // not split the node into a new block or move focus out of it.
+  // Enter should behave like a code editor and insert a character in place,
+  // not split the node into a new block. Tab is handled by BlockEditor so it
+  // can honor the user's editor-wide indent-size preference.
   addKeyboardShortcuts() {
     return {
       Enter: () => {
         if (!this.editor.isActive(this.name)) return false
         return this.editor.commands.insertContent('\n')
-      },
-      Tab: () => {
-        if (!this.editor.isActive(this.name)) return false
-        return this.editor.commands.insertContent('  ')
       },
     }
   },

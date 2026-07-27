@@ -9,6 +9,7 @@ interface CanvasRootProps {
   pageSize?: PageSize
   customPageWidthMm?: number
   customPageHeightMm?: number
+  exportMarginPx?: number
 }
 
 /**
@@ -17,7 +18,14 @@ interface CanvasRootProps {
  * via frameStyle() + the .scripture-card class) supplies its own
  * background/padding/radius from the layout tree.
  */
-export function CanvasRoot({ children, printMode, pageSize, customPageWidthMm, customPageHeightMm }: CanvasRootProps) {
+export function CanvasRoot({
+  children,
+  printMode,
+  pageSize,
+  customPageWidthMm,
+  customPageHeightMm,
+  exportMarginPx,
+}: CanvasRootProps) {
   return (
     <div
       id="canvas-root"
@@ -25,6 +33,7 @@ export function CanvasRoot({ children, printMode, pageSize, customPageWidthMm, c
       data-page-size={printMode ? (pageSize ?? 'content') : undefined}
       data-page-width-mm={printMode ? customPageWidthMm : undefined}
       data-page-height-mm={printMode ? customPageHeightMm : undefined}
+      style={printMode && exportMarginPx != null ? { padding: exportMarginPx } : undefined}
     >
       {children}
     </div>

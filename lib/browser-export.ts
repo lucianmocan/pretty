@@ -2,14 +2,13 @@
 
 import { PDFDocument } from 'pdf-lib'
 import { domToBlob, waitUntilLoad } from 'modern-screenshot'
+import { exportRasterScale, type ExportQuality } from '@/lib/app-preferences'
 
 const CSS_PX_TO_PDF_POINTS = 72 / 96
 const MM_TO_PDF_POINTS = 72 / 25.4
 // A PNG is itself the authored canvas, so one CSS pixel should become one
 // image pixel. PDF pages still benefit from a denser backing image because
 // their physical size is independent of the embedded raster resolution.
-const PNG_RASTER_SCALE = 1
-const PDF_RASTER_SCALE = 2
 
 interface CapturedPage {
   png: Uint8Array
@@ -46,7 +45,11 @@ export async function waitForExportSurfaces(
   throw new Error('Timed out while preparing pages for export.')
 }
 
-async function capturePage(surface: HTMLElement, rasterScale: number): Promise<CapturedPage> {
+async function capturePage(
+  surface: HTMLElement,
+  rasterScale: number,
+  transparentBackground: boolean
+): Promise<CapturedPage> {
   const canvasRoot = surface.querySelector<HTMLElement>('#canvas-root')
   if (!canvasRoot) throw new Error('The export page did not render its canvas.')
   await waitUntilLoad(canvasRoot, { timeout: 30_000 })
@@ -60,6 +63,9 @@ async function capturePage(surface: HTMLElement, rasterScale: number): Promise<C
     scale: rasterScale,
     width: widthPx,
     height: heightPx,
+    backgroundColor: transparentBackground
+      ? null
+      : getComputedStyle(canvasRoot.querySelector<HTMLElement>('.scripture-card') ?? canvasRoot).backgroundColor,
     font: { preferredFormat: 'woff2' },
     fetch: { requestInit: { cache: 'force-cache' } },
   })
@@ -102,14 +108,15 @@ function pdfPageSize(page: CapturedPage): { width: number; height: number } {
 
 export async function createBrowserExport(
   surfaces: HTMLElement[],
-  format: 'png' | 'pdf'
+  format: 'png' | 'pdf',
+  options?: { quality?: ExportQuality; transparentBackground?: boolean }
 ): Promise<Blob> {
   if (surfaces.length === 0) throw new Error('There are no pages to export.')
   const captures: CapturedPage[] = []
   const count = format === 'png' ? 1 : surfaces.length
-  const rasterScale = format === 'png' ? PNG_RASTER_SCALE : PDF_RASTER_SCALE
+  const rasterScale = exportRasterScale(format, options?.quality ?? 'standard')
   for (let index = 0; index < count; index += 1) {
-    captures.push(await capturePage(surfaces[index], rasterScale))
+    captures.push(await capturePage(surfaces[index], rasterScale, options?.transparentBackground ?? true))
   }
 
   if (format === 'png') return captures[0].pngBlob

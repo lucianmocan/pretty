@@ -182,7 +182,7 @@ function NodeControls({
               <GripVertical />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Drag to move</TooltipContent>
+          <TooltipContent className="z-40">Drag to move</TooltipContent>
         </Tooltip>
       )}
       {showReorderActions && (
@@ -193,7 +193,7 @@ function NodeControls({
                 <ChevronUp />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Move up</TooltipContent>
+            <TooltipContent className="z-40">Move up</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -201,7 +201,7 @@ function NodeControls({
                 <ChevronDown />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Move down</TooltipContent>
+            <TooltipContent className="z-40">Move down</TooltipContent>
           </Tooltip>
         </>
       )}
@@ -211,7 +211,7 @@ function NodeControls({
             <Copy />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Duplicate</TooltipContent>
+        <TooltipContent className="z-40">Duplicate</TooltipContent>
       </Tooltip>
       <DropdownMenuPrimitive.Root>
         <DropdownMenuPrimitive.Trigger asChild>

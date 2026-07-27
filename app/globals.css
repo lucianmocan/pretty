@@ -165,6 +165,15 @@
   }
 }
 
+html[data-scripture-reduced-motion='true'] *,
+html[data-scripture-reduced-motion='true'] *::before,
+html[data-scripture-reduced-motion='true'] *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
 /* ---------------------------------------------------------------------------
    Page shells
 --------------------------------------------------------------------------- */
@@ -262,11 +271,11 @@
   pointer-events: none;
 }
 
+.scripture-keycap,
 .scripture-pan-hint kbd {
   display: inline-flex;
-  min-width: 2.75rem;
+  min-width: 1.5rem;
   justify-content: center;
-  margin-inline: 0.1875rem;
   padding: 0.0625rem 0.3125rem;
   border: 1px solid var(--border);
   border-bottom-width: 2px;
@@ -275,6 +284,12 @@
   color: var(--foreground);
   font-family: var(--font-geist-sans), sans-serif;
   font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+.scripture-pan-hint kbd {
+  min-width: 2.75rem;
+  margin-inline: 0.1875rem;
 }
 
 /* Scaled to `zoom` via a CSS transform on the INNER element -- this outer
@@ -1041,7 +1056,9 @@ html[data-scripture-moving] * {
   box-shadow: var(--shadow-sm);
   pointer-events: auto;
   transform: translateX(-50%);
-  z-index: 60;
+  /* Above canvas selection/toolbar layers, below the z-50 application
+     modal layer so selected-node actions remain behind open dialogs. */
+  z-index: 40;
 }
 
 html[data-scripture-moving] .scripture-node-controls,
@@ -1050,7 +1067,9 @@ html[data-scripture-panning] .scripture-node-controls {
 }
 
 .scripture-node-menu {
-  z-index: 80;
+  /* Portaled menus follow the same canvas-overlay contract as their trigger:
+     visible over the workspace, covered by modal overlays. */
+  z-index: 40;
   min-width: 10rem;
   padding: 0.25rem;
   overflow: hidden;

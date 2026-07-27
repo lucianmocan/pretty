@@ -3,30 +3,24 @@
 import { useEffect, useRef, useState } from 'react'
 import { useEditor, useEditorState, EditorContent, type Editor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
-import { TextSelection, type Transaction } from '@tiptap/pm/state'
+import type { Transaction } from '@tiptap/pm/state'
 import { Collaboration } from '@tiptap/extension-collaboration'
 import { getYDoc, getUndoManager, blockFragmentName } from '@/lib/yjs/doc-store'
 import { baseExtensions } from '@/lib/tiptap/extensions'
 import { tokenizeCode } from '@/lib/shiki/tokenize'
-import { tokensToContent, type ProseMirrorTextNode } from '@/lib/tiptap/shiki-to-doc'
+import { syntaxMarkRanges } from '@/lib/tiptap/syntax-highlighting'
 import { BubbleToolbar } from './bubble-toolbar'
 import { CodeChrome } from './code-chrome'
 import { DEFAULT_THEME } from '@/lib/presets'
 import { resolveThemeArg } from '@/lib/presets/custom-syntax-themes'
-import type { PlainToken } from '@/lib/shiki/tokenize'
 import type { ChromeStyle, CustomChromeStyle } from '@/lib/layout/types'
 import { useEditorRegistry } from './editor-registry'
+import { indentationBackspaceCount, nextLineIndent, useAutoIndent, useTabSize } from '@/lib/editor-preferences'
 
 const RETOKENIZE_DEBOUNCE_MS = 350
 
-function toProseMirrorNodes(view: EditorView, nodes: ProseMirrorTextNode[]) {
-  return nodes.map((n) => view.state.schema.text(n.text, n.marks?.map((m) => view.state.schema.marks[m.type].create(m.attrs))))
-}
-
-/** Replacing text nodes solely to update syntax marks can rebuild the DOM
- * selection underneath the active contenteditable. Preserve browser focus
- * if this editor owned it immediately before dispatch, but never steal focus
- * back when the user already moved elsewhere while tokenization was pending. */
+/** Preserve browser focus if this editor owned it immediately before a
+ * cosmetic mark transaction, but never steal it after the user moved away. */
 function dispatchPreservingFocus(view: EditorView, transaction: Transaction) {
   const hadFocus = view.hasFocus()
   view.dispatch(transaction)
@@ -42,65 +36,43 @@ function dispatchPreservingFocus(view: EditorView, transaction: Transaction) {
   queueMicrotask(restoreDroppedFocus)
 }
 
-/** Replaces the whole block's content with freshly tokenized text when the
- * language/theme changes (this intentionally drops any manual bold/italic/
- * highlight/font-size marks, same trade-off as a fresh re-highlight).
- *
- * `selection`, when given, is restored after the replace -- for the
- * language/theme-change caller, the text itself hasn't changed (same
- * characters, just freshly re-tokenized marks), so the anchor/head positions
- * captured just before calling this are still valid and still refer to the
- * same underlying characters afterward. */
-function replaceWithTokenizedContent(
+/** Applies Shiki output as marks only. This function has no operation capable
+ * of inserting or deleting a character, which keeps async highlighting safe
+ * during fast typing, browser composition, and Yjs synchronization. */
+function applyTokenizedMarks(
   view: EditorView,
+  text: string,
   language: string,
-  lines: PlainToken[][],
-  selection?: { anchor: number; head: number }
+  lines: Awaited<ReturnType<typeof tokenizeCode>>['lines']
 ) {
-  const content = tokensToContent(lines)
-  const node = view.state.schema.nodes.annotatedCodeBlock.create(
-    { language },
-    content.length ? toProseMirrorNodes(view, content) : null
-  )
-  const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, node)
-  if (selection) {
-    try {
-      tr.setSelection(TextSelection.create(tr.doc, selection.anchor, selection.head))
-    } catch {
-      // Out of range for the new doc -- fall back to PM's default mapping.
-    }
-  }
-  dispatchPreservingFocus(view, tr)
-}
+  if (view.state.doc.textContent !== text) return false
 
-/** Starting character offset of each line within `lines.join('\n')`. */
-function lineStartOffsets(lines: string[]): number[] {
-  const offsets: number[] = []
-  let offset = 0
-  for (const line of lines) {
-    offsets.push(offset)
-    offset += line.length + 1
-  }
-  return offsets
-}
+  const ranges = syntaxMarkRanges(text, lines)
+  const syntaxColor = view.state.schema.marks.syntaxColor
+  let tr = view.state.tr
+  const contentEnd = 1 + text.length
 
-/** Slices a tokenized line down to a [start, end) character range, splitting
- * any token straddling that boundary -- used so re-tokenizing only the
- * substring that actually changed (see retokenizeChangedLines) doesn't need
- * the tokenizer to already work in character ranges. */
-function sliceTokensByChars(tokens: PlainToken[], start: number, end: number): PlainToken[] {
-  const result: PlainToken[] = []
-  let pos = 0
-  for (const tok of tokens) {
-    const tokStart = pos
-    const tokEnd = pos + tok.content.length
-    pos = tokEnd
-    if (tokEnd <= start || tokStart >= end) continue
-    const sliceStart = Math.max(0, start - tokStart)
-    const sliceEnd = Math.min(tok.content.length, end - tokStart)
-    if (sliceEnd > sliceStart) result.push({ ...tok, content: tok.content.slice(sliceStart, sliceEnd) })
+  if (text.length) tr = tr.removeMark(1, contentEnd, syntaxColor)
+  for (const range of ranges) {
+    tr = tr.addMark(range.from, range.to, syntaxColor.create(range.attrs))
   }
-  return result
+
+  const block = tr.doc.firstChild
+  if (block && block.type.name === 'annotatedCodeBlock' && block.attrs.language !== language) {
+    tr = tr.setNodeMarkup(0, undefined, { ...block.attrs, language })
+  }
+
+  // Syntax paint should persist and collaborate, but Cmd/Ctrl+Z must undo
+  // the user's last edit rather than an invisible highlighting transaction.
+  tr = tr.setMeta('addToHistory', false)
+
+  // Runtime safety belt: future refactors must preserve this invariant too.
+  if (tr.doc.textContent !== text) {
+    throw new Error('Syntax highlighting attempted to change editor text')
+  }
+
+  if (tr.steps.length) dispatchPreservingFocus(view, tr)
+  return true
 }
 
 export type BlockKind = 'code' | 'text'
@@ -160,6 +132,12 @@ export function BlockEditor({
   onLineClick,
 }: BlockEditorProps) {
   const [synced, setSynced] = useState(false)
+  const tabSize = useTabSize()
+  const autoIndent = useAutoIndent()
+  const tabSizeRef = useRef(tabSize)
+  const autoIndentRef = useRef(autoIndent)
+  tabSizeRef.current = tabSize
+  autoIndentRef.current = autoIndent
   const languageRef = useRef(language)
   const themeRef = useRef(theme)
   languageRef.current = language
@@ -169,27 +147,18 @@ export function BlockEditor({
   const fragment = ydoc.getXmlFragment(blockFragmentName(blockId))
   const undoManager = getUndoManager(docId)
 
-  // Per-line incremental re-highlighting while typing (see retokenizeChangedLines
-  // below). `isRetokenizingRef` guards against reacting to our OWN programmatic
-  // dispatches (language/theme change or this feature's own replace) --
-  // each of those triggers onUpdate again since it's a normal transaction
-  // dispatch through the same EditorView. `prevTextRef` is the baseline the
-  // next genuine edit gets diffed against; it's resynced (not diffed) whenever
-  // isRetokenizingRef is set, and left `null` until the first real update so
-  // the initial-content-seeding effect's own dispatch is never mistaken for
-  // an edit either.
+  // `isRetokenizingRef` guards against reacting to our own mark-only
+  // transactions. `prevTextRef` is the last highlighted text snapshot.
   const isRetokenizingRef = useRef(false)
   const prevTextRef = useRef<string | null>(null)
   const retokenizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Guards against an OLDER, slower retokenizeChangedLines call resolving
+  // Guards against an OLDER, slower rehighlightCode call resolving
   // AFTER a newer one already started (the debounce timer only prevents two
   // calls being SCHEDULED at once -- once a timer fires and the async
   // tokenizeCode() call is in flight, a slow cold grammar load can easily
   // still be pending when the NEXT debounce window elapses and starts a
-  // second call). Every dispatch path that replaces this block's content
-  // bumps this first, so a stale in-flight response can tell it's been
-  // superseded and skip applying its now-wrong-range replacement instead of
-  // corrupting the document or clobbering a newer path's own state.
+  // second call). Every competing async path bumps this first, so stale
+  // highlighting is skipped.
   const retokenizeGenerationRef = useRef(0)
 
   useEffect(() => {
@@ -210,154 +179,49 @@ export function BlockEditor({
     }
   }, [docId])
 
-  async function retokenizeChangedLines(editor: Editor) {
-    // Replacing marked text while the browser is painting a range selection
-    // makes that selection visibly collapse and reappear. Wait until the
-    // selection is collapsed; onSelectionUpdate schedules the pending pass.
+  async function rehighlightCode(editor: Editor) {
+    // Avoid repainting syntax spans while the browser is painting a range
+    // selection. onSelectionUpdate schedules the pending pass after collapse.
     if (!editor.state.selection.empty) return
+    if (editor.view.composing) {
+      scheduleRetokenize(editor)
+      return
+    }
 
-    const newText = editor.state.doc.textContent
-    const oldText = prevTextRef.current ?? newText
-    if (oldText === newText) return
+    const text = editor.state.doc.textContent
+    if (prevTextRef.current === text) return
 
     const generation = ++retokenizeGenerationRef.current
     try {
-      const { lines: tokenizedLines } = await tokenizeCode(
-        newText,
+      const { lines } = await tokenizeCode(
+        text,
         languageRef.current ?? 'plaintext',
         resolveThemeArg(themeRef.current)
       )
 
-      // A newer call/paste/theme change, OR simply more keystrokes that have
-      // not reached their next debounce yet, can make this response stale.
-      // In both cases its ranges were computed for a document snapshot that
-      // no longer exists; applying them can throw an out-of-range error or
-      // overwrite newer text. The pending debounce will tokenize the latest
-      // snapshot instead.
+      // More keystrokes may arrive while tokenization is in flight. Never
+      // apply ranges calculated for an older document snapshot.
       if (
         generation !== retokenizeGenerationRef.current ||
-        editor.state.doc.textContent !== newText ||
-        !editor.state.selection.empty
+        editor.state.doc.textContent !== text ||
+        !editor.state.selection.empty ||
+        editor.view.composing
       ) {
+        if (editor.view.composing) scheduleRetokenize(editor)
         return
       }
 
-      const oldLines = oldText.split('\n')
-      const newLines = newText.split('\n')
-
-      let from: number
-      let to: number
-      let replacementLines: PlainToken[][]
-
-      if (oldLines.length === newLines.length) {
-        // Fast path: typing within a single line is the overwhelmingly
-        // common case when line counts match -- find that one line, then
-        // narrow further to just its differing SUBSTRING (common prefix/
-        // suffix diff), not the whole line. Replacing the whole line would
-        // silently wipe any manual bold/italic/highlight mark elsewhere on
-        // it, not just at the edit point -- everything before and after the
-        // actual edit keeps its existing marks (and the cursor position,
-        // auto-mapped by the transaction) this way.
-        const lineIndex = newLines.findIndex((line, i) => line !== oldLines[i])
-        if (lineIndex === -1) return
-        const oldLine = oldLines[lineIndex]
-        const newLine = newLines[lineIndex]
-        const maxCommon = Math.min(oldLine.length, newLine.length)
-        let prefixLen = 0
-        while (prefixLen < maxCommon && oldLine[prefixLen] === newLine[prefixLen]) prefixLen++
-        let suffixLen = 0
-        while (
-          suffixLen < maxCommon - prefixLen &&
-          oldLine[oldLine.length - 1 - suffixLen] === newLine[newLine.length - 1 - suffixLen]
-        ) {
-          suffixLen++
-        }
-        // `from`/`to` use the NEW line's offsets/length: by the time this
-        // debounced pass runs, normal typing has already inserted the
-        // characters into the live document (we never intercept plain
-        // typing, only paste), so the document's actual current range for
-        // this line already matches newLines, not oldLines -- using the old
-        // (pre-edit) length here would replace the wrong-sized range and
-        // duplicate/clip text.
-        const newOffsets = lineStartOffsets(newLines)
-        const editStart = prefixLen
-        const editEnd = newLine.length - suffixLen
-        if (editEnd > editStart) {
-          from = 1 + newOffsets[lineIndex] + editStart
-          to = 1 + newOffsets[lineIndex] + editEnd
-          replacementLines = [sliceTokensByChars(tokenizedLines[lineIndex] ?? [], editStart, editEnd)]
-        } else {
-          // A pure DELETION (no characters typed, just removed) where the
-          // matching prefix+suffix already account for the entire new line
-          // collapses this to an EMPTY range -- prefixLen === newLine.length
-          // - suffixLen, so there's no "new" substring left to slice out.
-          // Replacing an empty range with an empty replacement is a total
-          // no-op: the line silently never gets re-colored at all (that's
-          // the "I have to press Enter before a line re-colors" bug --
-          // Enter forces the OTHER branch below, which always replaces a
-          // real, non-empty range). Retokenizing the WHOLE line instead
-          // guarantees an actual visible update here; it's less surgical
-          // than the prefix/suffix slice above (any manual bold/italic mark
-          // elsewhere on this one line is lost, same trade-off the line-
-          // count-changed branch below already accepts), but only for the
-          // specific line that was just edited, not the whole document.
-          from = 1 + newOffsets[lineIndex]
-          to = 1 + newOffsets[lineIndex] + newLine.length
-          replacementLines = [tokenizedLines[lineIndex] ?? []]
-        }
-      } else {
-        // Line count changed (Enter split a line, or a newline was deleted
-        // merging two) -- replace from the first differing line through the
-        // end of the document. Less surgical, but every untouched line
-        // BEFORE the edit still keeps its marks. Same reasoning as above:
-        // the end of the range must be the CURRENT (new) document's end.
-        let firstDiff = 0
-        const minLen = Math.min(oldLines.length, newLines.length)
-        while (firstDiff < minLen && oldLines[firstDiff] === newLines[firstDiff]) firstDiff++
-        const newOffsets = lineStartOffsets(newLines)
-        from = 1 + newOffsets[firstDiff]
-        to = 1 + newText.length
-        replacementLines = tokenizedLines.slice(firstDiff)
-      }
-
-      const replacementNodes = toProseMirrorNodes(editor.view, tokensToContent(replacementLines))
-      // Captured BEFORE building the transaction, from the CURRENT (pre-
-      // dispatch) selection -- replaceWith(from, to, ...) below swaps in the
-      // exact same characters over [from, to) (just freshly retokenized
-      // marks, not new text), so the document's total length is unchanged
-      // and anchor/head are still valid, still-correct positions afterward.
-      const { anchor, head } = editor.state.selection
       isRetokenizingRef.current = true
       try {
-        const tr = editor.view.state.tr.replaceWith(from, to, replacementNodes)
-        // ProseMirror's default mapping does NOT preserve this on its own: a
-        // selection that was strictly inside a replaced range collapses to
-        // the start of the new content instead of staying put -- exactly the
-        // "cursor jumps to a strange position while typing" bug this fixes.
-        // Restoring it explicitly, in the SAME transaction, means no extra
-        // render/flicker in between and no chance of a stale intermediate
-        // selection being visible.
-        try {
-          tr.setSelection(TextSelection.create(tr.doc, anchor, head))
-        } catch {
-          // Positions somehow out of range for tr.doc (shouldn't happen,
-          // given the same-length swap above) -- fall back to PM's own
-          // default mapping rather than losing the retokenize entirely.
-        }
-        dispatchPreservingFocus(editor.view, tr)
+        applyTokenizedMarks(editor.view, text, languageRef.current ?? 'plaintext', lines)
       } finally {
-        // finally, not a plain assignment after dispatch -- if dispatch
-        // itself throws (e.g. an out-of-range position from an edge case
-        // this guard didn't catch), this ref would otherwise stay stuck
-        // `true` forever, silently disabling all future re-highlighting for
-        // this block (onUpdate's early-return checks it unconditionally).
         isRetokenizingRef.current = false
       }
 
-      prevTextRef.current = newText
+      prevTextRef.current = text
     } catch (err) {
       console.error('Failed to re-highlight edited code', err)
-      if (generation === retokenizeGenerationRef.current) prevTextRef.current = newText
+      if (generation === retokenizeGenerationRef.current) prevTextRef.current = text
     }
   }
 
@@ -365,7 +229,7 @@ export function BlockEditor({
     if (retokenizeTimerRef.current) clearTimeout(retokenizeTimerRef.current)
     retokenizeTimerRef.current = setTimeout(() => {
       retokenizeTimerRef.current = null
-      if (!editor.isDestroyed) void retokenizeChangedLines(editor)
+      if (!editor.isDestroyed) void rehighlightCode(editor)
     }, RETOKENIZE_DEBOUNCE_MS)
   }
 
@@ -383,23 +247,51 @@ export function BlockEditor({
           spellcheck: 'false',
         },
         handleKeyDown(view, event) {
-          if (kind !== 'code' || event.key !== 'Tab') return false
-          event.preventDefault()
+          if (kind !== 'code') return false
 
-          const { from, to, $from } = view.state.selection
-          if (!event.shiftKey) {
-            view.dispatch(view.state.tr.insertText('  ', from, to).scrollIntoView())
+          if (event.key === 'Enter' && autoIndentRef.current && !event.isComposing) {
+            const { from, to, $from } = view.state.selection
+            const textBeforeCaret = $from.parent.textBetween(0, $from.parentOffset, '\n', '\n')
+            const indent = nextLineIndent(textBeforeCaret, tabSizeRef.current)
+            event.preventDefault()
+            view.dispatch(view.state.tr.insertText(`\n${indent}`, from, to).scrollIntoView())
             return true
           }
 
-          // Shift+Tab removes up to one two-space indent from the current
+          if (event.key === 'Backspace') {
+            const { empty, from, $from } = view.state.selection
+            if (!empty || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return false
+
+            const textBeforeCaret = $from.parent.textBetween(0, $from.parentOffset, '\n', '\n')
+            const spaces = indentationBackspaceCount(textBeforeCaret, tabSizeRef.current)
+            if (spaces === 0) return false
+
+            event.preventDefault()
+            view.dispatch(view.state.tr.delete(from - spaces, from).scrollIntoView())
+            return true
+          }
+
+          if (event.key !== 'Tab') return false
+          event.preventDefault()
+
+          const { from, to, $from } = view.state.selection
+          const currentTabSize = tabSizeRef.current
+          if (!event.shiftKey) {
+            view.dispatch(view.state.tr.insertText(' '.repeat(currentTabSize), from, to).scrollIntoView())
+            return true
+          }
+
+          // Shift+Tab removes up to one configured indent from the current
           // line and is still consumed when the line is already flush-left,
           // so focus never escapes the code editor in either direction.
           const parentStart = from - $from.parentOffset
           const textBeforeCaret = $from.parent.textBetween(0, $from.parentOffset, '\n', '\n')
           const lineStart = parentStart + textBeforeCaret.lastIndexOf('\n') + 1
-          const prefix = view.state.doc.textBetween(lineStart, Math.min(lineStart + 2, view.state.doc.content.size))
-          const spaces = prefix.match(/^ {1,2}/)?.[0].length ?? 0
+          const prefix = view.state.doc.textBetween(
+            lineStart,
+            Math.min(lineStart + currentTabSize, view.state.doc.content.size)
+          )
+          const spaces = prefix.match(new RegExp(`^ {1,${currentTabSize}}`))?.[0].length ?? 0
           if (spaces > 0) view.dispatch(view.state.tr.delete(lineStart, lineStart + spaces).scrollIntoView())
           return true
         },
@@ -412,7 +304,7 @@ export function BlockEditor({
 
           // Paste behaves like a normal text editor: insert at the caret, or
           // replace only the active selection. Syntax colors are applied by
-          // the same debounced incremental pass used for regular typing.
+          // the same debounced mark-only pass used for regular typing.
           if (retokenizeTimerRef.current) {
             clearTimeout(retokenizeTimerRef.current)
             retokenizeTimerRef.current = null
@@ -427,7 +319,7 @@ export function BlockEditor({
       onUpdate({ editor }) {
         if (kind !== 'code') return
         if (isRetokenizingRef.current || prevTextRef.current === null) {
-          // Our own programmatic dispatch (theme-change/incremental replace)
+          // Our own programmatic syntax-mark dispatch
           // or the very first update after content was seeded --
           // resync the baseline, don't treat it as an edit to re-highlight.
           prevTextRef.current = editor.state.doc.textContent
@@ -525,23 +417,19 @@ export function BlockEditor({
     const text = editor.state.doc.textContent
     if (!text) return
 
-    // Invalidates any slower, still-in-flight typing-triggered
-    // retokenizeChangedLines call -- same reasoning as the paste handler.
-    retokenizeGenerationRef.current++
+    // Invalidates any slower typing-triggered highlight request.
+    const generation = ++retokenizeGenerationRef.current
     tokenizeCode(text, language ?? 'plaintext', resolveThemeArg(theme))
       .then(({ lines }) => {
-        // `text` was captured before this await -- if the user kept typing
-        // during the round trip, applying a replace built from that now-
-        // stale snapshot would silently discard every character typed since
-        // then. Skipping here isn't a permanent loss: the regular per-
-        // keystroke retokenize path (which always diffs against the
-        // CURRENT text) catches up and re-colors those characters correctly
-        // once typing settles, just a beat later than usual.
-        if (editor.state.doc.textContent !== text) return
-        const { anchor, head } = editor.state.selection
+        if (
+          generation !== retokenizeGenerationRef.current ||
+          editor.state.doc.textContent !== text
+        ) {
+          return
+        }
         isRetokenizingRef.current = true
         try {
-          replaceWithTokenizedContent(editor.view, language ?? 'plaintext', lines, { anchor, head })
+          applyTokenizedMarks(editor.view, text, language ?? 'plaintext', lines)
         } finally {
           isRetokenizingRef.current = false
         }
@@ -576,7 +464,12 @@ export function BlockEditor({
         : 'Double-click to add text'
 
   const editorContent = (
-    <div className="scripture-editor-wrapper" data-empty={isEmpty || undefined} data-kind={kind}>
+    <div
+      className="scripture-editor-wrapper"
+      data-empty={isEmpty || undefined}
+      data-kind={kind}
+      style={kind === 'code' ? { tabSize } : undefined}
+    >
       {editor && <BubbleToolbar editor={editor} />}
       {isEmpty && (
         <span className="scripture-editor-placeholder" aria-hidden="true">

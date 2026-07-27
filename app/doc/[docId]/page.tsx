@@ -12,6 +12,7 @@ import { useLayoutTree } from '@/lib/use-layout-tree'
 import { getYDoc, getUndoManager } from '@/lib/yjs/doc-store'
 import { BrowserExportSurfaces } from '@/components/export/browser-export-surfaces'
 import { createBrowserExport, waitForExportSurfaces } from '@/lib/browser-export'
+import { getExportPreferences } from '@/lib/app-preferences'
 import {
   moveNode,
   duplicateNode,
@@ -759,7 +760,11 @@ export default function DocumentEditorPage() {
       // the local-first document data in the same IndexedDB-backed session
       // and avoids server-only Chromium/filesystem assumptions on hosts.
       const surfaces = await waitForExportSurfaces(exportSurfaceRootRef, pageIds)
-      const blob = await createBrowserExport(surfaces, format)
+      const preferences = getExportPreferences()
+      const blob = await createBrowserExport(surfaces, format, {
+        quality: preferences.quality,
+        transparentBackground: preferences.transparentBackground,
+      })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url

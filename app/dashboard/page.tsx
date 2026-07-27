@@ -7,12 +7,12 @@ import {
   FileCode,
   Files,
   HardDrive,
-  MessageSquare,
   Pin,
   PinOff,
   Pencil,
   Plus,
   Search,
+  Settings2,
   Trash2,
   X,
 } from 'lucide-react'
@@ -30,6 +30,7 @@ import { deleteDocument } from '@/lib/documents/delete-service'
 import { TEMPLATES, type Template } from '@/lib/templates'
 import { DocumentPreview } from '@/components/dashboard/document-preview'
 import { PageToolbar } from '@/components/layout/page-toolbar'
+import { SettingsDialog } from '@/components/settings/settings-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -80,6 +81,7 @@ export default function DocumentsDashboardPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -179,11 +181,9 @@ export default function DocumentsDashboardPage() {
         <h1 className="scripture-dashboard-title">
           <Link href="/">pretty</Link>
         </h1>
-        <Button variant="ghost" size="sm" className="ml-auto" asChild>
-          <a href="https://github.com/lucianmocan/pretty" target="_blank" rel="noopener noreferrer">
-            <MessageSquare />
-            Feedback
-          </a>
+        <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setSettingsOpen(true)}>
+          <Settings2 />
+          Settings
         </Button>
       </PageToolbar>
 
@@ -476,6 +476,8 @@ export default function DocumentsDashboardPage() {
           )}
         </main>
       </div>
+
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
 
       <Dialog open={showTemplatePicker} onOpenChange={setShowTemplatePicker}>
         <DialogContent className="sm:max-w-md">

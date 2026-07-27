@@ -64,6 +64,7 @@ export function getUndoManager(id: string): Y.UndoManager {
   if (!entry.undoManager) {
     entry.undoManager = new Y.UndoManager(entry.doc, {
       trackedOrigins: new Set([ySyncPluginKey, LAYOUT_MUTATION_ORIGIN]),
+      captureTransaction: (transaction) => transaction.meta.get('addToHistory') !== false,
     })
   }
   return entry.undoManager

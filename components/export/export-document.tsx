@@ -135,13 +135,14 @@ function renderNode(node: LayoutNode, ydoc: Y.Doc, parentChildLayout: ChildLayou
   )
 }
 
-export function ExportDocument({ tree, ydoc }: { tree: LayoutNode; ydoc: Y.Doc }) {
+export function ExportDocument({ tree, ydoc, margin }: { tree: LayoutNode; ydoc: Y.Doc; margin?: number }) {
   return (
     <CanvasRoot
       printMode
       pageSize={tree.pageSize}
       customPageWidthMm={tree.customPageWidthMm}
       customPageHeightMm={tree.customPageHeightMm}
+      exportMarginPx={margin}
     >
       {renderNode(tree, ydoc)}
     </CanvasRoot>

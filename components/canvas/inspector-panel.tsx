@@ -80,6 +80,7 @@ import { RadiusIcon } from '@/components/ui/radius-icon'
 import { MIN_NODE_SIZE } from '@/lib/layout/resize-geometry'
 import { useGeometryRegistry } from '@/components/canvas/geometry-registry'
 import { geometryRecord, type NodeGeometry } from '@/lib/layout/geometry'
+import { useExportFormat } from '@/lib/app-preferences'
 
 interface InspectorPanelProps {
   docId: string
@@ -505,6 +506,7 @@ export function InspectorPanel({
   exportError,
 }: InspectorPanelProps) {
   const { measureAll } = useGeometryRegistry()
+  const preferredExportFormat = useExportFormat()
 
   if (selectedIds.length > 1) {
     return (
@@ -765,11 +767,21 @@ export function InspectorPanel({
                   same card onto a fixed paper size instead of resizing it to fill one.
                 </p>
                 <div className="scripture-inspector-actions">
-                  <Button size="sm" onClick={onExportPdf} disabled={exporting !== null}>
+                  <Button
+                    variant={preferredExportFormat === 'pdf' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={onExportPdf}
+                    disabled={exporting !== null}
+                  >
                     <Download />
                     {exporting === 'pdf' ? 'Exporting PDF…' : 'Export PDF'}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={onExportPng} disabled={exporting !== null}>
+                  <Button
+                    variant={preferredExportFormat === 'png' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={onExportPng}
+                    disabled={exporting !== null}
+                  >
                     <Download />
                     {exporting === 'png' ? 'Exporting PNG…' : 'Export PNG'}
                   </Button>
