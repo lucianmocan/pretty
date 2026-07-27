@@ -34,6 +34,10 @@ export async function waitForExportSurfaces(
       const pages = pageIds.map((pageId) =>
         root.querySelector<HTMLElement>(`.scripture-browser-export-page[data-export-page-id="${CSS.escape(pageId)}"]`)
       )
+      const failedPage = pages.find((page) => page?.dataset.exportError)
+      if (failedPage?.dataset.exportError) {
+        throw new Error(`Could not prepare syntax highlighting for export: ${failedPage.dataset.exportError}`)
+      }
       if (pages.every((page) => page?.dataset.exportReady === 'true')) {
         await document.fonts.ready
         await nextPaint()

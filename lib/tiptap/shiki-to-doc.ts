@@ -1,4 +1,4 @@
-import type { PlainToken } from '@/lib/shiki/tokenize'
+import type { PlainToken } from '@/lib/shiki/token-types'
 
 export interface ProseMirrorTextNode {
   type: 'text'
@@ -8,8 +8,8 @@ export interface ProseMirrorTextNode {
 
 /**
  * Converts Shiki's per-line token output into the ProseMirror text-node content
- * of a single annotatedCodeBlock node. Live edits use the matching mark-only
- * range path in syntax-highlighting.ts.
+ * of a single annotatedCodeBlock node. Live editors use local decorations;
+ * this marked representation is only suitable for static snapshots.
  */
 export function tokensToContent(lines: PlainToken[][]): ProseMirrorTextNode[] {
   const content: ProseMirrorTextNode[] = []

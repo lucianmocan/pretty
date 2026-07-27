@@ -79,7 +79,10 @@ function LayerRow({
   const [editing, setEditing] = useState(false)
   const children = node.children ?? []
   const isExpanded = expanded.has(node.id)
-  const label = fallbackLabel(node, registry.getAll().get(node.id)?.getText())
+  const label = fallbackLabel(
+    node,
+    registry.getAll().get(node.id)?.getText() ?? registry.getStatic().get(node.id)?.getText()
+  )
 
   function commit(value: string) {
     updateNodeLabel(getYDoc(docId).doc, node.id, value)
@@ -174,6 +177,7 @@ export function LayersPanel({
   onDeletePage,
   onReorderPages,
   onSelectNode,
+  onSetEditing,
   onReorderNode,
 }: {
   tree: LayoutNode
@@ -185,6 +189,7 @@ export function LayersPanel({
   onDeletePage: (pageId: string) => Promise<void>
   onReorderPages: (pageIds: string[]) => void
   onSelectNode: (id: string, additive: boolean) => void
+  onSetEditing: (id: string | null) => void
   onReorderNode: (draggedId: string, targetId: string) => void
 }) {
   const [collapsed, setCollapsed] = useState(false)
@@ -352,7 +357,10 @@ export function LayersPanel({
           <SearchReplacePanel
             sidebar
             onClose={() => setSearchOpen(false)}
-            onSelectMatch={(blockId) => onSelectNode(blockId, false)}
+            onSelectMatch={(blockId) => {
+              onSelectNode(blockId, false)
+              onSetEditing(blockId)
+            }}
           />
         )}
         <ul className="scripture-layers-tree" role="tree" aria-label="Document layers">

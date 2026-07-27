@@ -34,6 +34,45 @@ export function nextLineIndent(textBeforeCaret: string, tabSize: number): string
   return leading + (opensBlock ? ' '.repeat(normalizeTabSize(tabSize)) : '')
 }
 
+export interface IndentEdit {
+  from: number
+  to: number
+  text: string
+}
+
+/** Zero-based text edits for indenting every selected line. A selection that
+ * ends exactly at the next line start does not unexpectedly include it. */
+export function selectedLineIndentEdits(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+  tabSize: number,
+  outdent: boolean
+): IndentEdit[] {
+  if (selectionEnd < selectionStart) {
+    return selectedLineIndentEdits(text, selectionEnd, selectionStart, tabSize, outdent)
+  }
+
+  const size = normalizeTabSize(tabSize)
+  const firstLineStart = text.lastIndexOf('\n', Math.max(0, selectionStart - 1)) + 1
+  const effectiveEnd =
+    selectionEnd > selectionStart && text[selectionEnd - 1] === '\n'
+      ? selectionEnd - 1
+      : selectionEnd
+  const lineStarts = [firstLineStart]
+  let newline = text.indexOf('\n', firstLineStart)
+  while (newline !== -1 && newline + 1 <= effectiveEnd) {
+    lineStarts.push(newline + 1)
+    newline = text.indexOf('\n', newline + 1)
+  }
+
+  return lineStarts.map((lineStart) => {
+    if (!outdent) return { from: lineStart, to: lineStart, text: ' '.repeat(size) }
+    const spaces = text.slice(lineStart, lineStart + size).match(/^ +/)?.[0].length ?? 0
+    return { from: lineStart, to: lineStart + spaces, text: '' }
+  }).filter((edit) => edit.from !== edit.to || edit.text.length > 0)
+}
+
 export function getTabSize(): number {
   if (typeof window === 'undefined') return DEFAULT_TAB_SIZE
   return normalizeTabSize(window.localStorage.getItem(TAB_SIZE_KEY))

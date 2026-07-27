@@ -1,4 +1,5 @@
-import type { PlainToken } from '@/lib/shiki/tokenize'
+import type { PlainToken } from '@/lib/shiki/token-types'
+import { syntaxStyleRanges } from '../shiki/token-ranges.ts'
 
 export interface SyntaxMarkRange {
   from: number
@@ -21,38 +22,13 @@ export function syntaxMarkRanges(
   lines: PlainToken[][],
   contentStart = 1
 ): SyntaxMarkRange[] {
-  const ranges: SyntaxMarkRange[] = []
-  let offset = 0
-  let tokenizedText = ''
-
-  lines.forEach((line, lineIndex) => {
-    for (const token of line) {
-      tokenizedText += token.content
-      const from = contentStart + offset
-      offset += token.content.length
-
-      if (token.content && (token.color || token.bold || token.italic)) {
-        ranges.push({
-          from,
-          to: contentStart + offset,
-          attrs: {
-            color: token.color ?? null,
-            bold: Boolean(token.bold),
-            italic: Boolean(token.italic),
-          },
-        })
-      }
-    }
-
-    if (lineIndex < lines.length - 1) {
-      tokenizedText += '\n'
-      offset++
-    }
-  })
-
-  if (tokenizedText !== text) {
-    throw new Error('Tokenized text does not exactly match the editor snapshot')
-  }
-
-  return ranges
+  return syntaxStyleRanges(text, lines, null, contentStart).map((range) => ({
+    from: range.from,
+    to: range.to,
+    attrs: {
+      color: range.color,
+      bold: range.bold,
+      italic: range.italic,
+    },
+  }))
 }

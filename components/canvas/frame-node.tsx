@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ContextMenu as ContextMenuPrimitive, DropdownMenu as DropdownMenuPrimitive } from 'radix-ui'
 import { GripVertical, ChevronUp, ChevronDown, Copy, MoreHorizontal, Trash2 } from 'lucide-react'
@@ -371,6 +371,10 @@ export function FrameNode({
   const activeDragCleanupRef = useRef<(() => void) | null>(null)
   const activeMarqueeCleanupRef = useRef<(() => void) | null>(null)
   const { observe: observeGeometry } = useGeometryRegistry()
+  const handleCodeLineClick = useCallback(
+    (lineNumber: number) => onGutterClick(node.id, lineNumber),
+    [node.id, onGutterClick]
+  )
 
   useEffect(() => {
     return () => {
@@ -935,6 +939,7 @@ export function FrameNode({
             blockId={node.id}
             kind={node.kind}
             editable={isEditing}
+            focusOnMount={needsEditGate}
             language={node.language}
             theme={node.theme}
             fontFamily={node.fontFamily}
@@ -949,7 +954,7 @@ export function FrameNode({
             highlightLines={node.highlightLines}
             trimRanges={node.trimRanges}
             diffLines={node.diffLines}
-            onLineClick={(lineNumber) => onGutterClick(node.id, lineNumber)}
+            onLineClick={handleCodeLineClick}
           />
         )}
       </div>

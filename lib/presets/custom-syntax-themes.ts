@@ -79,13 +79,9 @@ export function deleteCustomSyntaxTheme(id: string) {
   writeAll(readAll().filter((t) => t.id !== id))
 }
 
-/** Resolves a code block's stored `theme` string into whatever
- * lib/shiki/tokenize.ts's tokenizeCode expects as its 3rd argument -- a
- * bundled theme name unchanged, or (for "custom:<id>" values) the full,
- * self-contained Shiki theme object built from the saved custom theme, since
- * tokenizeCode is a server action ('use server') with no access to this
- * browser's localStorage. Falls back to the default bundled theme if a
- * custom theme was since deleted but a block still references its id. */
+/** Resolves a code block's stored `theme` string to a bundled theme name or
+ * a full, self-contained Shiki theme object. Falls back to the default theme
+ * if a referenced custom theme has since been deleted. */
 export function resolveThemeArg(theme: string | undefined) {
   const value = theme ?? DEFAULT_THEME
   if (!isCustomThemeValue(value)) return value
@@ -106,4 +102,14 @@ export function resolveThemeBackground(theme: string | undefined): string {
     return getCustomSyntaxTheme(id)?.background ?? THEME_PREVIEWS[DEFAULT_THEME].bg
   }
   return THEME_PREVIEWS[value as keyof typeof THEME_PREVIEWS]?.bg ?? THEME_PREVIEWS[DEFAULT_THEME].bg
+}
+
+/** Immediate text color before worker tokenization finishes. */
+export function resolveThemeForeground(theme: string | undefined): string {
+  const value = theme ?? DEFAULT_THEME
+  if (isCustomThemeValue(value)) {
+    const id = value.slice(CUSTOM_THEME_PREFIX.length)
+    return getCustomSyntaxTheme(id)?.foreground ?? THEME_PREVIEWS[DEFAULT_THEME].fg
+  }
+  return THEME_PREVIEWS[value as keyof typeof THEME_PREVIEWS]?.fg ?? THEME_PREVIEWS[DEFAULT_THEME].fg
 }

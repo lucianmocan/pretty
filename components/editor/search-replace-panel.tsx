@@ -8,9 +8,8 @@ import { Label } from '@/components/ui/label'
 import { useEditorRegistry } from './editor-registry'
 import { findAllMatches, selectMatch, replaceMatch, replaceAllInEditor, type Match } from '@/lib/tiptap/find-replace'
 
-/** Not node-specific, so this lives in the toolbar rather than the
- * Inspector -- it operates across every currently-mounted block's editor
- * via the EditorRegistryProvider each BlockEditor registers into. */
+/** Not node-specific, so this operates across live editors and static canvas
+ * block adapters through the shared registry. */
 export function SearchReplacePanel({
   sidebar = false,
   onClose,
@@ -30,44 +29,66 @@ export function SearchReplacePanel({
   useEffect(() => {
     if (!open) return
     const editors = Array.from(registry.getAll().values())
+    const staticAdapters = Array.from(registry.getStatic().entries())
+      .filter(([blockId]) => !registry.getAll().has(blockId))
+      .map(([, adapter]) => adapter)
     const refresh = () => setRevision((value) => value + 1)
     for (const editor of editors) editor.on('update', refresh)
+    const unsubscribeStatic = staticAdapters.map((adapter) => adapter.subscribe(refresh))
     return () => {
       for (const editor of editors) editor.off('update', refresh)
+      unsubscribeStatic.forEach((unsubscribe) => unsubscribe())
     }
   }, [open, registry])
 
   function getMatches(): Match[] {
-    return findAllMatches(registry.getAll(), query)
+    const liveEditors = registry.getAll()
+    const matches = findAllMatches(liveEditors, query)
+    for (const [blockId, adapter] of registry.getStatic()) {
+      if (liveEditors.has(blockId)) continue
+      matches.push(...adapter.findMatches(query).map((match) => ({ blockId, ...match })))
+    }
+    return matches
   }
 
-  function goTo(index: number) {
+  async function goTo(index: number) {
     const matches = getMatches()
     if (matches.length === 0) return
     const wrapped = ((index % matches.length) + matches.length) % matches.length
     setMatchIndex(wrapped)
     const match = matches[wrapped]
-    const editor = registry.getAll().get(match.blockId)
+    let editor = registry.getAll().get(match.blockId)
+    onSelectMatch?.(match.blockId)
+    if (!editor && registry.getStatic().has(match.blockId)) {
+      editor = (await registry.waitForEditor(match.blockId)) ?? undefined
+    }
     if (editor) {
-      onSelectMatch?.(match.blockId)
       selectMatch(editor, match)
     }
   }
 
-  function handleReplaceCurrent() {
+  async function handleReplaceCurrent() {
     const matches = getMatches()
     if (matches.length === 0) return
     const safeIndex = Math.min(matchIndex, matches.length - 1)
     const match = matches[safeIndex]
-    const editor = registry.getAll().get(match.blockId)
-    if (!editor) return
-    replaceMatch(editor, match, replacement)
+    let editor = registry.getAll().get(match.blockId)
+    onSelectMatch?.(match.blockId)
+    if (!editor && registry.getStatic().has(match.blockId)) {
+      editor = (await registry.waitForEditor(match.blockId)) ?? undefined
+    }
+    if (editor) replaceMatch(editor, match, replacement)
+    else registry.getStatic().get(match.blockId)?.replaceMatch(match, replacement)
     setMatchIndex(0)
   }
 
   function handleReplaceAll() {
-    for (const editor of registry.getAll().values()) {
+    const liveEditors = registry.getAll()
+    for (const editor of liveEditors.values()) {
       replaceAllInEditor(editor, query, replacement)
+    }
+    for (const [blockId, adapter] of registry.getStatic()) {
+      if (!liveEditors.has(blockId)) adapter.replaceAll(query, replacement)
     }
     setMatchIndex(0)
   }
@@ -99,7 +120,7 @@ export function SearchReplacePanel({
               setMatchIndex(0)
             }}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') goTo(safeMatchIndex + 1)
+              if (event.key === 'Enter') void goTo(safeMatchIndex + 1)
               if (event.key === 'Escape') onClose?.()
             }}
           />
@@ -109,10 +130,10 @@ export function SearchReplacePanel({
             {matches.length > 0 ? `Match ${safeMatchIndex + 1} of ${matches.length}` : 'No matches'}
           </span>
           <div className="flex gap-1">
-            <Button variant="ghost" size="icon-xs" onClick={() => goTo(safeMatchIndex - 1)} aria-label="Previous match">
+            <Button variant="ghost" size="icon-xs" onClick={() => void goTo(safeMatchIndex - 1)} aria-label="Previous match">
               <ChevronUp />
             </Button>
-            <Button variant="ghost" size="icon-xs" onClick={() => goTo(safeMatchIndex + 1)} aria-label="Next match">
+            <Button variant="ghost" size="icon-xs" onClick={() => void goTo(safeMatchIndex + 1)} aria-label="Next match">
               <ChevronDown />
             </Button>
           </div>
@@ -128,7 +149,7 @@ export function SearchReplacePanel({
           />
         </div>
         <div className="scripture-inspector-actions">
-          <Button variant="outline" size="sm" className="w-full" disabled={matches.length === 0} onClick={handleReplaceCurrent}>
+          <Button variant="outline" size="sm" className="w-full" disabled={matches.length === 0} onClick={() => void handleReplaceCurrent()}>
             Replace
           </Button>
           <Button variant="outline" size="sm" className="w-full" disabled={matches.length === 0} onClick={handleReplaceAll}>
@@ -151,7 +172,7 @@ export function SearchReplacePanel({
           setMatchIndex(0)
         }}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') goTo(safeMatchIndex + 1)
+          if (e.key === 'Enter') void goTo(safeMatchIndex + 1)
           if (e.key === 'Escape') setOpen(false)
         }}
       />
@@ -162,13 +183,13 @@ export function SearchReplacePanel({
         onChange={(e) => setReplacement(e.target.value)}
       />
       <span className="scripture-search-count">{matches.length > 0 ? `${safeMatchIndex + 1}/${matches.length}` : '0/0'}</span>
-      <Button variant="ghost" size="icon-xs" onClick={() => goTo(safeMatchIndex - 1)} aria-label="Previous match">
+      <Button variant="ghost" size="icon-xs" onClick={() => void goTo(safeMatchIndex - 1)} aria-label="Previous match">
         <ChevronUp />
       </Button>
-      <Button variant="ghost" size="icon-xs" onClick={() => goTo(safeMatchIndex + 1)} aria-label="Next match">
+      <Button variant="ghost" size="icon-xs" onClick={() => void goTo(safeMatchIndex + 1)} aria-label="Next match">
         <ChevronDown />
       </Button>
-      <Button variant="outline" size="sm" disabled={matches.length === 0} onClick={handleReplaceCurrent}>
+      <Button variant="outline" size="sm" disabled={matches.length === 0} onClick={() => void handleReplaceCurrent()}>
         Replace
       </Button>
       <Button variant="outline" size="sm" disabled={matches.length === 0} onClick={handleReplaceAll}>

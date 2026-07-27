@@ -845,6 +845,7 @@ export default function DocumentEditorPage() {
               onDeletePage={handleRemovePage}
               onReorderPages={handleReorderPages}
               onSelectNode={handleSelect}
+              onSetEditing={setEditingId}
               onReorderNode={handleReorder}
             />
             <div className="scripture-canvas-stage">

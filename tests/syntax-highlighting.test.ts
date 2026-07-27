@@ -1,7 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import type { PlainToken } from '../lib/shiki/tokenize.ts'
+import type { PlainToken } from '../lib/shiki/token-types.ts'
 import { syntaxMarkRanges } from '../lib/tiptap/syntax-highlighting.ts'
+import {
+  plainTextFromDocument,
+  withSyntaxRanges,
+} from '../lib/tiptap/syntax-document.ts'
+import { syntaxStyleRanges } from '../lib/shiki/token-ranges.ts'
 
 const token = (
   content: string,
@@ -53,4 +58,60 @@ test('rejects token output that differs from editor text', () => {
     () => syntaxMarkRanges('const value = {}', [[token('const value = {}}')]]),
     /does not exactly match/
   )
+})
+
+test('omits inherited foreground runs and merges adjacent equal styles', () => {
+  const text = 'const value'
+  const ranges = syntaxStyleRanges(text, [[
+    token('const', '#ff79c6'),
+    token(' ', '#f8f8f2'),
+    token('val', '#50fa7b'),
+    token('ue', '#50FA7B'),
+  ]], '#F8F8F2')
+
+  assert.deepEqual(ranges, [
+    { from: 0, to: 5, color: '#ff79c6', bold: false, italic: false },
+    { from: 6, to: 11, color: '#50fa7b', bold: false, italic: false },
+  ])
+})
+
+test('builds an export snapshot without mutating text or authored marks', () => {
+  const document = {
+    type: 'doc',
+    content: [{
+      type: 'annotatedCodeBlock',
+      attrs: { language: 'javascript' },
+      content: [
+        { type: 'text', text: 'const ', marks: [{ type: 'bold' }] },
+        {
+          type: 'text',
+          text: 'value = 1',
+          marks: [{ type: 'syntaxColor', attrs: { color: '#old' } }],
+        },
+      ],
+    }],
+  }
+  const original = JSON.stringify(document)
+  const lines = [[
+    token('const', '#ff79c6'),
+    token(' value = ' , null),
+    token('1', '#bd93f9'),
+  ]]
+  const highlighted = withSyntaxRanges(
+    document,
+    syntaxStyleRanges('const value = 1', lines)
+  )
+
+  assert.equal(plainTextFromDocument(highlighted), 'const value = 1')
+  assert.equal(JSON.stringify(document), original)
+  assert.doesNotMatch(JSON.stringify(highlighted), /#old/)
+  assert.match(JSON.stringify(highlighted), /#ff79c6/)
+  assert.match(JSON.stringify(highlighted), /#bd93f9/)
+
+  const firstBlock = highlighted.content?.[0]
+  const boldText = firstBlock?.content
+    ?.filter((node) => node.marks?.some((mark) => mark.type === 'bold'))
+    .map((node) => node.text)
+    .join('')
+  assert.equal(boldText, 'const ')
 })

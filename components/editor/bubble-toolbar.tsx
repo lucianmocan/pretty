@@ -1,7 +1,7 @@
 'use client'
 
 import { BubbleMenu } from '@tiptap/react/menus'
-import type { Editor } from '@tiptap/react'
+import { useEditorState, type Editor } from '@tiptap/react'
 import { Bold, Italic, Ban, Minus, Plus } from 'lucide-react'
 import { Toggle } from '@/components/ui/toggle'
 import { Button } from '@/components/ui/button'
@@ -27,6 +27,14 @@ function currentFontSize(editor: Editor): number {
 }
 
 export function BubbleToolbar({ editor }: { editor: Editor }) {
+  const toolbarState = useEditorState({
+    editor,
+    selector: ({ editor: currentEditor }) => ({
+      bold: currentEditor.isActive('bold'),
+      italic: currentEditor.isActive('italic'),
+      fontSize: currentFontSize(currentEditor),
+    }),
+  })
   const adjustFontSize = (delta: number) => {
     const next = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, currentFontSize(editor) + delta))
     editor.chain().focus().setFontSize(`${next}px`).run()
@@ -48,7 +56,7 @@ export function BubbleToolbar({ editor }: { editor: Editor }) {
         <TooltipTrigger asChild>
           <Toggle
             size="sm"
-            pressed={editor.isActive('bold')}
+            pressed={toolbarState.bold}
             onMouseDown={(e) => e.preventDefault()}
             onPressedChange={() => editor.chain().focus().toggleBold().run()}
             aria-label="Bold"
@@ -62,7 +70,7 @@ export function BubbleToolbar({ editor }: { editor: Editor }) {
         <TooltipTrigger asChild>
           <Toggle
             size="sm"
-            pressed={editor.isActive('italic')}
+            pressed={toolbarState.italic}
             onMouseDown={(e) => e.preventDefault()}
             onPressedChange={() => editor.chain().focus().toggleItalic().run()}
             aria-label="Italic"
@@ -121,7 +129,7 @@ export function BubbleToolbar({ editor }: { editor: Editor }) {
         </TooltipTrigger>
         <TooltipContent>Decrease font size</TooltipContent>
       </Tooltip>
-      <span className="scripture-font-size">{currentFontSize(editor)}px</span>
+      <span className="scripture-font-size">{toolbarState.fontSize}px</span>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

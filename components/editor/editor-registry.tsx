@@ -1,36 +1,84 @@
 'use client'
 
-import { createContext, useCallback, useContext, useRef, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useMemo, useRef, type ReactNode } from 'react'
 import type { Editor } from '@tiptap/react'
+import type { LocalMatch } from '@/lib/tiptap/find-replace'
+
+export interface StaticEditorAdapter {
+  getText: () => string
+  findMatches: (query: string) => LocalMatch[]
+  replaceMatch: (match: LocalMatch, replacement: string) => void
+  replaceAll: (query: string, replacement: string) => number
+  subscribe: (listener: () => void) => () => void
+}
 
 interface EditorRegistryValue {
   register: (blockId: string, editor: Editor) => void
-  unregister: (blockId: string) => void
+  unregister: (blockId: string, editor: Editor) => void
+  registerStatic: (blockId: string, adapter: StaticEditorAdapter) => void
+  unregisterStatic: (blockId: string, adapter: StaticEditorAdapter) => void
   getAll: () => Map<string, Editor>
+  getStatic: () => Map<string, StaticEditorAdapter>
+  waitForEditor: (blockId: string, timeoutMs?: number) => Promise<Editor | null>
 }
 
 const EditorRegistryContext = createContext<EditorRegistryValue | null>(null)
 
 /**
- * Every block renders its own live Tiptap instance simultaneously (see
- * BlockEditor) -- this registry is how a page-level feature that isn't
- * node-specific (search/replace) can reach all of them, keyed by block id.
- * A plain ref-backed Map, not state -- registering an editor shouldn't
- * itself trigger a re-render.
+ * Live editors and lightweight static block adapters share this registry so
+ * document-wide search keeps working when inactive canvas editors unmount.
  */
 export function EditorRegistryProvider({ children }: { children: ReactNode }) {
   const mapRef = useRef(new Map<string, Editor>())
+  const staticMapRef = useRef(new Map<string, StaticEditorAdapter>())
+  const waitersRef = useRef(new Map<string, Set<(editor: Editor | null) => void>>())
 
   const register = useCallback((blockId: string, editor: Editor) => {
     mapRef.current.set(blockId, editor)
+    const waiters = waitersRef.current.get(blockId)
+    if (waiters) {
+      waiters.forEach((resolve) => resolve(editor))
+      waitersRef.current.delete(blockId)
+    }
   }, [])
-  const unregister = useCallback((blockId: string) => {
-    mapRef.current.delete(blockId)
+  const unregister = useCallback((blockId: string, editor: Editor) => {
+    if (mapRef.current.get(blockId) === editor) mapRef.current.delete(blockId)
+  }, [])
+  const registerStatic = useCallback((blockId: string, adapter: StaticEditorAdapter) => {
+    staticMapRef.current.set(blockId, adapter)
+  }, [])
+  const unregisterStatic = useCallback((blockId: string, adapter: StaticEditorAdapter) => {
+    if (staticMapRef.current.get(blockId) === adapter) staticMapRef.current.delete(blockId)
   }, [])
   const getAll = useCallback(() => mapRef.current, [])
+  const getStatic = useCallback(() => staticMapRef.current, [])
+  const waitForEditor = useCallback((blockId: string, timeoutMs = 1200) => {
+    const current = mapRef.current.get(blockId)
+    if (current) return Promise.resolve(current)
+    return new Promise<Editor | null>((resolve) => {
+      const waiters = waitersRef.current.get(blockId) ?? new Set()
+      waiters.add(resolve)
+      waitersRef.current.set(blockId, waiters)
+      window.setTimeout(() => {
+        const pendingWaiters = waitersRef.current.get(blockId)
+        if (!pendingWaiters?.delete(resolve)) return
+        if (pendingWaiters.size === 0) waitersRef.current.delete(blockId)
+        resolve(null)
+      }, timeoutMs)
+    })
+  }, [])
+  const value = useMemo(() => ({
+    register,
+    unregister,
+    registerStatic,
+    unregisterStatic,
+    getAll,
+    getStatic,
+    waitForEditor,
+  }), [getAll, getStatic, register, registerStatic, unregister, unregisterStatic, waitForEditor])
 
   return (
-    <EditorRegistryContext.Provider value={{ register, unregister, getAll }}>
+    <EditorRegistryContext.Provider value={value}>
       {children}
     </EditorRegistryContext.Provider>
   )

@@ -3,12 +3,18 @@
 import type { JSONContent } from '@tiptap/core'
 import { yXmlFragmentToProsemirrorJSON } from '@tiptap/y-tiptap'
 import type { LayoutNode } from '@/lib/layout/types'
-import { resolveThemeBackground } from '@/lib/presets/custom-syntax-themes'
+import {
+  resolveThemeArg,
+  resolveThemeBackground,
+} from '@/lib/presets/custom-syntax-themes'
 import { getYDoc, blockFragmentName } from '@/lib/yjs/doc-store'
 import { toPlainTree } from '@/lib/yjs/layout-store'
 import { getDocumentMeta, type DocumentMeta } from './manifest'
+import { tokenizeCodeInWorker } from '@/lib/shiki/client-tokenizer'
+import type { SyntaxStyleRange } from '@/lib/shiki/token-types'
+import { plainTextFromDocument } from '@/lib/tiptap/syntax-document'
 
-const CACHE_VERSION = 1
+const CACHE_VERSION = 2
 const CACHE_PREFIX = 'scripture:document-preview:'
 const PREVIEW_WIDTH = 640
 const PREVIEW_HEIGHT = 400
@@ -121,19 +127,81 @@ function extractPreviewLines(content: JSONContent): PreviewLines {
   return lines.slice(0, MAX_PREVIEW_LINES)
 }
 
-function collectPreviewContent(tree: LayoutNode, doc: ReturnType<typeof getYDoc>['doc']): PreviewContent {
-  const result: PreviewContent = {}
+function syntaxRangesToPreview(text: string, ranges: SyntaxStyleRange[]): PreviewLines {
+  const result: PreviewLines = []
+  let lineStart = 0
+  let rangeIndex = 0
 
-  function visit(node: LayoutNode) {
-    if (node.kind === 'code' || node.kind === 'text') {
-      const fragment = doc.getXmlFragment(blockFragmentName(node.id))
-      result[node.id] = extractPreviewLines(yXmlFragmentToProsemirrorJSON(fragment))
+  for (const line of text.split('\n').slice(0, MAX_PREVIEW_LINES)) {
+    const visibleLength = Math.min(line.length, MAX_LINE_CHARACTERS)
+    const lineEnd = lineStart + visibleLength
+    const boundaries = new Set([lineStart, lineEnd])
+    for (let index = rangeIndex; index < ranges.length; index += 1) {
+      const range = ranges[index]
+      if (range.from >= lineEnd) break
+      if (range.to > lineStart) {
+        boundaries.add(Math.max(lineStart, range.from))
+        boundaries.add(Math.min(lineEnd, range.to))
+      }
     }
+
+    const points = [...boundaries].sort((left, right) => left - right)
+    const runs: PreviewRun[] = []
+    for (let index = 0; index < points.length - 1; index += 1) {
+      const from = points[index]
+      const to = points[index + 1]
+      while (ranges[rangeIndex] && ranges[rangeIndex].to <= from) rangeIndex += 1
+      const range = ranges[rangeIndex]
+      const style = range && range.from <= from && range.to >= to ? range : null
+      if (to > from) {
+        runs.push({
+          text: text.slice(from, to),
+          color: style?.color ?? undefined,
+          bold: style?.bold,
+          italic: style?.italic,
+        })
+      }
+    }
+    result.push(runs)
+    lineStart += line.length + 1
+  }
+  return result
+}
+
+async function collectPreviewContent(
+  tree: LayoutNode,
+  doc: ReturnType<typeof getYDoc>['doc']
+): Promise<PreviewContent> {
+  const leaves: LayoutNode[] = []
+  function visit(node: LayoutNode) {
+    if (node.kind === 'code' || node.kind === 'text') leaves.push(node)
     node.children?.forEach(visit)
   }
-
   visit(tree)
-  return result
+
+  const entries = await Promise.all(
+    leaves.map(async (node) => {
+      const document = yXmlFragmentToProsemirrorJSON(
+        doc.getXmlFragment(blockFragmentName(node.id))
+      )
+      if (node.kind !== 'code') {
+        return [node.id, extractPreviewLines(document)] as const
+      }
+
+      try {
+        const result = await tokenizeCodeInWorker(
+          plainTextFromDocument(document),
+          node.language ?? 'plaintext',
+          resolveThemeArg(node.theme),
+          { priority: 'background' }
+        )
+        return [node.id, syntaxRangesToPreview(plainTextFromDocument(document), result.ranges)] as const
+      } catch {
+        return [node.id, extractPreviewLines(document)] as const
+      }
+    })
+  )
+  return Object.fromEntries(entries)
 }
 
 function collectImageSources(node: LayoutNode, result = new Set<string>()): Set<string> {
@@ -446,8 +514,10 @@ async function generateDocumentPreview(meta: DocumentMeta): Promise<string | nul
   const context = canvas.getContext('2d')
   if (!context) return null
 
-  const content = collectPreviewContent(tree, doc)
-  const images = await loadPreviewImages(tree)
+  const [content, images] = await Promise.all([
+    collectPreviewContent(tree, doc),
+    loadPreviewImages(tree),
+  ])
   const logicalWidth = Math.max(1, tree.width ?? PREVIEW_WIDTH)
   const logicalHeight = Math.max(1, tree.height ?? PREVIEW_HEIGHT)
   const scale = Math.min(PREVIEW_WIDTH / logicalWidth, PREVIEW_HEIGHT / logicalHeight)

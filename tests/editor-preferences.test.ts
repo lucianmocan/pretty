@@ -5,6 +5,7 @@ import {
   indentationBackspaceCount,
   nextLineIndent,
   normalizeTabSize,
+  selectedLineIndentEdits,
 } from '../lib/editor-preferences.ts'
 
 test('accepts preset and custom editor tab sizes', () => {
@@ -43,4 +44,23 @@ test('automatic indentation carries whitespace and indents opening brackets', ()
   assert.equal(nextLineIndent('  if (ready) {', 2), '    ')
   assert.equal(nextLineIndent('call(', 4), '    ')
   assert.equal(nextLineIndent('line\n    item', 4), '    ')
+})
+
+function applyEdits(text: string, edits: ReturnType<typeof selectedLineIndentEdits>): string {
+  return [...edits]
+    .reverse()
+    .reduce((result, edit) => result.slice(0, edit.from) + edit.text + result.slice(edit.to), text)
+}
+
+test('tab indents every selected line without replacing its text', () => {
+  const text = 'first\nsecond\nthird'
+  const edits = selectedLineIndentEdits(text, 1, 12, 2, false)
+  assert.equal(applyEdits(text, edits), '  first\n  second\nthird')
+})
+
+test('shift-tab outdents every selected line and ignores an excluded trailing line', () => {
+  const text = '  first\n    second\n  third'
+  const thirdLineStart = text.indexOf('  third')
+  const edits = selectedLineIndentEdits(text, 0, thirdLineStart, 2, true)
+  assert.equal(applyEdits(text, edits), 'first\n  second\n  third')
 })

@@ -112,9 +112,9 @@ function SyntaxThemeEditor() {
     setDraft(null)
   }
 
-  // Debounced re-tokenize with the IN-PROGRESS (possibly unsaved) draft --
-  // same tokenizeCode call every other re-highlight path already uses, just
-  // fed the draft object directly instead of resolving a stored theme id.
+  // Debounced re-tokenize with the in-progress (possibly unsaved) draft.
+  // This intentionally uses a disposable server-side highlighter so each
+  // color-picker movement does not permanently grow the editor worker cache.
   useEffect(() => {
     // No setPreview(null) here for the !draft case -- the JSX below already
     // gates rendering on `draft &&`, so a stale preview value lingering in
@@ -217,7 +217,13 @@ function SyntaxThemeEditor() {
         )}
       </div>
 
-      <div className="scripture-customize-preview" style={{ background: draft?.background ?? '#1e1e1e' }}>
+      <div
+        className="scripture-customize-preview"
+        style={{
+          background: draft?.background ?? '#1e1e1e',
+          color: draft?.foreground ?? '#f8f8f2',
+        }}
+      >
         {draft && preview ? (
           <TokenPreview lines={preview} />
         ) : (

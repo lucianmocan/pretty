@@ -1,92 +1,56 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { useEditor, useEditorState, EditorContent, type Editor } from '@tiptap/react'
-import type { EditorView } from '@tiptap/pm/view'
-import type { Transaction } from '@tiptap/pm/state'
 import { Collaboration } from '@tiptap/extension-collaboration'
+import { TextSelection } from '@tiptap/pm/state'
 import { getYDoc, getUndoManager, blockFragmentName } from '@/lib/yjs/doc-store'
 import { baseExtensions } from '@/lib/tiptap/extensions'
-import { tokenizeCode } from '@/lib/shiki/tokenize'
-import { syntaxMarkRanges } from '@/lib/tiptap/syntax-highlighting'
+import { tokenizeCodeInWorker } from '@/lib/shiki/client-tokenizer'
+import { useSyntaxPriority } from '@/lib/shiki/use-syntax-priority'
+import {
+  SyntaxDecorations,
+  applySyntaxDecorations,
+} from '@/lib/tiptap/extensions/syntax-decorations'
 import { BubbleToolbar } from './bubble-toolbar'
 import { CodeChrome } from './code-chrome'
 import { DEFAULT_THEME } from '@/lib/presets'
-import { resolveThemeArg } from '@/lib/presets/custom-syntax-themes'
+import {
+  resolveThemeArg,
+  resolveThemeForeground,
+  subscribeToCustomSyntaxThemes,
+} from '@/lib/presets/custom-syntax-themes'
 import type { ChromeStyle, CustomChromeStyle } from '@/lib/layout/types'
 import { useEditorRegistry } from './editor-registry'
-import { indentationBackspaceCount, nextLineIndent, useAutoIndent, useTabSize } from '@/lib/editor-preferences'
+import {
+  indentationBackspaceCount,
+  nextLineIndent,
+  selectedLineIndentEdits,
+  useAutoIndent,
+  useTabSize,
+} from '@/lib/editor-preferences'
+import { StaticBlockEditor } from './static-block-editor'
 
-const RETOKENIZE_DEBOUNCE_MS = 350
+const RETOKENIZE_DEBOUNCE_MS = 140
+const RETOKENIZE_RETRY_MS = 900
+const MAX_RETOKENIZE_RETRIES = 2
 
-/** Preserve browser focus if this editor owned it immediately before a
- * cosmetic mark transaction, but never steal it after the user moved away. */
-function dispatchPreservingFocus(view: EditorView, transaction: Transaction) {
-  const hadFocus = view.hasFocus()
-  view.dispatch(transaction)
-  if (!hadFocus) return
-  const restoreDroppedFocus = () => {
-    if (view.isDestroyed || view.hasFocus()) return
-    const active = document.activeElement
-    // A programmatic DOM rebuild drops focus to the document body. If focus
-    // belongs to another actual control, the user moved it intentionally.
-    if (!active || active === document.body || active === document.documentElement) view.focus()
-  }
-  restoreDroppedFocus()
-  queueMicrotask(restoreDroppedFocus)
-}
-
-/** Applies Shiki output as marks only. This function has no operation capable
- * of inserting or deleting a character, which keeps async highlighting safe
- * during fast typing, browser composition, and Yjs synchronization. */
-function applyTokenizedMarks(
-  view: EditorView,
-  text: string,
-  language: string,
-  lines: Awaited<ReturnType<typeof tokenizeCode>>['lines']
-) {
-  if (view.state.doc.textContent !== text) return false
-
-  const ranges = syntaxMarkRanges(text, lines)
-  const syntaxColor = view.state.schema.marks.syntaxColor
-  let tr = view.state.tr
-  const contentEnd = 1 + text.length
-
-  if (text.length) tr = tr.removeMark(1, contentEnd, syntaxColor)
-  for (const range of ranges) {
-    tr = tr.addMark(range.from, range.to, syntaxColor.create(range.attrs))
-  }
-
-  const block = tr.doc.firstChild
-  if (block && block.type.name === 'annotatedCodeBlock' && block.attrs.language !== language) {
-    tr = tr.setNodeMarkup(0, undefined, { ...block.attrs, language })
-  }
-
-  // Syntax paint should persist and collaborate, but Cmd/Ctrl+Z must undo
-  // the user's last edit rather than an invisible highlighting transaction.
-  tr = tr.setMeta('addToHistory', false)
-
-  // Runtime safety belt: future refactors must preserve this invariant too.
-  if (tr.doc.textContent !== text) {
-    throw new Error('Syntax highlighting attempted to change editor text')
-  }
-
-  if (tr.steps.length) dispatchPreservingFocus(view, tr)
-  return true
+function themeIdentity(theme: ReturnType<typeof resolveThemeArg>): string {
+  return typeof theme === 'string' ? theme : String(theme.name)
 }
 
 export type BlockKind = 'code' | 'text'
 
-interface BlockEditorProps {
+export interface BlockEditorProps {
   docId: string
   blockId: string
   kind: BlockKind
   // Figma-style selection model (canvas-mode blocks only; frame-node.tsx
   // always passes true for flex-mode blocks, which stay always-editable).
-  // false means "selected but not text-editing" -- contenteditable is
-  // turned off so plain click+drag on the block means "move it" instead of
-  // "place a text cursor", exactly like clicking a shape in Figma.
+  // false means "selected but not text-editing" and uses the lightweight
+  // static renderer, so dragging moves the block instead of placing a cursor.
   editable?: boolean
+  focusOnMount?: boolean
   language?: string
   theme?: string
   fontFamily?: string
@@ -105,12 +69,12 @@ interface BlockEditorProps {
 }
 
 /**
- * One Tiptap instance per block, each bound to its own top-level Y.XmlFragment
+ * One active Tiptap instance per editable block, bound to its top-level Y.XmlFragment
  * (keyed by blockId) within the SAME Y.Doc, all sharing one Y.UndoManager
  * (see lib/yjs/doc-store.ts) -- that's what gives the whole canvas one
  * unified undo history instead of one per block.
  */
-export function BlockEditor({
+function InteractiveBlockEditor({
   docId,
   blockId,
   kind,
@@ -130,8 +94,14 @@ export function BlockEditor({
   trimRanges = [],
   diffLines = {},
   onLineClick,
+  focusOnMount = false,
 }: BlockEditorProps) {
   const [synced, setSynced] = useState(false)
+  const [customThemeRevision, setCustomThemeRevision] = useState(0)
+  const { elementRef: syntaxElementRef, priority: syntaxWorkPriority } =
+    useSyntaxPriority(kind === 'code' && synced)
+  const syntaxPriorityRef = useRef(syntaxWorkPriority)
+  syntaxPriorityRef.current = syntaxWorkPriority
   const tabSize = useTabSize()
   const autoIndent = useAutoIndent()
   const tabSizeRef = useRef(tabSize)
@@ -147,27 +117,31 @@ export function BlockEditor({
   const fragment = ydoc.getXmlFragment(blockFragmentName(blockId))
   const undoManager = getUndoManager(docId)
 
-  // `isRetokenizingRef` guards against reacting to our own mark-only
-  // transactions. `prevTextRef` is the last highlighted text snapshot.
-  const isRetokenizingRef = useRef(false)
-  const prevTextRef = useRef<string | null>(null)
+  const lastHighlightedRef = useRef<{
+    text: string
+    language: string
+    theme: string
+  } | null>(null)
   const retokenizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Guards against an OLDER, slower rehighlightCode call resolving
-  // AFTER a newer one already started (the debounce timer only prevents two
-  // calls being SCHEDULED at once -- once a timer fires and the async
-  // tokenizeCode() call is in flight, a slow cold grammar load can easily
-  // still be pending when the NEXT debounce window elapses and starts a
-  // second call). Every competing async path bumps this first, so stale
-  // highlighting is skipped.
+  const retokenizeAbortRef = useRef<AbortController | null>(null)
   const retokenizeGenerationRef = useRef(0)
+  const retokenizeRetryRef = useRef(0)
 
   useEffect(() => {
     const generationRef = retokenizeGenerationRef
     return () => {
       if (retokenizeTimerRef.current) clearTimeout(retokenizeTimerRef.current)
+      retokenizeAbortRef.current?.abort()
       generationRef.current++
     }
   }, [])
+
+  useEffect(() => {
+    if (kind !== 'code') return
+    return subscribeToCustomSyntaxThemes(() => {
+      setCustomThemeRevision((revision) => revision + 1)
+    })
+  }, [kind])
 
   useEffect(() => {
     let cancelled = false
@@ -180,65 +154,98 @@ export function BlockEditor({
   }, [docId])
 
   async function rehighlightCode(editor: Editor) {
-    // Avoid repainting syntax spans while the browser is painting a range
-    // selection. onSelectionUpdate schedules the pending pass after collapse.
-    if (!editor.state.selection.empty) return
     if (editor.view.composing) {
-      scheduleRetokenize(editor)
+      scheduleRetokenize(editor, 80, false)
       return
     }
 
     const text = editor.state.doc.textContent
-    if (prevTextRef.current === text) return
+    const currentLanguage = languageRef.current ?? 'plaintext'
+    const currentTheme = resolveThemeArg(themeRef.current)
+    const currentThemeIdentity = themeIdentity(currentTheme)
+    const lastHighlighted = lastHighlightedRef.current
+    if (
+      lastHighlighted?.text === text &&
+      lastHighlighted.language === currentLanguage &&
+      lastHighlighted.theme === currentThemeIdentity
+    ) {
+      return
+    }
 
     const generation = ++retokenizeGenerationRef.current
+    retokenizeAbortRef.current?.abort()
+    const controller = new AbortController()
+    retokenizeAbortRef.current = controller
     try {
-      const { lines } = await tokenizeCode(
+      const { ranges } = await tokenizeCodeInWorker(
         text,
-        languageRef.current ?? 'plaintext',
-        resolveThemeArg(themeRef.current)
+        currentLanguage,
+        currentTheme,
+        {
+          signal: controller.signal,
+          priority: editor.view.hasFocus() ? 'focused' : syntaxPriorityRef.current,
+        }
       )
 
-      // More keystrokes may arrive while tokenization is in flight. Never
-      // apply ranges calculated for an older document snapshot.
       if (
         generation !== retokenizeGenerationRef.current ||
         editor.state.doc.textContent !== text ||
-        !editor.state.selection.empty ||
         editor.view.composing
       ) {
-        if (editor.view.composing) scheduleRetokenize(editor)
+        if (editor.view.composing) scheduleRetokenize(editor, 80, false)
         return
       }
 
-      isRetokenizingRef.current = true
-      try {
-        applyTokenizedMarks(editor.view, text, languageRef.current ?? 'plaintext', lines)
-      } finally {
-        isRetokenizingRef.current = false
+      if (!applySyntaxDecorations(editor.view, text, ranges)) return
+      lastHighlightedRef.current = {
+        text,
+        language: currentLanguage,
+        theme: currentThemeIdentity,
       }
-
-      prevTextRef.current = text
+      retokenizeRetryRef.current = 0
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return
       console.error('Failed to re-highlight edited code', err)
-      if (generation === retokenizeGenerationRef.current) prevTextRef.current = text
+      if (
+        generation === retokenizeGenerationRef.current &&
+        retokenizeRetryRef.current < MAX_RETOKENIZE_RETRIES
+      ) {
+        retokenizeRetryRef.current++
+        scheduleRetokenize(
+          editor,
+          RETOKENIZE_RETRY_MS * retokenizeRetryRef.current,
+          false
+        )
+      }
+    } finally {
+      if (retokenizeAbortRef.current === controller) retokenizeAbortRef.current = null
     }
   }
 
-  function scheduleRetokenize(editor: Editor) {
+  function scheduleRetokenize(
+    editor: Editor,
+    delay = RETOKENIZE_DEBOUNCE_MS,
+    invalidateInFlight = true
+  ) {
     if (retokenizeTimerRef.current) clearTimeout(retokenizeTimerRef.current)
+    if (invalidateInFlight) {
+      retokenizeAbortRef.current?.abort()
+      retokenizeGenerationRef.current++
+    }
     retokenizeTimerRef.current = setTimeout(() => {
       retokenizeTimerRef.current = null
       if (!editor.isDestroyed) void rehighlightCode(editor)
-    }, RETOKENIZE_DEBOUNCE_MS)
+    }, delay)
   }
 
   const editor = useEditor(
     {
       immediatelyRender: false,
+      shouldRerenderOnTransaction: false,
       editable,
       extensions: [
         ...baseExtensions(),
+        ...(kind === 'code' ? [SyntaxDecorations] : []),
         Collaboration.configure({ fragment, yUndoOptions: { undoManager } }),
       ],
       editorProps: {
@@ -274,25 +281,34 @@ export function BlockEditor({
           if (event.key !== 'Tab') return false
           event.preventDefault()
 
-          const { from, to, $from } = view.state.selection
+          const { from, to } = view.state.selection
           const currentTabSize = tabSizeRef.current
-          if (!event.shiftKey) {
+          if (!event.shiftKey && from === to) {
             view.dispatch(view.state.tr.insertText(' '.repeat(currentTabSize), from, to).scrollIntoView())
             return true
           }
 
-          // Shift+Tab removes up to one configured indent from the current
-          // line and is still consumed when the line is already flush-left,
-          // so focus never escapes the code editor in either direction.
-          const parentStart = from - $from.parentOffset
-          const textBeforeCaret = $from.parent.textBetween(0, $from.parentOffset, '\n', '\n')
-          const lineStart = parentStart + textBeforeCaret.lastIndexOf('\n') + 1
-          const prefix = view.state.doc.textBetween(
-            lineStart,
-            Math.min(lineStart + currentTabSize, view.state.doc.content.size)
+          const edits = selectedLineIndentEdits(
+            view.state.doc.textContent,
+            from - 1,
+            to - 1,
+            currentTabSize,
+            event.shiftKey
           )
-          const spaces = prefix.match(new RegExp(`^ {1,${currentTabSize}}`))?.[0].length ?? 0
-          if (spaces > 0) view.dispatch(view.state.tr.delete(lineStart, lineStart + spaces).scrollIntoView())
+          if (edits.length === 0) return true
+
+          let transaction = view.state.tr
+          for (const edit of [...edits].reverse()) {
+            transaction = transaction.insertText(edit.text, edit.from + 1, edit.to + 1)
+          }
+          transaction = transaction.setSelection(
+            TextSelection.create(
+              transaction.doc,
+              transaction.mapping.map(from),
+              transaction.mapping.map(to)
+            )
+          )
+          view.dispatch(transaction.scrollIntoView())
           return true
         },
         handlePaste(view, event) {
@@ -303,13 +319,8 @@ export function BlockEditor({
           event.preventDefault()
 
           // Paste behaves like a normal text editor: insert at the caret, or
-          // replace only the active selection. Syntax colors are applied by
-          // the same debounced mark-only pass used for regular typing.
-          if (retokenizeTimerRef.current) {
-            clearTimeout(retokenizeTimerRef.current)
-            retokenizeTimerRef.current = null
-          }
-          retokenizeGenerationRef.current++
+          // replace only the active selection. The normal update hook queues
+          // a fresh, non-document-mutating syntax decoration pass.
           const { from, to } = view.state.selection
           view.dispatch(view.state.tr.insertText(text, from, to).scrollIntoView())
 
@@ -318,32 +329,11 @@ export function BlockEditor({
       },
       onUpdate({ editor }) {
         if (kind !== 'code') return
-        if (isRetokenizingRef.current || prevTextRef.current === null) {
-          // Our own programmatic syntax-mark dispatch
-          // or the very first update after content was seeded --
-          // resync the baseline, don't treat it as an edit to re-highlight.
-          prevTextRef.current = editor.state.doc.textContent
-          return
-        }
+        retokenizeRetryRef.current = 0
         scheduleRetokenize(editor)
       },
-      onSelectionUpdate({ editor }) {
-        if (kind !== 'code') return
-        if (!editor.state.selection.empty) {
-          if (retokenizeTimerRef.current) {
-            clearTimeout(retokenizeTimerRef.current)
-            retokenizeTimerRef.current = null
-          }
-          // Also invalidates a tokenizer request that was already in flight.
-          retokenizeGenerationRef.current++
-          return
-        }
-        if (
-          prevTextRef.current !== null &&
-          prevTextRef.current !== editor.state.doc.textContent
-        ) {
-          scheduleRetokenize(editor)
-        }
+      onFocus({ editor }) {
+        if (kind === 'code') scheduleRetokenize(editor, 0)
       },
     },
     [fragment, undoManager]
@@ -356,7 +346,7 @@ export function BlockEditor({
   useEffect(() => {
     if (!editor) return
     registry.register(blockId, editor)
-    return () => registry.unregister(blockId)
+    return () => registry.unregister(blockId, editor)
   }, [editor, blockId, registry])
 
   // useEditor's initial config value only applies on creation -- toggling
@@ -367,18 +357,9 @@ export function BlockEditor({
     editor?.setEditable(editable)
   }, [editor, editable])
 
-  // Auto-focuses when a block transitions INTO edit mode (double-click on an
-  // existing, already-populated block) -- skips the very first render, so a
-  // block that simply mounts already-editable (every flex-mode block, always)
-  // doesn't steal focus just by existing. Brand-new empty blocks get their
-  // own focus() call below instead, right after seeding their initial content.
-  const prevEditableRef = useRef(editable)
   useEffect(() => {
-    if (!editor) return
-    const wasEditable = prevEditableRef.current
-    prevEditableRef.current = editable
-    if (!wasEditable && editable) editor.commands.focus()
-  }, [editor, editable])
+    if (editor && focusOnMount) editor.commands.focus()
+  }, [editor, focusOnMount])
 
   // Seed initial content once synced, if this block's fragment is still empty.
   useEffect(() => {
@@ -399,56 +380,73 @@ export function BlockEditor({
       // every already-populated block reloaded from a saved document.
       if (editable) editor.commands.focus()
     }
-    if (kind === 'code') prevTextRef.current = editor.state.doc.textContent
+    if (kind === 'code') {
+      // Older documents stored every syntax token as collaborative marks.
+      // Remove only those obsolete marks once; all new highlighting is local
+      // decoration state and never enters Yjs or the undo stack.
+      const syntaxColor = editor.state.schema.marks.syntaxColor
+      const contentEnd = editor.state.doc.content.size
+      if (syntaxColor && contentEnd > 0) {
+        const transaction = editor.state.tr
+          .removeMark(0, contentEnd, syntaxColor)
+          .setMeta('addToHistory', false)
+        if (transaction.steps.length) editor.view.dispatch(transaction)
+      }
+      lastHighlightedRef.current = null
+      scheduleRetokenize(editor, 0)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, synced])
 
-  // Re-highlight existing text when language/theme change via the Inspector
-  // (not just new pastes). Skips the very first run after mount -- that's
-  // the initial value, not a change, and the content (if any) was already
-  // tokenized correctly when it was pasted.
-  const prevLangThemeRef = useRef<{ language?: string; theme: string } | null>(null)
+  // Re-highlight on the first load and whenever the language or theme changes.
+  // Custom theme edits can keep the same stored id, so their storage revision
+  // is also part of this trigger.
   useEffect(() => {
     if (kind !== 'code' || !editor || !synced) return
-    const prev = prevLangThemeRef.current
-    prevLangThemeRef.current = { language, theme }
-    if (!prev || (prev.language === language && prev.theme === theme)) return
-
-    const text = editor.state.doc.textContent
-    if (!text) return
-
-    // Invalidates any slower typing-triggered highlight request.
-    const generation = ++retokenizeGenerationRef.current
-    tokenizeCode(text, language ?? 'plaintext', resolveThemeArg(theme))
-      .then(({ lines }) => {
-        if (
-          generation !== retokenizeGenerationRef.current ||
-          editor.state.doc.textContent !== text
-        ) {
-          return
-        }
-        isRetokenizingRef.current = true
-        try {
-          applyTokenizedMarks(editor.view, text, language ?? 'plaintext', lines)
-        } finally {
-          isRetokenizingRef.current = false
-        }
-        prevTextRef.current = editor.state.doc.textContent
-      })
-      .catch((err) => console.error('Failed to re-highlight existing code', err))
+    const block = editor.state.doc.firstChild
+    const currentLanguage = language ?? 'plaintext'
+    if (
+      block?.type.name === 'annotatedCodeBlock' &&
+      block.attrs.language !== currentLanguage
+    ) {
+      editor.view.dispatch(
+        editor.state.tr
+          .setNodeMarkup(0, undefined, { ...block.attrs, language: currentLanguage })
+          .setMeta('addToHistory', false)
+      )
+    }
+    lastHighlightedRef.current = null
+    retokenizeRetryRef.current = 0
+    scheduleRetokenize(editor, 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor, synced, language, theme])
+  }, [editor, synced, language, theme, customThemeRevision])
+
+  useEffect(() => {
+    if (
+      kind === 'code' &&
+      editor &&
+      synced &&
+      syntaxWorkPriority === 'visible'
+    ) {
+      scheduleRetokenize(editor, 0)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, synced, kind, syntaxWorkPriority])
 
   // Reactive line count for the line-number gutter -- one literal '\n' is
   // always exactly one visual line, since code renders with white-space: pre.
-  const lineCount = useEditorState({
+  const renderedEditorState = useEditorState({
     editor,
-    selector: ({ editor }) => (editor ? editor.state.doc.textContent.split('\n').length : 1),
+    selector: ({ editor: currentEditor }) => {
+      const text = currentEditor?.state.doc.textContent ?? ''
+      return {
+        lineCount: text.split('\n').length,
+        isEmpty: text.trim().length === 0,
+      }
+    },
   })
-  const isEmpty = useEditorState({
-    editor,
-    selector: ({ editor }) => (editor ? editor.state.doc.textContent.trim().length === 0 : true),
-  })
+  const lineCount = renderedEditorState?.lineCount ?? 1
+  const isEmpty = renderedEditorState?.isEmpty ?? true
 
   if (!synced) {
     return <div className="scripture-editor-loading">Loading…</div>
@@ -465,10 +463,11 @@ export function BlockEditor({
 
   const editorContent = (
     <div
+      ref={syntaxElementRef}
       className="scripture-editor-wrapper"
       data-empty={isEmpty || undefined}
       data-kind={kind}
-      style={kind === 'code' ? { tabSize } : undefined}
+      style={kind === 'code' ? { tabSize, color: resolveThemeForeground(theme) } : undefined}
     >
       {editor && <BubbleToolbar editor={editor} />}
       {isEmpty && (
@@ -489,7 +488,7 @@ export function BlockEditor({
       chromeStyle={chromeStyle}
       customChrome={customChrome}
       showLineNumbers={showLineNumbers}
-      lineCount={lineCount ?? 1}
+      lineCount={lineCount}
       startLineNumber={startLineNumber}
       ligatures={ligatures}
       lineHeight={lineHeight}
@@ -503,3 +502,11 @@ export function BlockEditor({
     </CodeChrome>
   )
 }
+
+/** Canvas blocks stay as inexpensive static markup until the user enters
+ * text-edit mode; flex-flow blocks remain continuously editable. */
+export const BlockEditor = memo(function BlockEditor(props: BlockEditorProps) {
+  const editable = props.editable ?? true
+  if (!editable) return <StaticBlockEditor {...props} />
+  return <InteractiveBlockEditor {...props} />
+})

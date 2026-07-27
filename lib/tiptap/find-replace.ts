@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/react'
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 
 export interface LocalMatch {
   from: number
@@ -13,13 +14,13 @@ export interface Match extends LocalMatch {
  * Adjacent ProseMirror text nodes are merged into a searchable run, which
  * lets a match cross bold/italic/syntax mark boundaries while preserving
  * the exact document positions needed by selection and replacement. */
-export function findMatchesInEditor(editor: Editor, query: string): LocalMatch[] {
+export function findMatchesInDocument(doc: ProseMirrorNode, query: string): LocalMatch[] {
   if (!query) return []
   const matches: LocalMatch[] = []
   const lowerQuery = query.toLowerCase()
   const runs: Array<{ text: string; positions: number[] }> = []
   let current: { text: string; positions: number[] } | null = null
-  editor.state.doc.descendants((node, pos) => {
+  doc.descendants((node, pos) => {
     if (!node.isText || !node.text) return
     const expected = current && current.positions.length > 0
       ? current.positions[current.positions.length - 1] + 1
@@ -42,6 +43,10 @@ export function findMatchesInEditor(editor: Editor, query: string): LocalMatch[]
     }
   }
   return matches
+}
+
+export function findMatchesInEditor(editor: Editor, query: string): LocalMatch[] {
+  return findMatchesInDocument(editor.state.doc, query)
 }
 
 export function findAllMatches(editors: Map<string, Editor>, query: string): Match[] {

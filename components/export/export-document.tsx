@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import type { JSONContent } from '@tiptap/core'
 import { renderToReactElement } from '@tiptap/static-renderer'
 import { yXmlFragmentToProsemirrorJSON } from '@tiptap/y-tiptap'
 import type * as Y from 'yjs'
@@ -12,16 +11,17 @@ import {
   outerBoxStyle,
 } from '@/lib/layout/frame-style'
 import type { ChildLayout, LayoutNode } from '@/lib/layout/types'
-import { resolveThemeBackground } from '@/lib/presets/custom-syntax-themes'
+import {
+  resolveThemeBackground,
+  resolveThemeForeground,
+} from '@/lib/presets/custom-syntax-themes'
 import { baseExtensions } from '@/lib/tiptap/extensions'
 import { blockFragmentName } from '@/lib/yjs/doc-store'
 import { ROOT_ID } from '@/lib/yjs/layout-store'
+import type { SyntaxStyleRange } from '@/lib/shiki/token-types'
+import { plainTextFromDocument, withSyntaxRanges } from '@/lib/tiptap/syntax-document'
 
-function extractPlainText(node: JSONContent): string {
-  if (node.text) return node.text
-  if (node.content) return node.content.map(extractPlainText).join('')
-  return ''
-}
+export type ExportSyntaxSnapshots = Record<string, SyntaxStyleRange[]>
 
 function canvasPositionStyle(node: LayoutNode, isRoot: boolean, parentChildLayout: ChildLayout) {
   if (isRoot || parentChildLayout !== 'canvas') return undefined
@@ -44,7 +44,12 @@ function renderCallouts(node: LayoutNode): ReactNode {
   ))
 }
 
-function renderNode(node: LayoutNode, ydoc: Y.Doc, parentChildLayout: ChildLayout = 'flex'): ReactNode {
+function renderNode(
+  node: LayoutNode,
+  ydoc: Y.Doc,
+  syntaxSnapshots: ExportSyntaxSnapshots,
+  parentChildLayout: ChildLayout = 'flex'
+): ReactNode {
   if (node.kind === 'frame') {
     const isRoot = node.id === ROOT_ID
     const childLayout = node.childLayout ?? 'flex'
@@ -62,7 +67,7 @@ function renderNode(node: LayoutNode, ydoc: Y.Doc, parentChildLayout: ChildLayou
         style={{ ...frameOuterStyle(node), ...canvasPositionStyle(node, isRoot, parentChildLayout) }}
       >
         <div className="scripture-frame-content" style={frameInnerStyle(node)}>
-          {(node.children ?? []).map((child) => renderNode(child, ydoc, childLayout))}
+          {(node.children ?? []).map((child) => renderNode(child, ydoc, syntaxSnapshots, childLayout))}
         </div>
         {renderCallouts(node)}
       </div>
@@ -85,7 +90,11 @@ function renderNode(node: LayoutNode, ydoc: Y.Doc, parentChildLayout: ChildLayou
     )
   }
 
-  const docJSON = yXmlFragmentToProsemirrorJSON(ydoc.getXmlFragment(blockFragmentName(node.id)))
+  const sourceDocJSON = yXmlFragmentToProsemirrorJSON(ydoc.getXmlFragment(blockFragmentName(node.id)))
+  const docJSON =
+    node.kind === 'code' && syntaxSnapshots[node.id]
+      ? withSyntaxRanges(sourceDocJSON, syntaxSnapshots[node.id])
+      : sourceDocJSON
   const content = renderToReactElement({ content: docJSON, extensions: baseExtensions() })
   if (node.kind !== 'code') {
     return (
@@ -101,7 +110,7 @@ function renderNode(node: LayoutNode, ydoc: Y.Doc, parentChildLayout: ChildLayou
     )
   }
 
-  const lineCount = extractPlainText(docJSON).split('\n').length
+  const lineCount = plainTextFromDocument(docJSON).split('\n').length
   return (
     <div
       key={node.id}
@@ -128,14 +137,29 @@ function renderNode(node: LayoutNode, ydoc: Y.Doc, parentChildLayout: ChildLayou
           trimRanges={node.trimRanges ?? []}
           diffLines={node.diffLines ?? {}}
         >
-          <div className="scripture-code-editor">{content}</div>
+          <div
+            className="scripture-code-editor"
+            style={{ color: resolveThemeForeground(node.theme) }}
+          >
+            {content}
+          </div>
         </CodeChrome>
       </div>
     </div>
   )
 }
 
-export function ExportDocument({ tree, ydoc, margin }: { tree: LayoutNode; ydoc: Y.Doc; margin?: number }) {
+export function ExportDocument({
+  tree,
+  ydoc,
+  margin,
+  syntaxSnapshots = {},
+}: {
+  tree: LayoutNode
+  ydoc: Y.Doc
+  margin?: number
+  syntaxSnapshots?: ExportSyntaxSnapshots
+}) {
   return (
     <CanvasRoot
       printMode
@@ -144,7 +168,7 @@ export function ExportDocument({ tree, ydoc, margin }: { tree: LayoutNode; ydoc:
       customPageHeightMm={tree.customPageHeightMm}
       exportMarginPx={margin}
     >
-      {renderNode(tree, ydoc)}
+      {renderNode(tree, ydoc, syntaxSnapshots)}
     </CanvasRoot>
   )
 }
