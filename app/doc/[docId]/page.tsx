@@ -911,9 +911,19 @@ export default function DocumentEditorPage() {
                 onSelectionChange={handleSelectionChange}
                 onSetEditing={setEditingId}
               />
-              {canvasOverflows && panHintVisible && (
-                <div className="scripture-pan-hint" role="status">
-                  Hold <kbd>Space</kbd> and drag to pan
+              {(deleteNotice || (canvasOverflows && panHintVisible)) && (
+                <div className="scripture-canvas-notices">
+                  {deleteNotice && (
+                    <div className="scripture-delete-toast" role="status">
+                      <span>{deleteNotice.count === 1 ? 'Layer deleted' : `${deleteNotice.count} layers deleted`}</span>
+                      <button type="button" onClick={handleUndoDelete}>Undo</button>
+                    </div>
+                  )}
+                  {canvasOverflows && panHintVisible && (
+                    <div className="scripture-pan-hint" role="status">
+                      Hold <kbd>Space</kbd> and drag to pan
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -946,12 +956,6 @@ export default function DocumentEditorPage() {
             </div>
           </div>
         </>
-      )}
-      {deleteNotice && (
-        <div className="scripture-delete-toast" role="status">
-          <span>{deleteNotice.count === 1 ? 'Layer deleted' : `${deleteNotice.count} layers deleted`}</span>
-          <button type="button" onClick={handleUndoDelete}>Undo</button>
-        </div>
       )}
     </div>
   )

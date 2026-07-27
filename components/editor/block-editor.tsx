@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useEditor, useEditorState, EditorContent, type Editor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
-import { TextSelection } from '@tiptap/pm/state'
+import { TextSelection, type Transaction } from '@tiptap/pm/state'
 import { Collaboration } from '@tiptap/extension-collaboration'
 import { getYDoc, getUndoManager, blockFragmentName } from '@/lib/yjs/doc-store'
 import { baseExtensions } from '@/lib/tiptap/extensions'
@@ -21,6 +21,25 @@ const RETOKENIZE_DEBOUNCE_MS = 350
 
 function toProseMirrorNodes(view: EditorView, nodes: ProseMirrorTextNode[]) {
   return nodes.map((n) => view.state.schema.text(n.text, n.marks?.map((m) => view.state.schema.marks[m.type].create(m.attrs))))
+}
+
+/** Replacing text nodes solely to update syntax marks can rebuild the DOM
+ * selection underneath the active contenteditable. Preserve browser focus
+ * if this editor owned it immediately before dispatch, but never steal focus
+ * back when the user already moved elsewhere while tokenization was pending. */
+function dispatchPreservingFocus(view: EditorView, transaction: Transaction) {
+  const hadFocus = view.hasFocus()
+  view.dispatch(transaction)
+  if (!hadFocus) return
+  const restoreDroppedFocus = () => {
+    if (view.isDestroyed || view.hasFocus()) return
+    const active = document.activeElement
+    // A programmatic DOM rebuild drops focus to the document body. If focus
+    // belongs to another actual control, the user moved it intentionally.
+    if (!active || active === document.body || active === document.documentElement) view.focus()
+  }
+  restoreDroppedFocus()
+  queueMicrotask(restoreDroppedFocus)
 }
 
 /** Replaces the whole block's content with freshly tokenized text when the
@@ -51,7 +70,7 @@ function replaceWithTokenizedContent(
       // Out of range for the new doc -- fall back to PM's default mapping.
     }
   }
-  view.dispatch(tr)
+  dispatchPreservingFocus(view, tr)
 }
 
 /** Starting character offset of each line within `lines.join('\n')`. */
@@ -325,7 +344,7 @@ export function BlockEditor({
           // given the same-length swap above) -- fall back to PM's own
           // default mapping rather than losing the retokenize entirely.
         }
-        editor.view.dispatch(tr)
+        dispatchPreservingFocus(editor.view, tr)
       } finally {
         // finally, not a plain assignment after dispatch -- if dispatch
         // itself throws (e.g. an out-of-range position from an edge case
@@ -362,6 +381,27 @@ export function BlockEditor({
         attributes: {
           class: kind === 'code' ? 'scripture-code-editor' : 'scripture-text-editor',
           spellcheck: 'false',
+        },
+        handleKeyDown(view, event) {
+          if (kind !== 'code' || event.key !== 'Tab') return false
+          event.preventDefault()
+
+          const { from, to, $from } = view.state.selection
+          if (!event.shiftKey) {
+            view.dispatch(view.state.tr.insertText('  ', from, to).scrollIntoView())
+            return true
+          }
+
+          // Shift+Tab removes up to one two-space indent from the current
+          // line and is still consumed when the line is already flush-left,
+          // so focus never escapes the code editor in either direction.
+          const parentStart = from - $from.parentOffset
+          const textBeforeCaret = $from.parent.textBetween(0, $from.parentOffset, '\n', '\n')
+          const lineStart = parentStart + textBeforeCaret.lastIndexOf('\n') + 1
+          const prefix = view.state.doc.textBetween(lineStart, Math.min(lineStart + 2, view.state.doc.content.size))
+          const spaces = prefix.match(/^ {1,2}/)?.[0].length ?? 0
+          if (spaces > 0) view.dispatch(view.state.tr.delete(lineStart, lineStart + spaces).scrollIntoView())
+          return true
         },
         handlePaste(view, event) {
           if (kind !== 'code') return false // text blocks use Tiptap's default paste
