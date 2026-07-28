@@ -86,3 +86,32 @@ export function replaceAllInStaticBlock(
   commitDocument(fragment, transaction.doc, current.meta)
   return matches.length
 }
+
+/** Removes only the requested format attributes while preserving every other
+ * inline style on the same mark. Used when a block-level typography value is
+ * changed so stale selection overrides do not keep winning in parts of it. */
+export function clearFormatAttributesInStaticBlock(
+  fragment: Y.XmlFragment,
+  attributes: string[]
+) {
+  const current = currentDocument(fragment)
+  const state = EditorState.create({ schema, doc: current.doc })
+  const formatType = schema.marks.format
+  if (!formatType) return
+
+  const transaction = state.tr
+  current.doc.descendants((node, position) => {
+    if (!node.isText) return
+    const mark = node.marks.find((candidate) => candidate.type === formatType)
+    if (!mark) return
+
+    const nextAttributes = { ...mark.attrs }
+    for (const attribute of attributes) nextAttributes[attribute] = null
+    transaction.removeMark(position, position + node.nodeSize, mark)
+    if (Object.values(nextAttributes).some((value) => value != null)) {
+      transaction.addMark(position, position + node.nodeSize, formatType.create(nextAttributes))
+    }
+  })
+
+  if (transaction.docChanged) commitDocument(fragment, transaction.doc, current.meta)
+}

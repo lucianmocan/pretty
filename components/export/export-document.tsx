@@ -22,6 +22,9 @@ import { ROOT_ID } from '@/lib/yjs/layout-store'
 import type { SyntaxStyleRange } from '@/lib/shiki/token-types'
 import { plainTextFromDocument, withSyntaxRanges } from '@/lib/tiptap/syntax-document'
 import { codeLineFontSizes } from '@/lib/tiptap/line-font-sizes'
+import { googleFontsInDocument } from '@/lib/google-fonts'
+import { GoogleFontStylesheet } from '@/components/editor/google-font-loader'
+import { textBlockStyle } from '@/lib/layout/text-style'
 
 export type ExportSyntaxSnapshots = Record<string, SyntaxStyleRange[]>
 
@@ -106,7 +109,21 @@ function renderNode(
         style={{ ...outerBoxStyle(node), ...positionStyle }}
       >
         <div className="scripture-leaf-content" style={contentOverflowStyle(node)}>
-          <div className="scripture-text-editor">{content}</div>
+          <div
+            className="scripture-text-editor"
+            style={textBlockStyle({
+              textFontFamily: node.textFontFamily,
+              textFontSource: node.textFontSource,
+              textFontWeight: node.textFontWeight,
+              textFontStyle: node.textFontStyle,
+              textFontSize: node.textFontSize,
+              textLineHeight: node.textLineHeight,
+              textLetterSpacing: node.textLetterSpacing,
+              textColor: node.textColor,
+            })}
+          >
+            {content}
+          </div>
         </div>
       </div>
     )
@@ -155,6 +172,18 @@ function renderNode(
   )
 }
 
+function collectExportGoogleFonts(node: LayoutNode, ydoc: Y.Doc, families: Set<string>) {
+  if (node.kind === 'frame') {
+    for (const child of node.children ?? []) collectExportGoogleFonts(child, ydoc, families)
+    return
+  }
+  if (node.kind !== 'text') return
+  const document = yXmlFragmentToProsemirrorJSON(ydoc.getXmlFragment(blockFragmentName(node.id)))
+  for (const family of googleFontsInDocument(document, node.textFontFamily, node.textFontSource)) {
+    families.add(family)
+  }
+}
+
 export function ExportDocument({
   tree,
   ydoc,
@@ -166,15 +195,20 @@ export function ExportDocument({
   margin?: number
   syntaxSnapshots?: ExportSyntaxSnapshots
 }) {
+  const googleFonts = new Set<string>()
+  collectExportGoogleFonts(tree, ydoc, googleFonts)
   return (
-    <CanvasRoot
-      printMode
-      pageSize={tree.pageSize}
-      customPageWidthMm={tree.customPageWidthMm}
-      customPageHeightMm={tree.customPageHeightMm}
-      exportMarginPx={margin}
-    >
-      {renderNode(tree, ydoc, syntaxSnapshots)}
-    </CanvasRoot>
+    <>
+      <GoogleFontStylesheet families={[...googleFonts]} />
+      <CanvasRoot
+        printMode
+        pageSize={tree.pageSize}
+        customPageWidthMm={tree.customPageWidthMm}
+        customPageHeightMm={tree.customPageHeightMm}
+        exportMarginPx={margin}
+      >
+        {renderNode(tree, ydoc, syntaxSnapshots)}
+      </CanvasRoot>
+    </>
   )
 }

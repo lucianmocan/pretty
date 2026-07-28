@@ -1,6 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEditorState, type Editor } from '@tiptap/react'
+import type { JSONContent } from '@tiptap/core'
 import {
   Rows3,
   Columns3,
@@ -22,6 +24,18 @@ import {
   Ungroup,
   Trash2,
   Download,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignJustify,
+  List,
+  ListOrdered,
+  ListChecks,
+  IndentDecrease,
+  IndentIncrease,
+  RemoveFormatting,
+  Type,
+  ChevronDown,
 } from 'lucide-react'
 import type {
   LayoutNode,
@@ -30,21 +44,28 @@ import type {
   FlexJustify,
   ChildLayout,
   PageSize,
+  TextFontSource,
 } from '@/lib/layout/types'
 import {
   DEFAULT_CANVAS_HEIGHT,
   DEFAULT_CANVAS_WIDTH,
   DEFAULT_CODE_BLOCK_HEIGHT,
   DEFAULT_CODE_BLOCK_WIDTH,
+  DEFAULT_TEXT_BLOCK_PROPS,
 } from '@/lib/layout/types'
 import { findNode, findParent, findFirstByKind, collectByKind } from '@/lib/layout/tree-utils'
 import { alignNodes, distributeNodes, type PositionedNode, type AlignEdge } from '@/lib/layout/align-distribute'
 import { listStylePresets, saveStylePreset, deleteStylePreset, type StylePreset } from '@/lib/presets/style-presets'
-import { getYDoc } from '@/lib/yjs/doc-store'
+import { blockFragmentName, getYDoc } from '@/lib/yjs/doc-store'
+import {
+  clearFormatAttributesInStaticBlock,
+  staticBlockJSON,
+} from '@/lib/tiptap/static-block-document'
 import { deleteUploadedImage } from '@/lib/images/client'
 import {
   updateFrameProps,
   updateCodeProps,
+  updateTextProps,
   updateImageProps,
   updateNodeSize,
   updateNodePosition,
@@ -69,6 +90,18 @@ import { Label } from '@/components/ui/label'
 import { NumericPresetControl } from '@/components/ui/numeric-preset-control'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import {
   Select,
   SelectContent,
@@ -79,6 +112,11 @@ import {
 import { ThemeSwatchPicker } from '@/components/ui/theme-swatch-picker'
 import { ChromeStylePicker } from '@/components/ui/chrome-style-picker'
 import { LanguagePicker } from '@/components/ui/language-picker'
+import { FontPicker } from '@/components/editor/font-picker'
+import {
+  InlineFormattingControls,
+} from '@/components/editor/bubble-toolbar'
+import { useEditorRegistry } from '@/components/editor/editor-registry'
 import { IconField } from '@/components/ui/icon-field'
 import { RadiusIcon } from '@/components/ui/radius-icon'
 import { MIN_NODE_SIZE } from '@/lib/layout/resize-geometry'
@@ -112,6 +150,7 @@ interface InspectorPanelProps {
   onExportPng: () => void
   exporting: 'pdf' | 'png' | null
   exportError: string | null
+  onSetEditing: (id: string | null) => void
 }
 
 const GUTTER_CLICK_MODE_OPTIONS: Array<{ value: GutterClickMode; label: string }> = [
@@ -126,6 +165,122 @@ const PAGE_SIZE_OPTIONS: Array<{ value: PageSize; label: string }> = [
   { value: 'letter', label: 'Letter' },
   { value: 'custom', label: 'Custom' },
 ]
+
+const TEXT_FONT_SIZE_OPTIONS = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96]
+const TEXT_LINE_HEIGHT_OPTIONS = [1, 1.15, 1.25, 1.4, 1.5, 1.6, 1.75, 2, 2.5]
+const TEXT_LETTER_SPACING_OPTIONS = [-1, -0.5, -0.25, 0, 0.25, 0.5, 1, 1.5, 2, 3, 4]
+
+function compactNumber(value: number): string {
+  return String(Number(value.toFixed(2)))
+}
+
+function TextMetricPicker({
+  value,
+  options,
+  min,
+  max,
+  step,
+  unit,
+  ariaLabel,
+  onChange,
+  mixed = false,
+}: {
+  value: number
+  options: number[]
+  min: number
+  max: number
+  step: number
+  unit: string
+  ariaLabel: string
+  onChange: (value: number) => void
+  mixed?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const externalDraft = mixed ? '' : compactNumber(value)
+  const [draft, setDraft] = useState(() => externalDraft)
+  const [lastExternalDraft, setLastExternalDraft] = useState(() => externalDraft)
+  if (externalDraft !== lastExternalDraft) {
+    setLastExternalDraft(externalDraft)
+    setDraft(externalDraft)
+  }
+
+  const applyDraft = (next: string) => {
+    setDraft(next)
+    const parsed = Number(next)
+    if (next.trim() !== '' && Number.isFinite(parsed) && parsed >= min && parsed <= max) {
+      onChange(parsed)
+    }
+  }
+
+  const commitDraft = () => {
+    const parsed = Number(draft)
+    if (draft.trim() === '' || !Number.isFinite(parsed)) {
+      setDraft(mixed ? '' : compactNumber(value))
+      return
+    }
+    const next = Math.min(max, Math.max(min, parsed))
+    setDraft(compactNumber(next))
+    if (next !== value) onChange(next)
+  }
+
+  return (
+    <div className="scripture-text-metric-picker">
+      <input
+        className="scripture-text-metric-input"
+        type="number"
+        inputMode="decimal"
+        min={min}
+        max={max}
+        step={step}
+        value={draft}
+        placeholder={mixed ? 'Mixed' : undefined}
+        aria-label={ariaLabel}
+        onChange={(event) => applyDraft(event.target.value)}
+        onBlur={commitDraft}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur()
+          if (event.key === 'Escape') {
+            setDraft(mixed ? '' : compactNumber(value))
+            event.currentTarget.blur()
+          }
+        }}
+      />
+      <Popover open={open} onOpenChange={(next) => {
+        setOpen(next)
+        if (next) setDraft(mixed ? '' : compactNumber(value))
+      }}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="scripture-text-metric-chevron"
+            aria-label={`${ariaLabel} presets`}
+          >
+            <ChevronDown />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="scripture-text-metric-popover" align="end" sideOffset={4}>
+          <div className="scripture-text-metric-options">
+            {options.map((option) => (
+              <button
+                type="button"
+                key={option}
+                className="scripture-text-metric-option"
+                data-selected={!mixed && Math.abs(option - value) < 0.001 || undefined}
+                onClick={() => {
+                  onChange(option)
+                  setDraft(compactNumber(option))
+                  setOpen(false)
+                }}
+              >
+                {compactNumber(option)}{unit}
+              </button>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
+  )
+}
 
 function toHexColor(value: string | null | undefined): string {
   if (value && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value)) return value
@@ -507,6 +662,534 @@ function StylePresetsSection({ docId, tree, node }: { docId: string; tree: Layou
   )
 }
 
+interface TextTypographyDefaults {
+  family: string
+  source: TextFontSource
+  size: number
+  lineHeight: number
+  letterSpacing: number
+}
+
+interface TextTypographySummary {
+  family: string
+  source: TextFontSource
+  size: number
+  lineHeight: number
+  letterSpacing: number
+  familyMixed: boolean
+  sizeMixed: boolean
+  lineHeightMixed: boolean
+  letterSpacingMixed: boolean
+  hasSelection: boolean
+}
+
+function numericFormatValue(value: unknown): number | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  const parsed = Number.parseFloat(String(value))
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function summarizeTypographyValues(
+  values: Array<{
+    family: string
+    source: TextFontSource
+    size: number
+    lineHeight: number
+    letterSpacing: number
+  }>,
+  defaults: TextTypographyDefaults,
+  hasSelection: boolean
+): TextTypographySummary {
+  const resolved = values.length > 0 ? values : [{
+    family: defaults.family,
+    source: defaults.source,
+    size: defaults.size,
+    lineHeight: defaults.lineHeight * defaults.size,
+    letterSpacing: defaults.letterSpacing,
+  }]
+  const families = new Set(resolved.map((value) => `${value.source}\u0000${value.family}`))
+  const sizes = new Set(resolved.map((value) => value.size))
+  const lineHeights = new Set(resolved.map((value) => value.lineHeight))
+  const letterSpacings = new Set(resolved.map((value) => value.letterSpacing))
+  const first = resolved[0]
+
+  return {
+    ...first,
+    familyMixed: families.size > 1,
+    sizeMixed: sizes.size > 1,
+    lineHeightMixed: lineHeights.size > 1,
+    letterSpacingMixed: letterSpacings.size > 1,
+    hasSelection,
+  }
+}
+
+function effectiveTypography(
+  attributes: Record<string, unknown> | undefined,
+  defaults: TextTypographyDefaults
+) {
+  const family = typeof attributes?.fontFamily === 'string' ? attributes.fontFamily : defaults.family
+  const source = attributes?.fontSource === 'google' || attributes?.fontSource === 'local'
+    ? attributes.fontSource
+    : defaults.source
+  const size = numericFormatValue(attributes?.fontSize) ?? defaults.size
+  return {
+    family,
+    source,
+    size,
+    lineHeight: numericFormatValue(attributes?.lineHeight) ?? defaults.lineHeight * size,
+    letterSpacing: numericFormatValue(attributes?.letterSpacing) ?? defaults.letterSpacing,
+  }
+}
+
+function summarizeEditorTypography(
+  editor: Editor,
+  defaults: TextTypographyDefaults
+): TextTypographySummary {
+  const { doc, selection } = editor.state
+  const hasSelection = !selection.empty
+  const from = hasSelection ? selection.from : 0
+  const to = hasSelection ? selection.to : doc.content.size
+  const values: ReturnType<typeof effectiveTypography>[] = []
+
+  doc.nodesBetween(from, to, (node) => {
+    if (!node.isText) return
+    const format = node.marks.find((mark) => mark.type.name === 'format')
+    values.push(effectiveTypography(format?.attrs, defaults))
+  })
+  return summarizeTypographyValues(values, defaults, hasSelection)
+}
+
+function summarizeStaticTypography(
+  document: JSONContent | null,
+  defaults: TextTypographyDefaults
+): TextTypographySummary {
+  const values: ReturnType<typeof effectiveTypography>[] = []
+  const visit = (node: JSONContent) => {
+    if (node.type === 'text') {
+      const format = node.marks?.find((mark) => mark.type === 'format')
+      values.push(effectiveTypography(format?.attrs, defaults))
+    }
+    node.content?.forEach(visit)
+  }
+  if (document) visit(document)
+  return summarizeTypographyValues(values, defaults, false)
+}
+
+function clearEditorFormatAttributes(editor: Editor, attributes: string[]) {
+  const formatType = editor.schema.marks.format
+  if (!formatType) return
+  const transaction = editor.state.tr
+
+  editor.state.doc.descendants((node, position) => {
+    if (!node.isText) return
+    const mark = node.marks.find((candidate) => candidate.type === formatType)
+    if (!mark) return
+    const nextAttributes = { ...mark.attrs }
+    for (const attribute of attributes) nextAttributes[attribute] = null
+    transaction.removeMark(position, position + node.nodeSize, mark)
+    if (Object.values(nextAttributes).some((value) => value != null)) {
+      transaction.addMark(position, position + node.nodeSize, formatType.create(nextAttributes))
+    }
+  })
+
+  const storedMarks = editor.state.storedMarks
+  if (storedMarks) {
+    transaction.setStoredMarks(storedMarks.flatMap((mark) => {
+      if (mark.type !== formatType) return [mark]
+      const nextAttributes = { ...mark.attrs }
+      for (const attribute of attributes) nextAttributes[attribute] = null
+      return Object.values(nextAttributes).some((value) => value != null)
+        ? [formatType.create(nextAttributes)]
+        : []
+    }))
+  }
+
+  if (transaction.docChanged || transaction.storedMarksSet) editor.view.dispatch(transaction)
+}
+
+function withCurrentOption(options: number[], value: number, mixed: boolean): number[] {
+  if (mixed || options.some((option) => Math.abs(option - value) < 0.001)) return options
+  return [...options, value].sort((a, b) => a - b)
+}
+
+function TextTypographyControls({
+  docId,
+  blockId,
+  defaults,
+}: {
+  docId: string
+  blockId: string
+  defaults: TextTypographyDefaults
+}) {
+  const registry = useEditorRegistry()
+  const editor = useSyncExternalStore(
+    registry.subscribe,
+    () => registry.getAll().get(blockId) ?? null,
+    () => null
+  )
+  const entry = getYDoc(docId)
+  const fragment = entry.doc.getXmlFragment(blockFragmentName(blockId))
+  const serializedDocument = useSyncExternalStore(
+    (listener) => {
+      const observer = () => listener()
+      fragment.observeDeep(observer)
+      return () => fragment.unobserveDeep(observer)
+    },
+    () => JSON.stringify(staticBlockJSON(fragment)),
+    () => ''
+  )
+  const liveSummary = useEditorState({
+    editor,
+    selector: ({ editor: current }) => current
+      ? summarizeEditorTypography(current, defaults)
+      : null,
+  })
+  let staticDocument: JSONContent | null = null
+  if (serializedDocument) {
+    try {
+      staticDocument = JSON.parse(serializedDocument) as JSONContent
+    } catch {
+      staticDocument = null
+    }
+  }
+  const summary = liveSummary ?? summarizeStaticTypography(staticDocument, defaults)
+  const metricFontSize = summary.sizeMixed ? defaults.size : summary.size
+  const fontSizeOptions = withCurrentOption(TEXT_FONT_SIZE_OPTIONS, summary.size, summary.sizeMixed)
+  const lineHeightOptions = withCurrentOption(
+    TEXT_LINE_HEIGHT_OPTIONS.map((height) => Number((height * metricFontSize).toFixed(2))),
+    summary.lineHeight,
+    summary.lineHeightMixed
+  )
+  const letterSpacingOptions = withCurrentOption(
+    TEXT_LETTER_SPACING_OPTIONS,
+    summary.letterSpacing,
+    summary.letterSpacingMixed
+  )
+
+  const clearWholeBlockAttributes = (attributes: string[]) => {
+    if (editor) clearEditorFormatAttributes(editor, attributes)
+    else clearFormatAttributesInStaticBlock(fragment, attributes)
+  }
+  const applyFont = (family: string, source: TextFontSource) => {
+    if (editor && summary.hasSelection) {
+      editor.chain().setFontFamily(family, source).run()
+      return
+    }
+    updateTextProps(entry.doc, blockId, { textFontFamily: family, textFontSource: source })
+    clearWholeBlockAttributes(['fontFamily', 'fontSource'])
+  }
+  const applyFontSize = (value: number) => {
+    if (editor && summary.hasSelection) {
+      editor.chain().setFontSize(`${value}px`).run()
+      return
+    }
+    updateTextProps(entry.doc, blockId, { textFontSize: value })
+    clearWholeBlockAttributes(['fontSize'])
+  }
+  const applyLineHeight = (value: number) => {
+    if (editor && summary.hasSelection) {
+      editor.chain().setLineHeight(`${value}px`).run()
+      return
+    }
+    updateTextProps(entry.doc, blockId, {
+      textLineHeight: Number((value / defaults.size).toFixed(4)),
+    })
+    clearWholeBlockAttributes(['lineHeight'])
+  }
+  const applyLetterSpacing = (value: number) => {
+    if (editor && summary.hasSelection) {
+      editor.chain().setLetterSpacing(`${value}px`).run()
+      return
+    }
+    updateTextProps(entry.doc, blockId, { textLetterSpacing: value })
+    clearWholeBlockAttributes(['letterSpacing'])
+  }
+
+  return (
+    <>
+      <div className="scripture-inspector-stack">
+        <Label>Font</Label>
+        <FontPicker
+          value={{ family: summary.family, source: summary.source }}
+          mixed={summary.familyMixed}
+          onChange={(font) => applyFont(font.family, font.source)}
+        />
+      </div>
+      <div className="scripture-text-metrics" aria-label="Text size, line height, and letter spacing">
+        <div className="scripture-text-metric">
+          <Type aria-hidden="true" />
+          <TextMetricPicker
+            value={summary.size}
+            options={fontSizeOptions}
+            min={8}
+            max={512}
+            step={1}
+            unit="px"
+            ariaLabel="Font size"
+            mixed={summary.sizeMixed}
+            onChange={applyFontSize}
+          />
+        </div>
+        <div className="scripture-text-metric">
+          <MoveVertical aria-hidden="true" />
+          <TextMetricPicker
+            value={summary.lineHeight}
+            options={lineHeightOptions}
+            min={Number((metricFontSize * 0.5).toFixed(2))}
+            max={Number((metricFontSize * 4).toFixed(2))}
+            step={0.5}
+            unit="px"
+            ariaLabel="Line height"
+            mixed={summary.lineHeightMixed}
+            onChange={applyLineHeight}
+          />
+        </div>
+        <div className="scripture-text-metric">
+          <MoveHorizontal aria-hidden="true" />
+          <TextMetricPicker
+            value={summary.letterSpacing}
+            options={letterSpacingOptions}
+            min={-20}
+            max={100}
+            step={0.1}
+            unit="px"
+            ariaLabel="Letter spacing"
+            mixed={summary.letterSpacingMixed}
+            onChange={applyLetterSpacing}
+          />
+        </div>
+      </div>
+    </>
+  )
+}
+
+function TextContentControls({
+  blockId,
+  onSetEditing,
+  fontFamily,
+  fontSource,
+}: {
+  blockId: string
+  onSetEditing: (id: string) => void
+  fontFamily: string
+  fontSource: TextFontSource
+}) {
+  const registry = useEditorRegistry()
+  const editor = useSyncExternalStore(
+    registry.subscribe,
+    () => registry.getAll().get(blockId) ?? null,
+    () => null
+  )
+  const state = useEditorState({
+    editor,
+    selector: ({ editor: current }) => {
+      if (!current) {
+        return {
+          list: '',
+          block: 'paragraph',
+          alignment: 'left' as const,
+          bold: false,
+          fontWeight: 400,
+          italic: false,
+          underline: false,
+          strike: false,
+          code: false,
+          highlight: null as string | null,
+          textColor: null as string | null,
+          href: '',
+          fontFamily,
+          fontSource,
+        }
+      }
+      const list = current.isActive('taskList')
+        ? 'task'
+        : current.isActive('orderedList')
+          ? 'ordered'
+          : current.isActive('bulletList')
+            ? 'bullet'
+            : ''
+      const block = ([1, 2, 3] as const).find((level) => current.isActive('heading', { level }))
+      const alignment = (['center', 'right', 'justify'] as const).find((value) =>
+        current.isActive('paragraph', { textAlign: value }) || current.isActive('heading', { textAlign: value })
+      ) ?? 'left'
+      const format = current.getAttributes('format')
+      const heading = current.isActive('heading')
+      return {
+        list,
+        block: block ? `heading-${block}` : current.isActive('blockquote') ? 'quote' : 'paragraph',
+        alignment,
+        bold: current.isActive('bold') || heading,
+        fontWeight: Number.isFinite(Number.parseInt(String(format.fontWeight), 10))
+          ? Number.parseInt(String(format.fontWeight), 10)
+          : heading ? 700 : 400,
+        italic: current.isActive('italic'),
+        underline: current.isActive('underline'),
+        strike: current.isActive('strike'),
+        code: current.isActive('code'),
+        highlight: typeof format.highlight === 'string' ? format.highlight : null,
+        textColor: typeof format.textColor === 'string' ? format.textColor : null,
+        href: (current.getAttributes('link').href as string | undefined) ?? '',
+        fontFamily: typeof format.fontFamily === 'string' ? format.fontFamily : fontFamily,
+        fontSource: format.fontSource === 'google' ? 'google' : fontSource,
+      }
+    },
+  })
+
+  if (!editor || !state) {
+    return (
+      <div className="scripture-inspector-stack">
+        <Label>Content formatting</Label>
+        <Button variant="outline" size="sm" onClick={() => onSetEditing(blockId)}>
+          Edit text to format
+        </Button>
+        <p className="scripture-inspector-hint">
+          Enter text editing, then place the caret or select paragraphs to format them here.
+        </p>
+      </div>
+    )
+  }
+
+  const setBlock = (value: string) => {
+    if (value === 'paragraph') editor.chain().focus().clearNodes().run()
+    else if (value === 'quote') editor.chain().focus().toggleBlockquote().run()
+    else {
+      const level = Number(value.split('-')[1]) as 1 | 2 | 3
+      editor.chain().focus().toggleHeading({ level }).run()
+    }
+  }
+  const toggleList = (value: string) => {
+    const target = value || state.list
+    if (target === 'bullet') editor.chain().focus().toggleBulletList().run()
+    else if (target === 'ordered') editor.chain().focus().toggleOrderedList().run()
+    else if (target === 'task') editor.chain().focus().toggleTaskList().run()
+  }
+  const listItemType = state.list === 'task' ? 'taskItem' : 'listItem'
+
+  return (
+    <div className="scripture-inspector-section">
+      <h3>Content formatting</h3>
+
+      <div className="scripture-inspector-row">
+        <Label>Paragraph</Label>
+        <Select value={state.block} onValueChange={setBlock}>
+          <SelectTrigger className="w-36" size="sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="paragraph">Paragraph</SelectItem>
+            <SelectItem value="heading-1">Heading 1</SelectItem>
+            <SelectItem value="heading-2">Heading 2</SelectItem>
+            <SelectItem value="heading-3">Heading 3</SelectItem>
+            <SelectItem value="quote">Quote</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="scripture-inspector-stack">
+        <Label>Style</Label>
+        <div className="scripture-inline-format-controls">
+          <InlineFormattingControls editor={editor} kind="text" state={state} />
+        </div>
+        <p className="scripture-inspector-hint">
+          Right-click Bold to choose a font weight.
+        </p>
+      </div>
+
+      <div className="scripture-inspector-stack">
+        <Label>List</Label>
+        <div className="scripture-list-controls">
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            value={state.list}
+            onValueChange={toggleList}
+            className="scripture-list-type-controls"
+          >
+            <ToggleGroupItem value="bullet" className="flex-1" aria-label="Bulleted list"><List /></ToggleGroupItem>
+            <ToggleGroupItem value="ordered" className="flex-1" aria-label="Numbered list"><ListOrdered /></ToggleGroupItem>
+            <ToggleGroupItem value="task" className="flex-1" aria-label="Task list"><ListChecks /></ToggleGroupItem>
+          </ToggleGroup>
+          <span className="scripture-list-divider" aria-hidden="true" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                disabled={!state.list}
+                onClick={() => editor.chain().focus().liftListItem(listItemType).run()}
+                aria-label="Outdent"
+              >
+                <IndentDecrease />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Outdent</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                disabled={!state.list}
+                onClick={() => editor.chain().focus().sinkListItem(listItemType).run()}
+                aria-label="Indent"
+              >
+                <IndentIncrease />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Indent</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+
+      <div className="scripture-inspector-stack">
+        <Label>Alignment</Label>
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
+          value={state.alignment}
+          onValueChange={(value) => value && editor.chain().focus().setTextAlign(value as 'left' | 'center' | 'right' | 'justify').run()}
+          className="w-full"
+        >
+          <ToggleGroupItem value="left" className="flex-1" aria-label="Align left"><AlignLeft /></ToggleGroupItem>
+          <ToggleGroupItem value="center" className="flex-1" aria-label="Align center"><AlignCenter /></ToggleGroupItem>
+          <ToggleGroupItem value="right" className="flex-1" aria-label="Align right"><AlignRight /></ToggleGroupItem>
+          <ToggleGroupItem value="justify" className="flex-1" aria-label="Justify"><AlignJustify /></ToggleGroupItem>
+        </ToggleGroup>
+      </div>
+
+      <p className="scripture-inspector-hint">
+        Paragraph controls apply at the caret or across the current text selection.
+      </p>
+      <div className="scripture-clear-formatting-action">
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="destructive" size="sm" className="w-full justify-start">
+              <RemoveFormatting /> Clear selection formatting
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent size="sm">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Clear selection formatting?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This removes inline styles and resets paragraph formatting for the current selection. You can undo it afterward.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}
+              >
+                Clear formatting
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </div>
+  )
+}
+
 export function InspectorPanel({
   docId,
   tree,
@@ -519,6 +1202,7 @@ export function InspectorPanel({
   onExportPng,
   exporting,
   exportError,
+  onSetEditing,
 }: InspectorPanelProps) {
   const { measureAll } = useGeometryRegistry()
   const exportQuality = useExportQuality()
@@ -833,25 +1517,30 @@ export function InspectorPanel({
                     aria-label="Transparent export background"
                   />
                 </div>
-                <div className="scripture-inspector-actions">
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={onExportPdf}
-                    disabled={exporting !== null}
-                  >
-                    <Download />
-                    {exporting === 'pdf' ? 'Exporting PDF…' : 'Export PDF'}
-                  </Button>
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={onExportPng}
-                    disabled={exporting !== null}
-                  >
-                    <Download />
-                    {exporting === 'png' ? 'Exporting PNG…' : 'Export PNG'}
-                  </Button>
+                <div className="scripture-inspector-row">
+                  <Label>Save as</Label>
+                  <div className="scripture-inspector-actions">
+                    <Button
+                      variant="default"
+                      size="xs"
+                      className="min-w-0 flex-1"
+                      onClick={onExportPdf}
+                      disabled={exporting !== null}
+                    >
+                      <Download />
+                      {exporting === 'pdf' ? 'Saving…' : 'PDF'}
+                    </Button>
+                    <Button
+                      variant="default"
+                      size="xs"
+                      className="min-w-0 flex-1"
+                      onClick={onExportPng}
+                      disabled={exporting !== null}
+                    >
+                      <Download />
+                      {exporting === 'png' ? 'Saving…' : 'PNG'}
+                    </Button>
+                  </div>
                 </div>
                 <p className="scripture-inspector-hint">PDF includes every page. PNG exports the first page.</p>
                 {exportError && <p className="scripture-error-text">{exportError}</p>}
@@ -938,12 +1627,37 @@ export function InspectorPanel({
   }
 
   if (node.kind !== 'code') {
+    const textFontSize = node.textFontSize ?? DEFAULT_TEXT_BLOCK_PROPS.textFontSize
+    const textLineHeight = node.textLineHeight ?? DEFAULT_TEXT_BLOCK_PROPS.textLineHeight
+    const textLetterSpacing = node.textLetterSpacing ?? DEFAULT_TEXT_BLOCK_PROPS.textLetterSpacing
+
     return (
       <InspectorCard context="text">
         <CardContent className="flex flex-col gap-5">
           <div className="scripture-inspector-section">
             <h3>Text block</h3>
+            <TextTypographyControls
+              docId={docId}
+              blockId={node.id}
+              defaults={{
+                family: node.textFontFamily ?? DEFAULT_TEXT_BLOCK_PROPS.textFontFamily,
+                source: node.textFontSource ?? DEFAULT_TEXT_BLOCK_PROPS.textFontSource,
+                size: textFontSize,
+                lineHeight: textLineHeight,
+                letterSpacing: textLetterSpacing,
+              }}
+            />
+            <p className="scripture-inspector-hint">
+              Typography applies to selected text when there is a selection, or to the full block otherwise. Text and code fonts stay independent.
+            </p>
           </div>
+          <Separator />
+          <TextContentControls
+            blockId={node.id}
+            onSetEditing={onSetEditing}
+            fontFamily={node.textFontFamily ?? DEFAULT_TEXT_BLOCK_PROPS.textFontFamily}
+            fontSource={node.textFontSource ?? DEFAULT_TEXT_BLOCK_PROPS.textFontSource}
+          />
           <Separator />
           <SizeSection node={node} docId={docId} />
         </CardContent>

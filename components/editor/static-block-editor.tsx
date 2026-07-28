@@ -27,6 +27,9 @@ import {
 } from '@/lib/presets/custom-syntax-themes'
 import type { SyntaxStyleRange } from '@/lib/shiki/token-types'
 import { codeLineFontSizes } from '@/lib/tiptap/line-font-sizes'
+import { googleFontsInDocument } from '@/lib/google-fonts'
+import { GoogleFontLoader } from './google-font-loader'
+import { textBlockStyle } from '@/lib/layout/text-style'
 
 const staticExtensions = baseExtensions()
 
@@ -49,6 +52,14 @@ export const StaticBlockEditor = memo(function StaticBlockEditor({
   trimRanges = [],
   diffLines = {},
   onLineClick,
+  textFontFamily = 'Geist Sans',
+  textFontSource = 'local',
+  textFontWeight = 400,
+  textFontStyle = 'normal',
+  textFontSize = 16,
+  textLineHeight = 1.5,
+  textLetterSpacing = 0,
+  textColor = 'currentColor',
 }: BlockEditorProps) {
   const entry = getYDoc(docId)
   const fragment = entry.doc.getXmlFragment(blockFragmentName(blockId))
@@ -175,9 +186,21 @@ export const StaticBlockEditor = memo(function StaticBlockEditor({
               color: resolveThemeForeground(theme),
               '--scripture-code-selection-accent': resolveThemeSelectionAccent(theme),
             } as CSSProperties
-          : undefined
+          : textBlockStyle({
+              textFontFamily,
+              textFontSource,
+              textFontWeight,
+              textFontStyle,
+              textFontSize,
+              textLineHeight,
+              textLetterSpacing,
+              textColor,
+            })
       }
     >
+      <GoogleFontLoader
+        families={kind === 'text' ? googleFontsInDocument(document, textFontFamily, textFontSource) : []}
+      />
       {isEmpty && (
         <span className="scripture-editor-placeholder" aria-hidden="true">
           {placeholder}

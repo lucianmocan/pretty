@@ -926,6 +926,7 @@ export function FrameNode({
       className={classNames(
         'scripture-leaf',
         node.kind === 'code' && 'scripture-code-leaf',
+        isEditing && 'scripture-editing',
         isAutoWidth && 'scripture-auto-width',
         isAutoHeight && 'scripture-auto-height',
         isSelected && 'scripture-selected',
@@ -986,6 +987,14 @@ export function FrameNode({
             trimRanges={node.trimRanges}
             diffLines={node.diffLines}
             onLineClick={handleCodeLineClick}
+            textFontFamily={node.textFontFamily}
+            textFontSource={node.textFontSource}
+            textFontWeight={node.textFontWeight}
+            textFontStyle={node.textFontStyle}
+            textFontSize={node.textFontSize}
+            textLineHeight={node.textLineHeight}
+            textLetterSpacing={node.textLetterSpacing}
+            textColor={node.textColor}
           />
         )}
       </div>

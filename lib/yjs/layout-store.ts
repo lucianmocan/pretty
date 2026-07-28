@@ -6,9 +6,11 @@ import {
   DEFAULT_CODE_BLOCK_PROPS,
   DEFAULT_CODE_BLOCK_WIDTH,
   DEFAULT_CODE_BLOCK_HEIGHT,
+  DEFAULT_TEXT_BLOCK_PROPS,
   DEFAULT_IMAGE_BLOCK_PROPS,
   type FrameProps,
   type CodeBlockProps,
+  type TextBlockProps,
   type ImageBlockProps,
   type LayoutNode,
   type CalloutAnnotation,
@@ -148,6 +150,17 @@ function setCodeFields(map: Y.Map<unknown>, props: CodeBlockProps) {
   map.set('diffLines', props.diffLines)
 }
 
+function setTextFields(map: Y.Map<unknown>, props: TextBlockProps) {
+  map.set('textFontFamily', props.textFontFamily)
+  map.set('textFontSource', props.textFontSource)
+  map.set('textFontWeight', props.textFontWeight)
+  map.set('textFontStyle', props.textFontStyle)
+  map.set('textFontSize', props.textFontSize)
+  map.set('textLineHeight', props.textLineHeight)
+  map.set('textLetterSpacing', props.textLetterSpacing)
+  map.set('textColor', props.textColor)
+}
+
 function setImageFields(map: Y.Map<unknown>, props: ImageBlockProps) {
   map.set('src', props.src)
   map.set('alt', props.alt)
@@ -238,6 +251,17 @@ function buildYNode(plain: LayoutNode): Y.Map<unknown> {
       trimRanges: plain.trimRanges ?? DEFAULT_CODE_BLOCK_PROPS.trimRanges,
       diffLines: plain.diffLines ?? DEFAULT_CODE_BLOCK_PROPS.diffLines,
     })
+  } else if (plain.kind === 'text') {
+    setTextFields(map, {
+      textFontFamily: plain.textFontFamily ?? DEFAULT_TEXT_BLOCK_PROPS.textFontFamily,
+      textFontSource: plain.textFontSource ?? DEFAULT_TEXT_BLOCK_PROPS.textFontSource,
+      textFontWeight: plain.textFontWeight ?? DEFAULT_TEXT_BLOCK_PROPS.textFontWeight,
+      textFontStyle: plain.textFontStyle ?? DEFAULT_TEXT_BLOCK_PROPS.textFontStyle,
+      textFontSize: plain.textFontSize ?? DEFAULT_TEXT_BLOCK_PROPS.textFontSize,
+      textLineHeight: plain.textLineHeight ?? DEFAULT_TEXT_BLOCK_PROPS.textLineHeight,
+      textLetterSpacing: plain.textLetterSpacing ?? DEFAULT_TEXT_BLOCK_PROPS.textLetterSpacing,
+      textColor: plain.textColor ?? DEFAULT_TEXT_BLOCK_PROPS.textColor,
+    })
   } else if (plain.kind === 'image') {
     setImageFields(map, {
       src: plain.src ?? DEFAULT_IMAGE_BLOCK_PROPS.src,
@@ -261,6 +285,8 @@ function createLeafMap(kind: 'code' | 'text' | 'image', language?: string): { ma
   map.set('y', null)
   if (kind === 'code') {
     setCodeFields(map, { ...DEFAULT_CODE_BLOCK_PROPS, language: language ?? DEFAULT_CODE_BLOCK_PROPS.language })
+  } else if (kind === 'text') {
+    setTextFields(map, DEFAULT_TEXT_BLOCK_PROPS)
   } else if (kind === 'image') {
     setImageFields(map, DEFAULT_IMAGE_BLOCK_PROPS)
   }
@@ -466,6 +492,17 @@ export function updateCodeProps(doc: Y.Doc, id: string, patch: Partial<CodeBlock
   const root = ensureRootFrame(doc)
   const node = findNodeMap(root, id)
   if (!node || node.get('kind') !== 'code') return
+  doc.transact(() => {
+    for (const [key, value] of Object.entries(patch)) {
+      node.set(key, value)
+    }
+  }, LAYOUT_MUTATION_ORIGIN)
+}
+
+export function updateTextProps(doc: Y.Doc, id: string, patch: Partial<TextBlockProps>) {
+  const root = ensureRootFrame(doc)
+  const node = findNodeMap(root, id)
+  if (!node || node.get('kind') !== 'text') return
   doc.transact(() => {
     for (const [key, value] of Object.entries(patch)) {
       node.set(key, value)

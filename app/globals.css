@@ -652,11 +652,132 @@ html[data-scripture-reduced-motion='true'] *::after {
 
 .scripture-text-editor {
   margin: 0;
-  font-family: var(--font-geist-sans), sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
+  font-family: var(--scripture-text-font, var(--font-geist-sans)), sans-serif;
+  font-size: var(--scripture-text-font-size, 16px);
+  font-weight: var(--scripture-text-font-weight, 400);
+  font-style: var(--scripture-text-font-style, normal);
+  line-height: var(--scripture-text-line-height, 1.5);
+  letter-spacing: var(--scripture-text-letter-spacing, 0);
+  color: var(--scripture-text-color, currentColor);
+  /* Never let the browser synthesize a heavier face in one renderer while
+     the other has the authored Google font face available. */
+  font-synthesis: none;
   outline: none;
   min-width: 160px;
+}
+
+/* ProseMirror defaults to `white-space: break-spaces`, which preserves a
+   leading space inside a marked range. The static renderer collapses that
+   space, making a highlight appear wider to the left only while editing.
+   Text blocks use normal document whitespace in both renderers; explicit
+   hard breaks remain represented by their own nodes. */
+.scripture-text-editor.ProseMirror {
+  white-space: normal;
+}
+
+.scripture-text-editor > :first-child {
+  margin-top: 0;
+}
+
+.scripture-text-editor > :last-child {
+  margin-bottom: 0;
+}
+
+.scripture-text-editor p {
+  margin: 0 0 0.65em;
+}
+
+.scripture-text-editor h1,
+.scripture-text-editor h2,
+.scripture-text-editor h3 {
+  margin: 0.85em 0 0.35em;
+  font-weight: 700;
+  line-height: inherit;
+  letter-spacing: inherit;
+}
+
+.scripture-text-editor h1 { font-size: 2em; }
+.scripture-text-editor h2 { font-size: 1.55em; }
+.scripture-text-editor h3 { font-size: 1.25em; }
+
+.scripture-text-editor ul,
+.scripture-text-editor ol {
+  margin: 0.4em 0 0.75em;
+  padding-left: 1.55em;
+}
+
+.scripture-text-editor ul { list-style: disc; }
+.scripture-text-editor ol { list-style: decimal; }
+.scripture-text-editor li { margin: 0.18em 0; }
+.scripture-text-editor li > p { margin: 0; }
+.scripture-text-editor li ul { list-style: circle; }
+.scripture-text-editor li li ul { list-style: square; }
+
+.scripture-text-editor ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0;
+}
+
+.scripture-text-editor ul[data-type='taskList'] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+}
+
+.scripture-text-editor ul[data-type='taskList'] li > label {
+  display: inline-flex;
+  padding-top: 0.22em;
+  user-select: none;
+}
+
+.scripture-text-editor ul[data-type='taskList'] li > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.scripture-text-editor ul[data-type='taskList'] input[type='checkbox'] {
+  width: 1em;
+  height: 1em;
+  accent-color: var(--primary);
+}
+
+.scripture-text-editor ul[data-type='taskList'] li[data-checked='true'] > div {
+  color: var(--muted-foreground);
+  text-decoration: line-through;
+}
+
+.scripture-text-editor blockquote {
+  margin: 0.65em 0;
+  padding-left: 0.9em;
+  border-left: 3px solid color-mix(in srgb, currentColor 30%, transparent);
+  color: color-mix(in srgb, currentColor 76%, transparent);
+}
+
+.scripture-text-editor code {
+  padding: 0.1em 0.3em;
+  border-radius: 0.3em;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.scripture-text-editor a {
+  color: #3b82f6;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+/* When a bold mark is nested inside a custom format span, do not let the
+   semantic <strong> element replace the explicitly selected font weight in
+   the static renderer. A plain <strong> without a format span remains 700. */
+.scripture-text-editor [data-format] strong {
+  font-weight: inherit;
+}
+
+.scripture-text-editor hr {
+  margin: 1em 0;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 25%, transparent);
 }
 
 .scripture-editor-wrapper {
@@ -692,9 +813,9 @@ html[data-scripture-reduced-motion='true'] *::after {
 }
 
 .scripture-editor-wrapper[data-kind='text'] .scripture-editor-placeholder {
-  font-family: var(--font-geist-sans), sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
+  font-family: var(--scripture-text-font, var(--font-geist-sans)), sans-serif;
+  font-size: var(--scripture-text-font-size, 16px);
+  line-height: var(--scripture-text-line-height, 1.5);
 }
 
 /* Layout tree: frames (containers) and leaves (code/text blocks). */
@@ -706,6 +827,19 @@ html[data-scripture-reduced-motion='true'] *::after {
 .scripture-leaf {
   position: relative;
   border-radius: 4px;
+  cursor: default;
+}
+
+.scripture-leaf:not(.scripture-editing) .scripture-text-editor,
+.scripture-leaf:not(.scripture-editing) .scripture-code-editor,
+.scripture-leaf:not(.scripture-editing) .scripture-text-editor * ,
+.scripture-leaf:not(.scripture-editing) .scripture-code-editor * {
+  cursor: default !important;
+}
+
+.scripture-leaf.scripture-editing .scripture-text-editor,
+.scripture-leaf.scripture-editing .scripture-code-editor {
+  cursor: text;
 }
 
 .scripture-leaf.scripture-auto-width {
@@ -717,6 +851,26 @@ html[data-scripture-reduced-motion='true'] *::after {
 
 .scripture-leaf.scripture-auto-height {
   min-height: 1.5em;
+}
+
+/* Auto-sized text blocks should keep the same intrinsic width while they are
+   editable. ProseMirror's default `word-wrap: break-word` makes its editor
+   choose a smaller min-content width than the static renderer, so a word can
+   wrap only while editing and then unwrap again on blur. */
+.scripture-leaf.scripture-auto-width .scripture-editor-wrapper,
+.scripture-leaf.scripture-auto-width .scripture-text-editor {
+  width: max-content;
+  max-width: none;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+/* The static renderer uses a regular div while the live editor uses
+   ProseMirror. Give both paragraph/list roots the same intrinsic width so a
+   static block cannot wrap text that fits while editing. */
+.scripture-leaf.scripture-auto-width .scripture-text-editor > * {
+  width: max-content;
+  max-width: none;
 }
 
 /* A new code block should look like an editor, not a one-line label. Keep
@@ -1187,12 +1341,114 @@ html[data-scripture-panning] .scripture-node-controls {
   z-index: 70;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0.25rem;
   padding: 5px;
   border-radius: var(--radius-md);
   background: var(--popover);
   border: 1px solid var(--border);
   box-shadow: inset 0 1px 0 var(--highlight-top), var(--shadow-md);
+  max-width: min(980px, calc(100vw - 16px));
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.scripture-bubble-menu.is-text {
+  min-height: 38px;
+}
+
+.scripture-bubble-style-toggle[data-state='on'] {
+  background: color-mix(in srgb, var(--foreground) 12%, var(--background));
+  color: var(--foreground);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.scripture-bubble-style-toggle {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+}
+
+.scripture-bubble-weight-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.scripture-bubble-weight-anchor::after {
+  content: '';
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  width: 0.28rem;
+  height: 0.28rem;
+  border-right: 1.5px solid var(--foreground);
+  border-bottom: 1.5px solid var(--foreground);
+  border-radius: 999px;
+  transform: translate(-0.22rem, -0.22rem) rotate(45deg);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.scripture-bubble-weight-anchor::before {
+  content: '';
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 0.72rem;
+  height: 0.72rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--background);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 20%, transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.scripture-font-weight-picker {
+  width: 10rem;
+  padding: 0.375rem;
+  font-family: var(--font-geist-sans), sans-serif;
+}
+
+.scripture-font-weight-label {
+  padding: 0.125rem 0.25rem 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+}
+
+.scripture-font-weight-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.125rem;
+}
+
+.scripture-font-weight-option {
+  min-height: 1.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.scripture-font-weight-option:hover,
+.scripture-font-weight-option[data-selected] {
+  border-color: var(--primary);
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.scripture-font-weight-option:hover:not([data-selected]) {
+  border-color: var(--border);
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.scripture-font-weight-status {
+  padding: 0.5rem 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
 }
 
 .scripture-bubble-divider {
@@ -1203,26 +1459,341 @@ html[data-scripture-panning] .scripture-node-controls {
 }
 
 .scripture-swatch {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
+  width: 20px;
+  height: 20px;
+  border-radius: 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--foreground) 16%, transparent);
   cursor: pointer;
   padding: 0;
-  transition: transform 0.1s;
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
 }
 
 .scripture-swatch:hover {
-  transform: scale(1.15);
+  transform: translateY(-1px);
   border-color: var(--ring);
+  box-shadow: var(--shadow-sm);
+}
+
+.scripture-swatch[data-selected] {
+  border-color: var(--popover);
+  box-shadow: 0 0 0 2px var(--ring);
 }
 
 .scripture-font-size {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
   font-size: 12px;
   color: var(--muted-foreground);
   min-width: 30px;
   text-align: center;
 }
+
+.scripture-font-size:hover {
+  color: var(--foreground);
+}
+
+.scripture-color-trigger {
+  position: relative;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+}
+
+.scripture-color-trigger > span {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  width: 12px;
+  height: 3px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 25%, transparent);
+  border-radius: 999px;
+}
+
+.scripture-color-picker {
+  width: 220px;
+  gap: 0.625rem;
+  padding: 0.625rem;
+  font-family: var(--font-geist-sans), sans-serif;
+  font-size: 0.75rem;
+}
+
+.scripture-color-picker button,
+.scripture-color-picker input {
+  font-family: var(--font-geist-sans), sans-serif;
+}
+
+.scripture-color-picker-heading,
+.scripture-color-custom,
+.scripture-color-alpha,
+.scripture-link-picker,
+.scripture-font-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scripture-color-picker-heading {
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.scripture-color-picker-heading > span {
+  color: var(--foreground);
+  font-size: 0.75rem;
+  letter-spacing: -0.01em;
+}
+
+.scripture-color-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1.25rem);
+  justify-content: space-between;
+  gap: 0.25rem 0;
+}
+
+.scripture-color-picker small,
+.scripture-font-picker-label,
+.scripture-font-picker-hint {
+  color: var(--muted-foreground);
+  font-size: 0.625rem;
+}
+
+.scripture-color-picker small {
+  margin-bottom: -0.25rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.scripture-color-custom input[type='color'],
+.scripture-inspector-row input[type='color'] {
+  width: 32px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.scripture-color-custom {
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.scripture-color-custom input[type='color'] {
+  flex: none;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 0.4rem;
+}
+
+.scripture-color-custom input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.scripture-color-custom input[type='color']::-webkit-color-swatch {
+  border: 0;
+}
+
+.scripture-color-custom input[type='color']::-moz-color-swatch {
+  border: 0;
+}
+
+.scripture-color-custom [data-slot='input'] {
+  height: 28px;
+  font-family: var(--font-geist-sans), sans-serif;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+}
+
+.scripture-color-alpha {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+}
+
+.scripture-color-alpha-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.scripture-color-alpha-heading output {
+  min-width: 2.35rem;
+  padding: 0.15rem 0.35rem;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--foreground);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.scripture-color-alpha-slider {
+  width: 100%;
+  height: 0.25rem;
+  border-radius: 999px;
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.scripture-color-alpha-slider::-webkit-slider-thumb {
+  width: 0.875rem;
+  height: 0.875rem;
+  border: 2px solid var(--primary);
+  border-radius: 50%;
+  background: var(--popover);
+  box-shadow: var(--shadow-sm);
+  appearance: none;
+}
+
+.scripture-color-alpha-slider::-moz-range-thumb {
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 2px solid var(--primary);
+  border-radius: 50%;
+  background: var(--popover);
+  box-shadow: var(--shadow-sm);
+}
+
+.scripture-color-alpha-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
+}
+
+.scripture-color-alpha-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
+}
+
+.scripture-font-picker-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font-family: var(--font-geist-sans), sans-serif;
+  font-size: 0.6875rem;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scripture-font-picker-row:hover,
+.scripture-font-picker-row[data-selected] {
+  background: var(--accent);
+}
+
+.scripture-link-picker {
+  width: 330px;
+  flex-direction: row;
+}
+
+.scripture-link-picker [data-slot='input'] { flex: 1; }
+
+.scripture-font-picker-trigger {
+  width: 100%;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  font-family: var(--font-geist-sans), sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 400;
+}
+
+.scripture-inspector .scripture-font-picker-trigger.scripture-font-picker-trigger {
+  font-size: 0.6875rem;
+}
+
+.scripture-font-picker-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scripture-font-picker {
+  width: 330px;
+  padding: 8px;
+  font-family: var(--font-geist-sans), sans-serif;
+  font-size: 0.6875rem;
+}
+
+.scripture-font-picker-search {
+  position: relative;
+}
+
+.scripture-font-picker-search > svg {
+  position: absolute;
+  left: 9px;
+  z-index: 1;
+  width: 15px;
+  color: var(--muted-foreground);
+}
+
+.scripture-font-picker-search [data-slot='input'] {
+  padding-left: 30px;
+  font-size: 0.6875rem;
+}
+
+.scripture-font-picker-preview {
+  display: flex;
+  align-items: center;
+  height: 64px;
+  overflow: hidden;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--muted) 50%, transparent);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.scripture-font-picker-list {
+  max-height: 285px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.scripture-font-picker-label {
+  padding: 8px 8px 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.5625rem;
+}
+
+.scripture-font-picker-row small {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 0.5625rem;
+}
+
+.scripture-font-picker-row > svg {
+  width: 14px;
+  margin-left: auto;
+}
+
+.scripture-font-picker-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 80px;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+}
+
+.scripture-font-picker-status svg { width: 16px; }
+.scripture-font-picker-status.is-error { color: var(--destructive); }
+.scripture-font-picker-hint { margin: 0; padding: 2px 6px 0; }
 
 /* ---------------------------------------------------------------------------
    Theme swatch picker -- small color-preview buttons instead of a plain
@@ -1826,6 +2397,182 @@ html[data-scripture-panning] .scripture-node-controls {
   color: var(--muted-foreground);
 }
 
+.scripture-text-metrics,
+.scripture-list-controls,
+.scripture-inline-format-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.scripture-text-metrics {
+  gap: 0.25rem;
+}
+
+.scripture-selection-typography-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5.25rem;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.scripture-selection-font-size {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.scripture-selection-font-size > svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: none;
+  color: var(--muted-foreground);
+}
+
+.scripture-text-metric {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.scripture-text-metric > svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: none;
+  color: var(--muted-foreground);
+}
+
+.scripture-text-metric-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1.5rem;
+  align-items: center;
+  flex: 1;
+  height: 1.75rem;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--input);
+  border-radius: min(var(--radius-md), 10px);
+  background: var(--background);
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.scripture-text-metric-picker:hover {
+  background: var(--muted);
+}
+
+.scripture-text-metric-picker:focus-within {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent);
+}
+
+.scripture-text-metric-input {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), sans-serif;
+  font-size: 0.625rem;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.scripture-text-metric-input::-webkit-inner-spin-button,
+.scripture-text-metric-input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.scripture-text-metric-chevron {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.scripture-text-metric-chevron:hover {
+  color: var(--foreground);
+}
+
+.scripture-text-metric-chevron svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.scripture-text-metric-popover {
+  width: 8.5rem;
+  gap: 0.375rem;
+  padding: 0.375rem;
+  font-family: var(--font-geist-sans), sans-serif;
+  font-size: 0.75rem;
+}
+
+.scripture-text-metric-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.125rem;
+}
+
+.scripture-text-metric-option {
+  padding: 0.3rem 0.375rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  cursor: pointer;
+}
+
+.scripture-text-metric-option:hover,
+.scripture-text-metric-option[data-selected] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.scripture-inline-format-controls {
+  justify-content: space-between;
+}
+
+.scripture-inline-format-controls [data-slot='toggle'] {
+  min-width: 1.75rem;
+  padding-inline: 0.375rem;
+}
+
+.scripture-list-type-controls {
+  flex: 1;
+  min-width: 0;
+}
+
+.scripture-list-divider {
+  width: 1px;
+  height: 1.25rem;
+  margin-inline: 0.125rem;
+  background: var(--border);
+}
+
+.scripture-clear-formatting-action {
+  margin-top: 0.25rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
 /* Normalizes shadcn primitives' own default text-sm (14px) down to match
    the Inspector's established 11px header / 12px field-label scale.
    Without this, Button/Input/Select/Toggle text (Save/Duplicate/Delete,
@@ -1882,7 +2629,7 @@ html[data-scripture-panning] .scripture-node-controls {
 
 .scripture-inspector-actions {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 0.375rem;
 }
 

@@ -945,6 +945,7 @@ export default function DocumentEditorPage() {
               onExportPng={() => handleExport('png')}
               exporting={exporting}
               exportError={exportError}
+              onSetEditing={setEditingId}
             />
           </div>
         ) : (

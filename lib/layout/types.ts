@@ -138,9 +138,34 @@ export interface LayoutNode {
   trimRanges?: Array<[number, number]>
   // 1-based line number -> diff marker for that line.
   diffLines?: Record<number, 'add' | 'remove'>
+  // text-only -- deliberately separate from the code properties above.
+  // Google font family names are stored verbatim so newly-added families do
+  // not require a document migration or a new app release.
+  textFontFamily?: string
+  textFontSource?: TextFontSource
+  textFontWeight?: number
+  textFontStyle?: TextFontStyle
+  textFontSize?: number
+  textLineHeight?: number
+  textLetterSpacing?: number
+  textColor?: string
   // image-only
   src?: string
   alt?: string
+}
+
+export type TextFontSource = 'local' | 'google'
+export type TextFontStyle = 'normal' | 'italic'
+
+export interface TextBlockProps {
+  textFontFamily: string
+  textFontSource: TextFontSource
+  textFontWeight: number
+  textFontStyle: TextFontStyle
+  textFontSize: number
+  textLineHeight: number
+  textLetterSpacing: number
+  textColor: string
 }
 
 export interface CodeBlockProps {
@@ -186,6 +211,17 @@ export const DEFAULT_CODE_BLOCK_PROPS: CodeBlockProps = {
   highlightLines: [],
   trimRanges: [],
   diffLines: {},
+}
+
+export const DEFAULT_TEXT_BLOCK_PROPS: TextBlockProps = {
+  textFontFamily: 'Geist Sans',
+  textFontSource: 'local',
+  textFontWeight: 400,
+  textFontStyle: 'normal',
+  textFontSize: 16,
+  textLineHeight: 1.5,
+  textLetterSpacing: 0,
+  textColor: 'currentColor',
 }
 
 export interface ImageBlockProps {

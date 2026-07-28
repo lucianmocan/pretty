@@ -33,6 +33,10 @@ import {
 } from '@/lib/editor-preferences'
 import { StaticBlockEditor } from './static-block-editor'
 import { codeLineFontSizes } from '@/lib/tiptap/line-font-sizes'
+import type { TextFontSource, TextFontStyle } from '@/lib/layout/types'
+import { textBlockStyle } from '@/lib/layout/text-style'
+import { googleFontsInDocument } from '@/lib/google-fonts'
+import { GoogleFontLoader } from './google-font-loader'
 
 const RETOKENIZE_DEBOUNCE_MS = 140
 const RETOKENIZE_RETRY_MS = 900
@@ -69,6 +73,14 @@ export interface BlockEditorProps {
   trimRanges?: Array<[number, number]>
   diffLines?: Record<number, 'add' | 'remove'>
   onLineClick?: (lineNumber: number) => void
+  textFontFamily?: string
+  textFontSource?: TextFontSource
+  textFontWeight?: number
+  textFontStyle?: TextFontStyle
+  textFontSize?: number
+  textLineHeight?: number
+  textLetterSpacing?: number
+  textColor?: string
 }
 
 /**
@@ -98,6 +110,14 @@ function InteractiveBlockEditor({
   diffLines = {},
   onLineClick,
   focusOnMount = false,
+  textFontFamily = 'Geist Sans',
+  textFontSource = 'local',
+  textFontWeight = 400,
+  textFontStyle = 'normal',
+  textFontSize = 16,
+  textLineHeight = 1.5,
+  textLetterSpacing = 0,
+  textColor = 'currentColor',
 }: BlockEditorProps) {
   const [synced, setSynced] = useState(false)
   const [customThemeRevision, setCustomThemeRevision] = useState(0)
@@ -450,12 +470,16 @@ function InteractiveBlockEditor({
         lineCount: text.split('\n').length,
         isEmpty: text.trim().length === 0,
         lineFontSizes: currentEditor ? codeLineFontSizes(currentEditor.getJSON()) : [],
+        googleFonts: currentEditor && kind === 'text'
+          ? googleFontsInDocument(currentEditor.getJSON(), textFontFamily, textFontSource)
+          : [],
       }
     },
   })
   const lineCount = renderedEditorState?.lineCount ?? 1
   const isEmpty = renderedEditorState?.isEmpty ?? true
   const lineFontSizes = renderedEditorState?.lineFontSizes ?? []
+  const googleFonts = renderedEditorState?.googleFonts ?? []
 
   if (!synced) {
     return <div className="scripture-editor-loading">Loading…</div>
@@ -483,10 +507,27 @@ function InteractiveBlockEditor({
               color: resolveThemeForeground(theme),
               '--scripture-code-selection-accent': resolveThemeSelectionAccent(theme),
             } as CSSProperties
-          : undefined
+          : textBlockStyle({
+              textFontFamily,
+              textFontSource,
+              textFontWeight,
+              textFontStyle,
+              textFontSize,
+              textLineHeight,
+              textLetterSpacing,
+              textColor,
+            })
       }
     >
-      {editor && <BubbleToolbar editor={editor} />}
+      <GoogleFontLoader families={googleFonts} />
+      {editor && (
+        <BubbleToolbar
+          editor={editor}
+          kind={kind}
+          fontFamily={kind === 'text' ? textFontFamily : fontFamily}
+          fontSource={kind === 'text' ? textFontSource : 'local'}
+        />
+      )}
       {isEmpty && (
         <span className="scripture-editor-placeholder" aria-hidden="true">
           {placeholder}

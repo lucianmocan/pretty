@@ -20,6 +20,7 @@ interface EditorRegistryValue {
   getAll: () => Map<string, Editor>
   getStatic: () => Map<string, StaticEditorAdapter>
   waitForEditor: (blockId: string, timeoutMs?: number) => Promise<Editor | null>
+  subscribe: (listener: () => void) => () => void
 }
 
 const EditorRegistryContext = createContext<EditorRegistryValue | null>(null)
@@ -32,6 +33,8 @@ export function EditorRegistryProvider({ children }: { children: ReactNode }) {
   const mapRef = useRef(new Map<string, Editor>())
   const staticMapRef = useRef(new Map<string, StaticEditorAdapter>())
   const waitersRef = useRef(new Map<string, Set<(editor: Editor | null) => void>>())
+  const listenersRef = useRef(new Set<() => void>())
+  const notify = useCallback(() => listenersRef.current.forEach((listener) => listener()), [])
 
   const register = useCallback((blockId: string, editor: Editor) => {
     mapRef.current.set(blockId, editor)
@@ -40,10 +43,13 @@ export function EditorRegistryProvider({ children }: { children: ReactNode }) {
       waiters.forEach((resolve) => resolve(editor))
       waitersRef.current.delete(blockId)
     }
-  }, [])
+    notify()
+  }, [notify])
   const unregister = useCallback((blockId: string, editor: Editor) => {
-    if (mapRef.current.get(blockId) === editor) mapRef.current.delete(blockId)
-  }, [])
+    if (mapRef.current.get(blockId) !== editor) return
+    mapRef.current.delete(blockId)
+    notify()
+  }, [notify])
   const registerStatic = useCallback((blockId: string, adapter: StaticEditorAdapter) => {
     staticMapRef.current.set(blockId, adapter)
   }, [])
@@ -67,6 +73,12 @@ export function EditorRegistryProvider({ children }: { children: ReactNode }) {
       }, timeoutMs)
     })
   }, [])
+  const subscribe = useCallback((listener: () => void) => {
+    listenersRef.current.add(listener)
+    return () => {
+      listenersRef.current.delete(listener)
+    }
+  }, [])
   const value = useMemo(() => ({
     register,
     unregister,
@@ -75,7 +87,8 @@ export function EditorRegistryProvider({ children }: { children: ReactNode }) {
     getAll,
     getStatic,
     waitForEditor,
-  }), [getAll, getStatic, register, registerStatic, unregister, unregisterStatic, waitForEditor])
+    subscribe,
+  }), [getAll, getStatic, register, registerStatic, subscribe, unregister, unregisterStatic, waitForEditor])
 
   return (
     <EditorRegistryContext.Provider value={value}>
