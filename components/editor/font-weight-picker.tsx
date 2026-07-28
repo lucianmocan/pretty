@@ -73,6 +73,7 @@ export function FontWeightPicker({
         align="start"
         sideOffset={6}
         onOpenAutoFocus={(event) => {
+          if (!(event.currentTarget instanceof HTMLElement)) return
           const selected = event.currentTarget.querySelector<HTMLButtonElement>('[data-selected]')
           if (!selected) return
           event.preventDefault()
