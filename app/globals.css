@@ -2334,15 +2334,19 @@ html[data-scripture-panning] .scripture-node-controls {
   border: 1px solid var(--border);
   border-radius: inherit;
   pointer-events: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-.scripture-page-card:hover::after {
-  border-color: var(--ring);
+.scripture-page-card:hover:not(.is-active)::after {
+  border-color: color-mix(in srgb, var(--ring) 58%, var(--border));
 }
 
 .scripture-page-card.is-active::after {
   border-width: 2px;
   border-color: var(--ring);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--ring) 30%, transparent),
+    0 5px 16px color-mix(in srgb, var(--foreground) 16%, transparent);
 }
 
 .scripture-page-card::before,
@@ -2467,6 +2471,7 @@ html[data-scripture-panning] .scripture-node-controls {
   background: var(--muted);
   font-size: 0.6875rem;
   color: var(--muted-foreground);
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
 .scripture-page-card-label {
@@ -2478,9 +2483,18 @@ html[data-scripture-panning] .scripture-node-controls {
 }
 
 .scripture-page-number {
+  display: inline-flex;
   flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.2rem;
+  border-radius: 0.25rem;
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
+  line-height: 1;
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
 .scripture-page-name {
@@ -2514,7 +2528,19 @@ button.scripture-page-name {
 }
 
 .scripture-page-card.is-active .scripture-page-card-footer {
+  background: color-mix(in srgb, var(--ring) 24%, var(--muted));
   color: var(--foreground);
+}
+
+.scripture-page-card.is-active .scripture-page-number,
+.scripture-page-row.is-active .scripture-page-number {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.scripture-page-card.is-active .scripture-page-name,
+.scripture-page-row.is-active .scripture-page-name {
+  font-weight: 600;
 }
 
 .scripture-page-card-actions {
@@ -2556,6 +2582,11 @@ button.scripture-page-name {
 .scripture-layer-row.is-selected {
   background: color-mix(in srgb, var(--ring) 16%, transparent);
   color: var(--foreground);
+}
+
+.scripture-page-row.is-active {
+  background: color-mix(in srgb, var(--ring) 24%, transparent);
+  box-shadow: inset 3px 0 var(--ring);
 }
 
 .scripture-page-row-label,
@@ -3921,33 +3952,6 @@ button.scripture-page-name {
   padding-top: 0.75rem;
 }
 
-.scripture-dashboard-loading {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5625rem;
-  width: 100%;
-  padding-top: 2rem;
-}
-
-.scripture-dashboard-loading div {
-  height: 2.625rem;
-  border-radius: var(--radius-md);
-  background: linear-gradient(90deg, var(--muted), var(--accent), var(--muted));
-  background-size: 220% 100%;
-  animation: scripture-dashboard-loading 1.4s ease infinite;
-}
-
-.scripture-dashboard-loading div:first-child {
-  width: 46%;
-  height: 5.375rem;
-}
-
-@keyframes scripture-dashboard-loading {
-  to {
-    background-position: -120% 0;
-  }
-}
-
 .scripture-dashboard-empty {
   display: flex;
   flex-direction: column;
@@ -4473,6 +4477,53 @@ button.scripture-page-name {
 }
 
 .scripture-export-progress svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--muted-foreground);
+  animation: scripture-save-spin 800ms linear infinite;
+}
+
+/* Every route loader uses the viewport as its containing block. Centering a
+   loader in its surrounding flex layout made its position depend on toolbar
+   height, dashboard padding, and whatever content had already mounted. */
+.scripture-route-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--foreground);
+  cursor: progress;
+  text-decoration: none;
+}
+
+.scripture-route-loading.is-page {
+  background: var(--background);
+}
+
+.scripture-route-loading.is-content,
+.scripture-route-loading.is-overlay {
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+  backdrop-filter: blur(0.5rem);
+}
+
+.scripture-route-loading-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--shadow-md);
+  font-size: 0.8125rem;
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.scripture-route-loading-progress svg {
   width: 1rem;
   height: 1rem;
   color: var(--muted-foreground);

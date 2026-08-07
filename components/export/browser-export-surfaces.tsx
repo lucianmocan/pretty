@@ -27,17 +27,20 @@ export const BrowserExportPage = memo(function BrowserExportPage({
   margin,
   priority = 'focused',
   allowSyntaxFallback = false,
+  revision = 0,
   pageNumber,
 }: {
   pageId: string
   margin: number
   priority?: 'focused' | 'background'
   allowSyntaxFallback?: boolean
+  revision?: number
   pageNumber?: { number: number; settings: PageNumberSettings }
 }) {
   const tree = useLayoutTree(pageId)
   const [prepared, setPrepared] = useState<{
     tree: LayoutNode
+    revision: number
     syntaxSnapshots: ExportSyntaxSnapshots | null
     error: string | null
   } | null>(null)
@@ -66,6 +69,7 @@ export const BrowserExportPage = memo(function BrowserExportPage({
         if (!controller.signal.aborted) {
           setPrepared({
             tree,
+            revision,
             syntaxSnapshots: Object.fromEntries(entries),
             error: null,
           })
@@ -75,16 +79,18 @@ export const BrowserExportPage = memo(function BrowserExportPage({
         if (controller.signal.aborted) return
         setPrepared({
           tree,
+          revision,
           syntaxSnapshots: null,
           error: error instanceof Error ? error.message : 'Syntax highlighting failed',
         })
       })
 
     return () => controller.abort()
-  }, [pageId, priority, tree])
+  }, [pageId, priority, revision, tree])
 
-  const syntaxSnapshots = prepared?.tree === tree ? prepared.syntaxSnapshots : null
-  const syntaxError = prepared?.tree === tree ? prepared.error : null
+  const preparedIsCurrent = prepared?.tree === tree && prepared.revision === revision
+  const syntaxSnapshots = preparedIsCurrent ? prepared.syntaxSnapshots : null
+  const syntaxError = preparedIsCurrent ? prepared.error : null
   const renderableSnapshots = syntaxSnapshots ?? (allowSyntaxFallback && syntaxError ? {} : null)
 
   return (

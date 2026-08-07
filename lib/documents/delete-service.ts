@@ -4,7 +4,8 @@ import { getPageIds, deleteDocumentMeta, removePage } from '@/lib/documents/mani
 import { deleteUploadedImage } from '@/lib/images/client'
 import { deleteYDoc, getYDoc } from '@/lib/yjs/doc-store'
 import { toPlainTree } from '@/lib/yjs/layout-store'
-import { clearDocumentPreview } from '@/lib/documents/preview'
+import { clearDocumentPreview, clearPagePreview } from '@/lib/documents/preview'
+import { clearLayoutTreeCache } from '@/lib/use-layout-tree'
 import {
   deletePageResources,
   type PageDeletionDependencies,
@@ -31,6 +32,8 @@ export async function deletePage(docId: string, pageId: string): Promise<void> {
   if (pageIds.length <= 1) throw new Error('A document must keep at least one page.')
   if (!pageIds.includes(pageId)) throw new Error('Page not found.')
   await deletePageResources(pageId, browserDeletionDependencies)
+  clearLayoutTreeCache(pageId)
+  await clearPagePreview(pageId)
   removePage(docId, pageId)
 }
 
@@ -38,7 +41,8 @@ export async function deleteDocument(docId: string): Promise<void> {
   const pageIds = getPageIds(docId)
   for (const pageId of pageIds) {
     await deletePageResources(pageId, browserDeletionDependencies)
+    clearLayoutTreeCache(pageId)
   }
-  clearDocumentPreview(docId)
+  await clearDocumentPreview(docId, pageIds)
   deleteDocumentMeta(docId)
 }

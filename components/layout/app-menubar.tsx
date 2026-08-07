@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { Check, ChevronRight, Home, LoaderCircle, Settings2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { SettingsDialog } from '@/components/settings/settings-dialog'
+import { PendingRouteLoading } from '@/components/layout/route-loading'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -29,6 +30,7 @@ export function AppMenubar({
         <div className="scripture-document-identity">
           <Link href="/dashboard" className="scripture-home-link" aria-label="Back to workspace" title="Back to workspace">
             <Home size={16} />
+            <PendingRouteLoading label="Returning to workspace…" />
           </Link>
 
           <ChevronRight className="scripture-document-breadcrumb" aria-hidden="true" />

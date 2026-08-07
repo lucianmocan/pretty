@@ -119,7 +119,9 @@ function InteractiveBlockEditor({
   textLetterSpacing = 0,
   textColor = 'currentColor',
 }: BlockEditorProps) {
-  const [synced, setSynced] = useState(false)
+  const entry = getYDoc(docId)
+  const [syncedDocId, setSyncedDocId] = useState<string | null>(() => entry.isSynced ? docId : null)
+  const synced = syncedDocId === docId
   const [customThemeRevision, setCustomThemeRevision] = useState(0)
   const { elementRef: syntaxElementRef, priority: syntaxWorkPriority } =
     useSyntaxPriority(kind === 'code' && synced)
@@ -136,7 +138,7 @@ function InteractiveBlockEditor({
   languageRef.current = language
   themeRef.current = theme
 
-  const { doc: ydoc } = getYDoc(docId)
+  const { doc: ydoc } = entry
   const fragment = ydoc.getXmlFragment(blockFragmentName(blockId))
   const undoManager = getUndoManager(docId)
 
@@ -167,14 +169,18 @@ function InteractiveBlockEditor({
   }, [kind])
 
   useEffect(() => {
+    if (entry.isSynced) {
+      setSyncedDocId(docId)
+      return
+    }
     let cancelled = false
-    getYDoc(docId).synced.then(() => {
-      if (!cancelled) setSynced(true)
+    entry.synced.then(() => {
+      if (!cancelled) setSyncedDocId(docId)
     })
     return () => {
       cancelled = true
     }
-  }, [docId])
+  }, [docId, entry])
 
   async function rehighlightCode(editor: Editor) {
     if (editor.view.composing) {

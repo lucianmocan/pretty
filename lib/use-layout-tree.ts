@@ -1,36 +1,114 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useSyncExternalStore } from 'react'
 import { getYDoc } from '@/lib/yjs/doc-store'
 import { ensureRootFrame, toPlainTree } from '@/lib/yjs/layout-store'
 import type { LayoutNode } from '@/lib/layout/types'
 
-/** Live-updating plain snapshot of the layout tree, ready once the doc has
- * synced from IndexedDB. Subscribes with observeDeep so nested frame/children
- * mutations (not just root-level ones) trigger a re-render. */
-export function useLayoutTree(docId: string | null): LayoutNode | null {
-  const [tree, setTree] = useState<LayoutNode | null>(null)
+type LayoutRoot = ReturnType<typeof ensureRootFrame>
 
-  useEffect(() => {
-    if (!docId) return
-    let cancelled = false
-    let cleanup: (() => void) | null = null
-    const { doc, synced } = getYDoc(docId)
+interface LayoutTreeStore {
+  getSnapshot: () => LayoutNode | null
+  subscribe: (listener: () => void) => () => void
+  preload: () => Promise<void>
+  dispose: () => void
+}
 
-    synced.then(() => {
-      if (cancelled) return
-      const root = ensureRootFrame(doc)
-      const update = () => setTree(toPlainTree(doc))
-      update()
-      root.observeDeep(update)
-      cleanup = () => root.unobserveDeep(update)
+const stores = new Map<string, LayoutTreeStore>()
+const emptyStore: LayoutTreeStore = {
+  getSnapshot: () => null,
+  subscribe: () => () => undefined,
+  preload: () => Promise.resolve(),
+  dispose: () => undefined,
+}
+
+function createLayoutTreeStore(docId: string): LayoutTreeStore {
+  let snapshot: LayoutNode | null = null
+  let root: LayoutRoot | null = null
+  let observing = false
+  let disposed = false
+  let loadPromise: Promise<void> | null = null
+  const listeners = new Set<() => void>()
+
+  const notify = () => listeners.forEach((listener) => listener())
+  const update = () => {
+    if (disposed) return
+    snapshot = toPlainTree(getYDoc(docId).doc)
+    notify()
+  }
+  const beginObserving = () => {
+    if (!root || observing || listeners.size === 0 || disposed) return
+    root.observeDeep(update)
+    observing = true
+  }
+  const stopObserving = () => {
+    if (!root || !observing) return
+    root.unobserveDeep(update)
+    observing = false
+  }
+  const preload = () => {
+    if (loadPromise) return loadPromise
+    const entry = getYDoc(docId)
+    loadPromise = entry.synced.then(() => {
+      if (disposed) return
+      root = ensureRootFrame(entry.doc)
+      snapshot = toPlainTree(entry.doc)
+      beginObserving()
+      notify()
     })
+    return loadPromise
+  }
 
-    return () => {
-      cancelled = true
-      cleanup?.()
-    }
-  }, [docId])
+  return {
+    getSnapshot: () => snapshot,
+    subscribe(listener) {
+      if (disposed) return () => undefined
+      listeners.add(listener)
+      void preload()
+      if (root) {
+        beginObserving()
+        // The document may have changed while this store had no subscribers.
+        snapshot = toPlainTree(getYDoc(docId).doc)
+      }
+      return () => {
+        listeners.delete(listener)
+        if (listeners.size === 0) stopObserving()
+      }
+    },
+    preload,
+    dispose() {
+      disposed = true
+      stopObserving()
+      listeners.clear()
+      root = null
+      snapshot = null
+    },
+  }
+}
 
-  return tree
+function getLayoutTreeStore(docId: string): LayoutTreeStore {
+  let store = stores.get(docId)
+  if (!store) {
+    store = createLayoutTreeStore(docId)
+    stores.set(docId, store)
+  }
+  return store
+}
+
+/** Starts IndexedDB/Yjs hydration and keeps the resulting plain tree ready
+ * for a future page switch without mounting a React consumer. */
+export function preloadLayoutTree(docId: string): Promise<void> {
+  return getLayoutTreeStore(docId).preload()
+}
+
+export function clearLayoutTreeCache(docId: string): void {
+  stores.get(docId)?.dispose()
+  stores.delete(docId)
+}
+
+/** A page-aware shared snapshot. Each page owns a separate store, so changing
+ * docId can never expose the previous page's tree under the new document id. */
+export function useLayoutTree(docId: string | null): LayoutNode | null {
+  const store = docId ? getLayoutTreeStore(docId) : emptyStore
+  return useSyncExternalStore(store.subscribe, store.getSnapshot, () => null)
 }

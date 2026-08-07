@@ -21,10 +21,11 @@ export function blockFragmentName(blockId: string): string {
   return `block:${blockId}`
 }
 
-interface DocEntry {
+export interface DocEntry {
   doc: Y.Doc
   persistence: IndexeddbPersistence
   synced: Promise<void>
+  isSynced: boolean
   undoManager: Y.UndoManager | null
 }
 
@@ -40,11 +41,23 @@ export function getYDoc(id: string): DocEntry {
   if (!entry) {
     const doc = new Y.Doc()
     const persistence = new IndexeddbPersistence(`scripture:${id}`, doc)
+    let resolveSynced!: () => void
     const synced = new Promise<void>((resolve) => {
-      persistence.once('synced', () => resolve())
+      resolveSynced = resolve
     })
-    entry = { doc, persistence, synced, undoManager: null }
-    docs.set(id, entry)
+    const createdEntry: DocEntry = {
+      doc,
+      persistence,
+      synced,
+      isSynced: false,
+      undoManager: null,
+    }
+    persistence.once('synced', () => {
+      createdEntry.isSynced = true
+      resolveSynced()
+    })
+    entry = createdEntry
+    docs.set(id, createdEntry)
   }
   return entry
 }

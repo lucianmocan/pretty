@@ -7,7 +7,10 @@ import type { SyntaxPriority } from './token-types'
  * for the tokenizer's idle queue. Focus is promoted separately by editors. */
 export function useSyntaxPriority(enabled: boolean) {
   const elementRef = useRef<HTMLDivElement>(null)
-  const [priority, setPriority] = useState<SyntaxPriority>('background')
+  // A newly mounted page is visible until the observer proves otherwise.
+  // Starting it in the background queue made a page switch wait behind stale
+  // thumbnail work for one observer turn.
+  const [priority, setPriority] = useState<SyntaxPriority>('visible')
 
   useEffect(() => {
     if (!enabled) return

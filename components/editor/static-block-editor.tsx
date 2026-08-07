@@ -64,7 +64,10 @@ export const StaticBlockEditor = memo(function StaticBlockEditor({
   const entry = getYDoc(docId)
   const fragment = entry.doc.getXmlFragment(blockFragmentName(blockId))
   const registry = useEditorRegistry()
-  const [document, setDocument] = useState<JSONContent | null>(null)
+  const [documentState, setDocumentState] = useState<{ docId: string; document: JSONContent } | null>(
+    () => entry.isSynced ? { docId, document: staticBlockJSON(fragment) } : null
+  )
+  const document = documentState?.docId === docId ? documentState.document : null
   const [customThemeRevision, setCustomThemeRevision] = useState(0)
   const [highlighted, setHighlighted] = useState<{
     text: string
@@ -102,19 +105,21 @@ export const StaticBlockEditor = memo(function StaticBlockEditor({
     let cancelled = false
     let observing = false
     const update = () => {
-      if (!cancelled) setDocument(staticBlockJSON(fragment))
+      if (!cancelled) setDocumentState({ docId, document: staticBlockJSON(fragment) })
     }
-    void entry.synced.then(() => {
+    const beginObserving = () => {
       if (cancelled) return
       update()
       fragment.observeDeep(update)
       observing = true
-    })
+    }
+    if (entry.isSynced) beginObserving()
+    else void entry.synced.then(beginObserving)
     return () => {
       cancelled = true
       if (observing) fragment.unobserveDeep(update)
     }
-  }, [entry.synced, fragment])
+  }, [docId, entry, fragment])
 
   useEffect(() => {
     if (kind !== 'code') return

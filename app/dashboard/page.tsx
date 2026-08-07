@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -30,6 +30,7 @@ import { deleteDocument } from '@/lib/documents/delete-service'
 import { TEMPLATES, type Template } from '@/lib/templates'
 import { DocumentPreview } from '@/components/dashboard/document-preview'
 import { PageToolbar } from '@/components/layout/page-toolbar'
+import { PendingRouteLoading, RouteLoadingScreen } from '@/components/layout/route-loading'
 import { SettingsDialog } from '@/components/settings/settings-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -75,6 +76,34 @@ function plural(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? '' : 's'}`
 }
 
+interface DocumentOpenLinkProps {
+  documentMeta: DocumentMeta
+  className: string
+  ariaLabel?: string
+  children?: ReactNode
+}
+
+function DocumentOpenLink({ documentMeta, className, ariaLabel, children }: DocumentOpenLinkProps) {
+  const warmActivePage = () => {
+    const firstPageId = documentMeta.pageIds?.[0] ?? documentMeta.id
+    void getYDoc(firstPageId).synced
+  }
+
+  return (
+    <Link
+      href={`/doc/${documentMeta.id}`}
+      className={className}
+      aria-label={ariaLabel}
+      onPointerEnter={warmActivePage}
+      onPointerDown={warmActivePage}
+      onFocus={warmActivePage}
+    >
+      {children}
+      <PendingRouteLoading label="Opening project…" />
+    </Link>
+  )
+}
+
 export default function DocumentsDashboardPage() {
   const router = useRouter()
   const [docs, setDocs] = useState<DocumentMeta[] | null>(null)
@@ -106,12 +135,36 @@ export default function DocumentsDashboardPage() {
     const missing = docs.filter((doc) => !(doc.id in contentIndex))
     if (missing.length === 0) return
     let cancelled = false
-    Promise.all(missing.map(async (doc) => [doc.id, await extractDocumentText(doc.id)] as const)).then((entries) => {
-      if (cancelled) return
-      setContentIndex((prev) => ({ ...prev, ...Object.fromEntries(entries) }))
-    })
+    let idleHandle: number
+    let usesIdleCallback = false
+    const idleWindow = window as unknown as {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number
+      cancelIdleCallback?: (handle: number) => void
+    }
+
+    const buildIndex = async () => {
+      // Opening every document concurrently competes with the preview and
+      // editor for IndexedDB. Index one at a time after the dashboard has
+      // had a chance to paint; search still reports its indexing state.
+      for (const doc of missing) {
+        if (cancelled) return
+        const text = await extractDocumentText(doc.id)
+        if (cancelled) return
+        setContentIndex((prev) => (doc.id in prev ? prev : { ...prev, [doc.id]: text }))
+      }
+    }
+
+    if (idleWindow.requestIdleCallback) {
+      usesIdleCallback = true
+      idleHandle = idleWindow.requestIdleCallback(() => void buildIndex(), { timeout: 1000 })
+    } else {
+      idleHandle = window.setTimeout(() => void buildIndex(), 100)
+    }
+
     return () => {
       cancelled = true
+      if (usesIdleCallback) idleWindow.cancelIdleCallback?.(idleHandle)
+      else window.clearTimeout(idleHandle)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed off doc ids, not the whole contentIndex object
   }, [docs])
@@ -190,11 +243,7 @@ export default function DocumentsDashboardPage() {
       <div className="scripture-page">
         <main className="scripture-dashboard-main">
           {docs === null ? (
-            <div className="scripture-dashboard-loading" aria-label="Loading documents">
-              <div />
-              <div />
-              <div />
-            </div>
+            <RouteLoadingScreen label="Loading workspace…" />
           ) : (
             <>
               <section className="scripture-dashboard-overview" aria-labelledby="documents-heading">
@@ -258,11 +307,10 @@ export default function DocumentsDashboardPage() {
                             <Card className="scripture-doc-card" size="sm">
                               <div className="scripture-doc-card-preview">
                                 <DocumentPreview documentMeta={doc} />
-                                <button
-                                  type="button"
+                                <DocumentOpenLink
+                                  documentMeta={doc}
                                   className="scripture-doc-card-preview-open"
-                                  onClick={() => router.push(`/doc/${doc.id}`)}
-                                  aria-label={`Open ${doc.name}`}
+                                  ariaLabel={`Open ${doc.name}`}
                                 />
                               </div>
                               <CardContent className="scripture-doc-card-content">
@@ -280,13 +328,12 @@ export default function DocumentsDashboardPage() {
                                     }}
                                   />
                                 ) : (
-                                  <button
-                                    type="button"
+                                  <DocumentOpenLink
+                                    documentMeta={doc}
                                     className="scripture-doc-card-name"
-                                    onClick={() => router.push(`/doc/${doc.id}`)}
                                   >
                                     {doc.name}
-                                  </button>
+                                  </DocumentOpenLink>
                                 )}
 
                                 <div className="scripture-doc-card-meta">
@@ -411,13 +458,12 @@ export default function DocumentsDashboardPage() {
                                 }}
                               />
                             ) : (
-                              <button
-                                type="button"
+                              <DocumentOpenLink
+                                documentMeta={doc}
                                 className="scripture-doc-list-name"
-                                onClick={() => router.push(`/doc/${doc.id}`)}
                               >
                                 {doc.name}
-                              </button>
+                              </DocumentOpenLink>
                             )}
 
                             <span className="scripture-doc-list-pages">
@@ -479,6 +525,8 @@ export default function DocumentsDashboardPage() {
       </div>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+
+      {creating && <RouteLoadingScreen label="Creating project…" mode="overlay" />}
 
       <Dialog open={showTemplatePicker} onOpenChange={setShowTemplatePicker}>
         <DialogContent className="sm:max-w-md">

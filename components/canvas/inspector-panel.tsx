@@ -132,7 +132,7 @@ import { useEditorRegistry } from '@/components/editor/editor-registry'
 import { IconField } from '@/components/ui/icon-field'
 import { RadiusIcon } from '@/components/ui/radius-icon'
 import { MIN_NODE_SIZE } from '@/lib/layout/resize-geometry'
-import { useGeometryRegistry } from '@/components/canvas/geometry-registry'
+import { useGeometryActions, useGeometryRegistry } from '@/components/canvas/geometry-registry'
 import { geometryRecord, type NodeGeometry } from '@/lib/layout/geometry'
 import {
   EXPORT_MARGIN_OPTIONS,
@@ -1480,7 +1480,7 @@ export function InspectorPanel({
   pageIds,
   pageNames,
 }: InspectorPanelProps) {
-  const { measureAll } = useGeometryRegistry()
+  const { measureAll } = useGeometryActions()
   const exportQuality = useExportQuality()
   const exportMargin = useExportMargin()
   const transparentExport = useTransparentExport()
@@ -1490,6 +1490,10 @@ export function InspectorPanel({
   useEffect(() => {
     if (selectedId !== ROOT_ID) setPageNumberStyleOpen(false)
   }, [selectedId])
+
+  useEffect(() => {
+    setPageNumberStyleOpen(false)
+  }, [docId])
 
   if (selectedIds.length > 1) {
     return (

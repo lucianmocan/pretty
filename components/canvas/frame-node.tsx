@@ -31,7 +31,7 @@ import { useOverflowFade } from '@/lib/use-overflow-fade'
 import type { PositionPatch, SizePatch } from '@/lib/layout/resize-geometry'
 import type { PageNumberSettings } from '@/lib/documents/manifest'
 import { CanvasPageNumber } from '@/components/canvas/canvas-page-number'
-import { useGeometryRegistry } from './geometry-registry'
+import { useGeometryActions } from './geometry-registry'
 
 interface FrameNodeProps {
   node: LayoutNode
@@ -531,7 +531,7 @@ export function FrameNode({
   // onRepositionNode against a stale node id/closure.
   const activeDragCleanupRef = useRef<(() => void) | null>(null)
   const activeMarqueeCleanupRef = useRef<(() => void) | null>(null)
-  const { observe: observeGeometry } = useGeometryRegistry()
+  const { observe: observeGeometry } = useGeometryActions()
   const handleCodeLineClick = useCallback(
     (lineNumber: number) => onGutterClick(node.id, lineNumber),
     [node.id, onGutterClick]

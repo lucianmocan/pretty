@@ -1,6 +1,7 @@
 'use client'
 
 import { memo, useEffect, useRef, useState, type ReactElement } from 'react'
+import type { Transaction } from 'yjs'
 import { ContextMenu as ContextMenuPrimitive, DropdownMenu as DropdownMenuPrimitive } from 'radix-ui'
 import {
   ChevronDown,
@@ -24,7 +25,8 @@ import type { LayoutNode } from '@/lib/layout/types'
 import type { PageNumberSettings } from '@/lib/documents/manifest'
 import { resolvePageNumber } from '@/lib/documents/page-numbers'
 import { updateNodeLabel } from '@/lib/yjs/layout-store'
-import { getYDoc } from '@/lib/yjs/doc-store'
+import { getYDoc, LAYOUT_MAP } from '@/lib/yjs/doc-store'
+import { preloadLayoutTree } from '@/lib/use-layout-tree'
 import { PagePreviewSurface } from '@/components/export/page-preview-surface'
 import { useEditorRegistry } from '@/components/editor/editor-registry'
 import { Button } from '@/components/ui/button'
@@ -116,27 +118,50 @@ const PageThumbnail = memo(function PageThumbnail({
   const [revision, setRevision] = useState(0)
   const wasActive = useRef(pageId === activePageId)
   const dirty = useRef(false)
+  const pendingRefreshFrame = useRef<number | null>(null)
 
-  // Only while this page is the one on-screen, listen for real edits so a
-  // plain "switch away and back" doesn't re-render a thumbnail that never
-  // changed.
+  useEffect(() => () => {
+    if (pendingRefreshFrame.current != null) cancelAnimationFrame(pendingRefreshFrame.current)
+  }, [])
+
+  // Layout changes flow through the preview's shared layout-tree subscription.
+  // Canvas moves/resizes only commit on pointer release, so this still avoids
+  // work during pointer movement. Text lives outside that tree and gets one
+  // short trailing revision without remounting the preview renderer.
   useEffect(() => {
     if (pageId !== activePageId) return
     const { doc } = getYDoc(pageId)
-    const onUpdate = () => {
+    const layoutRoot = doc.getMap(LAYOUT_MAP)
+    let refreshTimeout: ReturnType<typeof setTimeout> | null = null
+    const onTransaction = (transaction: Transaction) => {
+      if (transaction.changedParentTypes.has(layoutRoot)) return
       dirty.current = true
+      if (refreshTimeout) clearTimeout(refreshTimeout)
+      refreshTimeout = setTimeout(() => {
+        refreshTimeout = null
+        dirty.current = false
+        setRevision((value) => value + 1)
+      }, 100)
     }
-    doc.on('update', onUpdate)
-    return () => doc.off('update', onUpdate)
+    doc.on('afterTransaction', onTransaction)
+    return () => {
+      doc.off('afterTransaction', onTransaction)
+      if (refreshTimeout) clearTimeout(refreshTimeout)
+    }
   }, [pageId, activePageId])
 
   useEffect(() => {
     const isActive = pageId === activePageId
-    // Refresh the thumbnail right as the user navigates away from a page
-    // they actually edited, so the grid reflects what just changed.
+    // If navigation interrupts the tiny debounce above, refresh on the very
+    // next frame. This lets the newly selected canvas commit first without an
+    // arbitrary idle timeout that makes the old slide look stale.
     if (wasActive.current && !isActive && dirty.current) {
       dirty.current = false
-      setRevision((value) => value + 1)
+      if (pendingRefreshFrame.current != null) cancelAnimationFrame(pendingRefreshFrame.current)
+      pendingRefreshFrame.current = requestAnimationFrame(() => {
+        pendingRefreshFrame.current = null
+        setRevision((value) => value + 1)
+      })
     }
     wasActive.current = isActive
   }, [activePageId, pageId])
@@ -147,6 +172,7 @@ const PageThumbnail = memo(function PageThumbnail({
       revision={revision}
       pageNumber={pageNumber}
       pageNumberSettings={pageNumberSettings}
+      priority={pageId === activePageId ? 'foreground' : 'background'}
     />
   )
 })
@@ -398,7 +424,7 @@ export function LayersPanel({
   onSetEditing,
   onReorderNode,
 }: {
-  tree: LayoutNode
+  tree: LayoutNode | null
   pageIds: string[]
   pageNames: Record<string, string>
   pageNumberSettings: PageNumberSettings
@@ -808,6 +834,8 @@ export function LayersPanel({
                 <li
                   data-page-id={pageId}
                   style={{ order: index }}
+                  onPointerEnter={() => void preloadLayoutTree(pageId)}
+                  onFocusCapture={() => void preloadLayoutTree(pageId)}
                   aria-posinset={index + 1}
                   aria-setsize={pageIds.length}
                   className={[
@@ -881,6 +909,8 @@ export function LayersPanel({
                 <li
                   data-page-id={pageId}
                   style={{ order: index }}
+                  onPointerEnter={() => void preloadLayoutTree(pageId)}
+                  onFocusCapture={() => void preloadLayoutTree(pageId)}
                   aria-posinset={index + 1}
                   aria-setsize={pageIds.length}
                   className={[
@@ -966,16 +996,18 @@ export function LayersPanel({
           />
         )}
         <ul className="scripture-layers-tree" role="tree" aria-label="Document layers">
-          <LayerRow
-            node={tree}
-            depth={0}
-            docId={activePageId}
-            selectedIds={selectedIds}
-            expanded={expanded}
-            onToggle={toggleExpanded}
-            onSelect={onSelectNode}
-            onReorder={onReorderNode}
-          />
+          {tree && (
+            <LayerRow
+              node={tree}
+              depth={0}
+              docId={activePageId}
+              selectedIds={selectedIds}
+              expanded={expanded}
+              onToggle={toggleExpanded}
+              onSelect={onSelectNode}
+              onReorder={onReorderNode}
+            />
+          )}
         </ul>
       </section>
 

@@ -1,10 +1,14 @@
 'use client'
 
-import { memo, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { BrowserExportPage } from '@/components/export/browser-export-surfaces'
 import {
   acquirePreviewSlot,
+  pagePreviewVariant,
+  readPagePreview,
+  savePagePreview,
   waitForPagePreviewSurface,
+  type PagePreviewSnapshot,
 } from '@/lib/documents/preview'
 import type { PageNumberSettings } from '@/lib/documents/manifest'
 
@@ -13,6 +17,7 @@ interface PagePreviewSurfaceProps {
   revision?: number
   pageNumber?: number
   pageNumberSettings?: PageNumberSettings
+  priority?: 'foreground' | 'background'
 }
 
 /**
@@ -24,23 +29,41 @@ interface PagePreviewSurfaceProps {
  * mounted. This keeps scrolling and reordering from rebuilding an already
  * prepared document tree. Initial preparation is globally limited by
  * acquirePreviewSlot(), preventing a large page list from tokenizing and
- * laying out every page simultaneously.
+ * laying out every page simultaneously. Once ready, the rendered DOM is
+ * persisted in IndexedDB; a later session can paint that sharp snapshot
+ * immediately while the authoritative Yjs-backed version revalidates it.
  */
 export const PagePreviewSurface = memo(function PagePreviewSurface({
   pageId,
   revision = 0,
   pageNumber,
   pageNumberSettings,
+  priority = 'background',
 }: PagePreviewSurfaceProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const documentRef = useRef<HTMLDivElement>(null)
+  const cachedDocumentRef = useRef<HTMLDivElement>(null)
   const releaseRef = useRef<(() => void) | null>(null)
+  const priorityRef = useRef(priority)
+  const acquiredPriorityRef = useRef<'foreground' | 'background'>('background')
   const requestRef = useRef(0)
+  const cacheRequestRef = useRef(0)
+  const lastSavedHtmlRef = useRef<string | null>(null)
   const [shouldMount, setShouldMount] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [ready, setReady] = useState(false)
   const [failed, setFailed] = useState(false)
   const [scale, setScale] = useState(1)
+  const [cachedScale, setCachedScale] = useState(1)
+  const [cachedSnapshot, setCachedSnapshot] = useState<PagePreviewSnapshot | null>(null)
+  priorityRef.current = priority
+  const variant = pagePreviewVariant(pageNumber, pageNumberSettings)
+  const resolvedPageNumber = useMemo(
+    () => pageNumber != null && pageNumberSettings
+      ? { number: pageNumber, settings: pageNumberSettings }
+      : undefined,
+    [pageNumber, pageNumberSettings]
+  )
 
   useEffect(() => {
     const viewport = viewportRef.current
@@ -66,20 +89,63 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
 
   useEffect(() => {
     if (!shouldMount) return
+    const request = cacheRequestRef.current + 1
+    cacheRequestRef.current = request
+    setCachedSnapshot(null)
+    lastSavedHtmlRef.current = null
+    void readPagePreview(pageId, variant).then((snapshot) => {
+      if (cacheRequestRef.current !== request || !snapshot) return
+      const viewport = viewportRef.current
+      if (viewport) {
+        setCachedScale(Math.min(
+          viewport.clientWidth / snapshot.pageWidth,
+          viewport.clientHeight / snapshot.pageHeight
+        ))
+      }
+      lastSavedHtmlRef.current = snapshot.html
+      setCachedSnapshot(snapshot)
+    })
+    return () => {
+      if (cacheRequestRef.current === request) cacheRequestRef.current += 1
+    }
+  }, [pageId, shouldMount, variant])
+
+  useEffect(() => {
+    if (!cachedSnapshot) return
+    const viewport = viewportRef.current
+    const cachedDocument = cachedDocumentRef.current
+    if (!viewport) return
+    if (cachedDocument) cachedDocument.inert = true
+    const updateScale = () => {
+      setCachedScale(Math.min(
+        viewport.clientWidth / cachedSnapshot.pageWidth,
+        viewport.clientHeight / cachedSnapshot.pageHeight
+      ))
+    }
+    const observer = new ResizeObserver(updateScale)
+    observer.observe(viewport)
+    updateScale()
+    return () => observer.disconnect()
+  }, [cachedSnapshot])
+
+  useEffect(() => {
+    if (!shouldMount) return
 
     const request = requestRef.current + 1
     requestRef.current = request
     const controller = new AbortController()
+    const requestPriority = priorityRef.current
     setFailed(false)
     setReady(false)
 
-    void acquirePreviewSlot(pageId, controller.signal)
+    void acquirePreviewSlot(pageId, controller.signal, requestPriority)
       .then((release) => {
         if (controller.signal.aborted || requestRef.current !== request) {
           release()
           return
         }
         releaseRef.current = release
+        acquiredPriorityRef.current = requestPriority
         setMounted(true)
       })
       .catch((error) => {
@@ -95,7 +161,7 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
       setMounted(false)
       setReady(false)
     }
-  }, [pageId, revision, shouldMount])
+  }, [pageId, shouldMount])
 
   useEffect(() => {
     if (!mounted) return
@@ -132,10 +198,10 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
               const viewport = viewportRef.current
               const page = surface.querySelector<HTMLElement>('.scripture-card')
               if (!viewport || !page) return
+              const pageWidth = page.offsetWidth
+              const pageHeight = page.offsetHeight
+              if (pageWidth <= 0 || pageHeight <= 0) return
               const updateScale = () => {
-                const pageWidth = page.offsetWidth
-                const pageHeight = page.offsetHeight
-                if (pageWidth <= 0 || pageHeight <= 0) return
                 setScale(Math.min(viewport.clientWidth / pageWidth, viewport.clientHeight / pageHeight))
               }
               geometryObserver?.disconnect()
@@ -143,6 +209,27 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
               geometryObserver.observe(viewport)
               geometryObserver.observe(page)
               updateScale()
+              const canvasRoot = surface.querySelector<HTMLElement>('#canvas-root')
+              if (canvasRoot) {
+                const html = canvasRoot.outerHTML
+                if (lastSavedHtmlRef.current !== html) {
+                  const snapshot: PagePreviewSnapshot = {
+                    pageId,
+                    variant,
+                    html,
+                    pageWidth,
+                    pageHeight,
+                  }
+                  cacheRequestRef.current += 1
+                  lastSavedHtmlRef.current = html
+                  setCachedScale(Math.min(
+                    viewport.clientWidth / pageWidth,
+                    viewport.clientHeight / pageHeight
+                  ))
+                  setCachedSnapshot(snapshot)
+                  void savePagePreview(snapshot)
+                }
+              }
               setReady(true)
             })
           })
@@ -173,17 +260,29 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
       readinessObserver?.disconnect()
       geometryObserver?.disconnect()
     }
-  }, [mounted, pageId])
+  }, [mounted, pageId, variant])
+
+  const hasVisiblePreview = ready || cachedSnapshot != null
 
   return (
     <div ref={viewportRef} className="scripture-page-preview-surface" aria-hidden="true">
-      {!ready && (
+      {!hasVisiblePreview && (
         <div className={failed
           ? 'scripture-page-preview-placeholder is-error'
           : 'scripture-page-preview-placeholder'}
         >
           {failed ? 'Preview unavailable' : null}
         </div>
+      )}
+      {/* Serialized from our own static React export DOM; authored text was
+          escaped before it entered that DOM. */}
+      {cachedSnapshot && !ready && (
+        <div
+          ref={cachedDocumentRef}
+          className="scripture-page-preview-document is-ready"
+          style={{ '--scripture-preview-scale': cachedScale } as CSSProperties}
+          dangerouslySetInnerHTML={{ __html: cachedSnapshot.html }}
+        />
       )}
       {mounted && (
         <div
@@ -196,11 +295,10 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
           <BrowserExportPage
             pageId={pageId}
             margin={0}
-            priority="background"
+            priority={acquiredPriorityRef.current === 'foreground' ? 'focused' : 'background'}
             allowSyntaxFallback
-            pageNumber={pageNumber != null && pageNumberSettings
-              ? { number: pageNumber, settings: pageNumberSettings }
-              : undefined}
+            revision={revision}
+            pageNumber={resolvedPageNumber}
           />
         </div>
       )}
