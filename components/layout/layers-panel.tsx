@@ -134,7 +134,7 @@ const PageThumbnail = memo(function PageThumbnail({
     const layoutRoot = doc.getMap(LAYOUT_MAP)
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null
     const onTransaction = (transaction: Transaction) => {
-      if (transaction.changedParentTypes.has(layoutRoot)) return
+      if (transaction.changedParentTypes.has(layoutRoot as unknown as Parameters<typeof transaction.changedParentTypes.has>[0])) return
       dirty.current = true
       if (refreshTimeout) clearTimeout(refreshTimeout)
       refreshTimeout = setTimeout(() => {
