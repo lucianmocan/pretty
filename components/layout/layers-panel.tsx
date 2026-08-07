@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useRef, useState, type ReactElement } from 'react'
+import { ContextMenu as ContextMenuPrimitive, DropdownMenu as DropdownMenuPrimitive } from 'radix-ui'
 import {
   ChevronDown,
   ChevronRight,
@@ -10,14 +11,21 @@ import {
   Frame,
   Image as ImageIcon,
   Layers3,
+  LayoutGrid,
+  MoreHorizontal,
+  Pencil,
   Plus,
+  Copy,
   Search,
   Trash2,
   Type,
 } from 'lucide-react'
 import type { LayoutNode } from '@/lib/layout/types'
+import type { PageNumberSettings } from '@/lib/documents/manifest'
+import { resolvePageNumber } from '@/lib/documents/page-numbers'
 import { updateNodeLabel } from '@/lib/yjs/layout-store'
 import { getYDoc } from '@/lib/yjs/doc-store'
+import { PagePreviewSurface } from '@/components/export/page-preview-surface'
 import { useEditorRegistry } from '@/components/editor/editor-registry'
 import { Button } from '@/components/ui/button'
 import { SearchReplacePanel } from '@/components/editor/search-replace-panel'
@@ -35,8 +43,214 @@ import {
 const PANEL_COLLAPSED_KEY = 'scripture:layers-panel-collapsed'
 const PANEL_WIDTH_KEY = 'scripture:layers-panel-width'
 const TREE_EXPANSION_KEY = 'scripture:layers-tree-expanded'
+const PAGES_VIEW_MODE_KEY = 'scripture:pages-view-mode'
+const PAGES_HEIGHT_KEY = 'scripture:pages-height'
 const LAYER_DRAG_TYPE = 'application/x-scripture-layer-id'
 const PAGE_DRAG_TYPE = 'application/x-scripture-page-id'
+const DEFAULT_PAGES_HEIGHT = 216
+const MIN_PAGES_HEIGHT = 96
+const MIN_LAYERS_HEIGHT = 140
+const MIN_PANEL_WIDTH = 200
+const MAX_PANEL_WIDTH = 360
+const RESIZE_KEY_STEP = 8
+
+type PageDropPosition = {
+  pageId: string
+  edge: 'before' | 'after'
+}
+
+function readPreference(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writePreference(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // UI preferences are disposable and must never break editor controls.
+  }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+function rootUiScale(): number {
+  return (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16) / 16
+}
+
+function maximumPagesHeight(panel: HTMLElement): number {
+  const heading = panel.querySelector<HTMLElement>('.scripture-panel-heading')
+  const scale = rootUiScale()
+  const panelHeight = panel.getBoundingClientRect().height / scale
+  const headingHeight = (heading?.getBoundingClientRect().height ?? 38) / scale
+  return Math.max(MIN_PAGES_HEIGHT, panelHeight - headingHeight - MIN_LAYERS_HEIGHT)
+}
+
+function useStablePageMountOrder(pageIds: string[]): string[] {
+  const mountOrderRef = useRef<string[]>([])
+  const livePageIds = new Set(pageIds)
+  const nextMountOrder = mountOrderRef.current.filter((pageId) => livePageIds.has(pageId))
+  for (const pageId of pageIds) {
+    if (!nextMountOrder.includes(pageId)) nextMountOrder.push(pageId)
+  }
+  mountOrderRef.current = nextMountOrder
+  return nextMountOrder
+}
+
+const PageThumbnail = memo(function PageThumbnail({
+  pageId,
+  activePageId,
+  pageNumber,
+  pageNumberSettings,
+}: {
+  pageId: string
+  activePageId: string
+  pageNumber?: number
+  pageNumberSettings: PageNumberSettings
+}) {
+  const [revision, setRevision] = useState(0)
+  const wasActive = useRef(pageId === activePageId)
+  const dirty = useRef(false)
+
+  // Only while this page is the one on-screen, listen for real edits so a
+  // plain "switch away and back" doesn't re-render a thumbnail that never
+  // changed.
+  useEffect(() => {
+    if (pageId !== activePageId) return
+    const { doc } = getYDoc(pageId)
+    const onUpdate = () => {
+      dirty.current = true
+    }
+    doc.on('update', onUpdate)
+    return () => doc.off('update', onUpdate)
+  }, [pageId, activePageId])
+
+  useEffect(() => {
+    const isActive = pageId === activePageId
+    // Refresh the thumbnail right as the user navigates away from a page
+    // they actually edited, so the grid reflects what just changed.
+    if (wasActive.current && !isActive && dirty.current) {
+      dirty.current = false
+      setRevision((value) => value + 1)
+    }
+    wasActive.current = isActive
+  }, [activePageId, pageId])
+
+  return (
+    <PagePreviewSurface
+      pageId={pageId}
+      revision={revision}
+      pageNumber={pageNumber}
+      pageNumberSettings={pageNumberSettings}
+    />
+  )
+})
+
+function PageActionsMenu({
+  pageNumber,
+  canDelete,
+  onRename,
+  onDuplicate,
+  onDelete,
+}: {
+  pageNumber: number
+  canDelete: boolean
+  onRename: () => void
+  onDuplicate: () => void
+  onDelete: () => void
+}) {
+  return (
+    <DropdownMenuPrimitive.Root>
+      <DropdownMenuPrimitive.Trigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          data-page-no-drag
+          aria-label={`Page ${pageNumber} actions`}
+          title="Page actions"
+        >
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuPrimitive.Trigger>
+      <DropdownMenuPrimitive.Portal>
+        <DropdownMenuPrimitive.Content
+          className="scripture-node-menu is-compact"
+          align="end"
+          sideOffset={5}
+          collisionPadding={8}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
+          <DropdownMenuPrimitive.Item className="scripture-node-menu-item" onSelect={onRename}>
+            <Pencil />
+            Rename
+          </DropdownMenuPrimitive.Item>
+          <DropdownMenuPrimitive.Item className="scripture-node-menu-item" onSelect={onDuplicate}>
+            <Copy />
+            Duplicate page
+          </DropdownMenuPrimitive.Item>
+          <DropdownMenuPrimitive.Separator className="scripture-node-menu-separator" />
+          <DropdownMenuPrimitive.Item
+            className="scripture-node-menu-item is-destructive"
+            disabled={!canDelete}
+            onSelect={onDelete}
+          >
+            <Trash2 />
+            Delete page
+          </DropdownMenuPrimitive.Item>
+        </DropdownMenuPrimitive.Content>
+      </DropdownMenuPrimitive.Portal>
+    </DropdownMenuPrimitive.Root>
+  )
+}
+
+function PageContextMenu({
+  children,
+  canDelete,
+  onRename,
+  onDuplicate,
+  onDelete,
+}: {
+  children: ReactElement
+  canDelete: boolean
+  onRename: () => void
+  onDuplicate: () => void
+  onDelete: () => void
+}) {
+  return (
+    <ContextMenuPrimitive.Root>
+      <ContextMenuPrimitive.Trigger asChild>{children}</ContextMenuPrimitive.Trigger>
+      <ContextMenuPrimitive.Portal>
+        <ContextMenuPrimitive.Content
+          className="scripture-node-menu"
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
+          <ContextMenuPrimitive.Item className="scripture-node-menu-item" onSelect={onRename}>
+            <Pencil />
+            Rename
+          </ContextMenuPrimitive.Item>
+          <ContextMenuPrimitive.Item className="scripture-node-menu-item" onSelect={onDuplicate}>
+            <Copy />
+            Duplicate page
+          </ContextMenuPrimitive.Item>
+          <ContextMenuPrimitive.Separator className="scripture-node-menu-separator" />
+          <ContextMenuPrimitive.Item
+            className="scripture-node-menu-item is-destructive"
+            disabled={!canDelete}
+            onSelect={onDelete}
+          >
+            <Trash2 />
+            Delete page
+          </ContextMenuPrimitive.Item>
+        </ContextMenuPrimitive.Content>
+      </ContextMenuPrimitive.Portal>
+    </ContextMenuPrimitive.Root>
+  )
+}
 
 function fallbackLabel(node: LayoutNode, editorText?: string): string {
   if (node.label?.trim()) return node.label.trim()
@@ -170,11 +384,15 @@ function LayerRow({
 export function LayersPanel({
   tree,
   pageIds,
+  pageNames,
+  pageNumberSettings,
   activePageId,
   selectedIds,
   onAddPage,
   onSelectPage,
   onDeletePage,
+  onDuplicatePage,
+  onRenamePage,
   onReorderPages,
   onSelectNode,
   onSetEditing,
@@ -182,11 +400,15 @@ export function LayersPanel({
 }: {
   tree: LayoutNode
   pageIds: string[]
+  pageNames: Record<string, string>
+  pageNumberSettings: PageNumberSettings
   activePageId: string
   selectedIds: string[]
   onAddPage: () => void
   onSelectPage: (pageId: string) => void
   onDeletePage: (pageId: string) => Promise<void>
+  onDuplicatePage: (pageId: string) => Promise<void>
+  onRenamePage: (pageId: string, name: string) => void
   onReorderPages: (pageIds: string[]) => void
   onSelectNode: (id: string, additive: boolean) => void
   onSetEditing: (id: string | null) => void
@@ -198,23 +420,74 @@ export function LayersPanel({
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [renamingPageId, setRenamingPageId] = useState<string | null>(null)
+  const [pageNameDraft, setPageNameDraft] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
+  const [pagesViewMode, setPagesViewMode] = useState<'list' | 'grid'>('list')
+  const [pagesHeight, setPagesHeight] = useState(DEFAULT_PAGES_HEIGHT)
+  const [pagesMaxHeight, setPagesMaxHeight] = useState(DEFAULT_PAGES_HEIGHT)
+  const [pageDropPosition, setPageDropPosition] = useState<PageDropPosition | null>(null)
+  // Page order is visual. Existing cards stay in their original DOM slots so
+  // Chromium can retain each scaled preview's compositing layer instead of
+  // repainting a large export subtree whenever pages are reordered.
+  const pageMountOrder = useStablePageMountOrder(pageIds)
+  const panelRef = useRef<HTMLElement>(null)
+  const draggedPageIdRef = useRef<string | null>(null)
+  const activeResizeCleanupRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
-    setCollapsed(localStorage.getItem(PANEL_COLLAPSED_KEY) === 'true')
-    const storedWidth = Number(localStorage.getItem(PANEL_WIDTH_KEY))
-    if (Number.isFinite(storedWidth) && storedWidth >= 200 && storedWidth <= 360) setPanelWidth(storedWidth)
+    setCollapsed(readPreference(PANEL_COLLAPSED_KEY) === 'true')
+    const storedWidthValue = readPreference(PANEL_WIDTH_KEY)
+    const storedWidth = Number(storedWidthValue)
+    if (storedWidthValue != null && Number.isFinite(storedWidth)) {
+      setPanelWidth(clamp(storedWidth, MIN_PANEL_WIDTH, MAX_PANEL_WIDTH))
+    }
+    const storedViewMode = readPreference(PAGES_VIEW_MODE_KEY)
+    if (storedViewMode === 'grid' || storedViewMode === 'list') setPagesViewMode(storedViewMode)
+    const storedHeight = Number(readPreference(PAGES_HEIGHT_KEY))
+    if (Number.isFinite(storedHeight) && storedHeight >= MIN_PAGES_HEIGHT) setPagesHeight(storedHeight)
     try {
-      const stored = JSON.parse(localStorage.getItem(TREE_EXPANSION_KEY) || '[]')
+      const stored = JSON.parse(readPreference(TREE_EXPANSION_KEY) || '[]')
       if (Array.isArray(stored)) setExpanded(new Set(['root', ...stored]))
     } catch {
       // Ignore malformed local UI preferences.
     }
   }, [])
 
+  useEffect(() => {
+    return () => activeResizeCleanupRef.current?.()
+  }, [])
+
+  useEffect(() => {
+    if (collapsed) return
+    const panel = panelRef.current
+    if (!panel) return
+    const updateBounds = () => {
+      const maximum = maximumPagesHeight(panel)
+      setPagesMaxHeight(maximum)
+      setPagesHeight((current) => clamp(current, MIN_PAGES_HEIGHT, maximum))
+    }
+    updateBounds()
+    const observer = new ResizeObserver(updateBounds)
+    observer.observe(panel)
+    window.addEventListener('resize', updateBounds)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', updateBounds)
+    }
+  }, [collapsed])
+
+  function togglePagesViewMode() {
+    setPagesViewMode((mode) => {
+      const next = mode === 'grid' ? 'list' : 'grid'
+      writePreference(PAGES_VIEW_MODE_KEY, next)
+      return next
+    })
+  }
+
   function togglePanel() {
     setCollapsed((value) => {
-      localStorage.setItem(PANEL_COLLAPSED_KEY, String(!value))
+      writePreference(PANEL_COLLAPSED_KEY, String(!value))
       return !value
     })
   }
@@ -225,34 +498,95 @@ export function LayersPanel({
       if (next.has(id)) next.delete(id)
       else next.add(id)
       next.add('root')
-      localStorage.setItem(TREE_EXPANSION_KEY, JSON.stringify(Array.from(next)))
+      writePreference(TREE_EXPANSION_KEY, JSON.stringify(Array.from(next)))
       return next
     })
   }
 
   function beginResize(event: React.PointerEvent) {
     event.preventDefault()
+    activeResizeCleanupRef.current?.()
     const startX = event.clientX
     const startWidth = panelWidth
-    const rootFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
-    const uiScale = rootFontSize / 16
+    const uiScale = rootUiScale()
     const onMove = (moveEvent: PointerEvent) => {
-      const next = Math.min(360, Math.max(200, startWidth + (moveEvent.clientX - startX) / uiScale))
+      const next = clamp(startWidth + (moveEvent.clientX - startX) / uiScale, MIN_PANEL_WIDTH, MAX_PANEL_WIDTH)
       setPanelWidth(next)
     }
     const onUp = (upEvent: PointerEvent) => {
-      const next = Math.min(360, Math.max(200, startWidth + (upEvent.clientX - startX) / uiScale))
-      localStorage.setItem(PANEL_WIDTH_KEY, String(next))
+      const next = clamp(startWidth + (upEvent.clientX - startX) / uiScale, MIN_PANEL_WIDTH, MAX_PANEL_WIDTH)
+      setPanelWidth(next)
+      writePreference(PANEL_WIDTH_KEY, String(next))
       cleanup()
     }
     function cleanup() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
+      activeResizeCleanupRef.current = null
     }
+    activeResizeCleanupRef.current = cleanup
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onUp)
+  }
+
+  function beginPagesResize(event: React.PointerEvent) {
+    event.preventDefault()
+    activeResizeCleanupRef.current?.()
+    const startY = event.clientY
+    const startHeight = pagesHeight
+    const container = panelRef.current
+    const maxHeight = container ? maximumPagesHeight(container) : pagesMaxHeight
+    const uiScale = rootUiScale()
+    const onMove = (moveEvent: PointerEvent) => {
+      const next = clamp(startHeight + (moveEvent.clientY - startY) / uiScale, MIN_PAGES_HEIGHT, maxHeight)
+      setPagesHeight(next)
+    }
+    const onUp = (upEvent: PointerEvent) => {
+      const next = clamp(startHeight + (upEvent.clientY - startY) / uiScale, MIN_PAGES_HEIGHT, maxHeight)
+      setPagesHeight(next)
+      writePreference(PAGES_HEIGHT_KEY, String(next))
+      cleanup()
+    }
+    function cleanup() {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      activeResizeCleanupRef.current = null
+    }
+    activeResizeCleanupRef.current = cleanup
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }
+
+  function resizePanelFromKeyboard(event: React.KeyboardEvent) {
+    const amount = event.shiftKey ? RESIZE_KEY_STEP * 3 : RESIZE_KEY_STEP
+    let next = panelWidth
+    if (event.key === 'ArrowLeft') next -= amount
+    else if (event.key === 'ArrowRight') next += amount
+    else if (event.key === 'Home') next = MIN_PANEL_WIDTH
+    else if (event.key === 'End') next = MAX_PANEL_WIDTH
+    else return
+    event.preventDefault()
+    next = clamp(next, MIN_PANEL_WIDTH, MAX_PANEL_WIDTH)
+    setPanelWidth(next)
+    writePreference(PANEL_WIDTH_KEY, String(next))
+  }
+
+  function resizePagesFromKeyboard(event: React.KeyboardEvent) {
+    const amount = event.shiftKey ? RESIZE_KEY_STEP * 3 : RESIZE_KEY_STEP
+    let next = pagesHeight
+    if (event.key === 'ArrowUp') next -= amount
+    else if (event.key === 'ArrowDown') next += amount
+    else if (event.key === 'Home') next = MIN_PAGES_HEIGHT
+    else if (event.key === 'End') next = pagesMaxHeight
+    else return
+    event.preventDefault()
+    next = clamp(next, MIN_PAGES_HEIGHT, pagesMaxHeight)
+    setPagesHeight(next)
+    writePreference(PAGES_HEIGHT_KEY, String(next))
   }
 
   async function confirmDelete() {
@@ -269,6 +603,148 @@ export function LayersPanel({
     }
   }
 
+  function beginPageRename(pageId: string) {
+    setPageNameDraft(pageNames[pageId] ?? '')
+    setRenamingPageId(pageId)
+  }
+
+  function commitPageRename(pageId: string) {
+    onRenamePage(pageId, pageNameDraft)
+    setRenamingPageId(null)
+  }
+
+  function pageNameEditor(pageId: string, pageNumber: number) {
+    return (
+      <input
+        autoFocus
+        data-page-no-drag
+        className="scripture-page-name-input"
+        value={pageNameDraft}
+        placeholder="Untitled page"
+        aria-label={`Rename page ${pageNumber}`}
+        onChange={(event) => setPageNameDraft(event.target.value)}
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+        onBlur={() => commitPageRename(pageId)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur()
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            setRenamingPageId(null)
+          }
+        }}
+      />
+    )
+  }
+
+  function movePageBy(pageId: string, delta: -1 | 1) {
+    const from = pageIds.indexOf(pageId)
+    const to = from + delta
+    if (from < 0 || to < 0 || to >= pageIds.length) return
+    const next = [...pageIds]
+    next.splice(from, 1)
+    next.splice(to, 0, pageId)
+    onReorderPages(next)
+  }
+
+  function pageKeyboardReorderHandlers(pageId: string) {
+    const index = pageIds.indexOf(pageId)
+    return {
+      onKeyDown: (event: React.KeyboardEvent) => {
+        if (!event.altKey) return
+        if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+          event.preventDefault()
+          movePageBy(pageId, -1)
+        } else if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+          event.preventDefault()
+          movePageBy(pageId, 1)
+        }
+      },
+      'aria-keyshortcuts': 'Alt+ArrowUp Alt+ArrowDown',
+      title: pageIds.length > 1 ? `Page ${index + 1} · drag to reorder` : undefined,
+    }
+  }
+
+  function pageOrderForDrop(draggedId: string, position: PageDropPosition): string[] | null {
+    if (!pageIds.includes(draggedId) || !pageIds.includes(position.pageId)) return null
+    if (draggedId === position.pageId) return [...pageIds]
+    const next = pageIds.filter((id) => id !== draggedId)
+    const insertAt = next.indexOf(position.pageId) + (position.edge === 'after' ? 1 : 0)
+    next.splice(insertAt, 0, draggedId)
+    return next
+  }
+
+  function pageListDropHandlers() {
+    const positionFromPointer = (event: React.DragEvent<HTMLOListElement>): PageDropPosition | null => {
+      // DOM mount order intentionally stays stable; sort by screen position
+      // so gap detection follows the current CSS order the user sees.
+      const items = (Array.from(event.currentTarget.children) as HTMLElement[]).sort(
+        (left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top
+      )
+      for (const item of items) {
+        const pageId = item.dataset.pageId
+        if (!pageId) continue
+        const bounds = item.getBoundingClientRect()
+        if (event.clientY < bounds.top + bounds.height / 2) return { pageId, edge: 'before' }
+      }
+      const lastPageId = items.at(-1)?.dataset.pageId
+      return lastPageId ? { pageId: lastPageId, edge: 'after' } : null
+    }
+
+    return {
+      onDragOver: (event: React.DragEvent<HTMLOListElement>) => {
+        if (!event.dataTransfer.types.includes(PAGE_DRAG_TYPE)) return
+        event.preventDefault()
+        const position = positionFromPointer(event)
+        const draggedId = draggedPageIdRef.current
+        const next = position && draggedId ? pageOrderForDrop(draggedId, position) : null
+        if (!position || !next || next.every((id, index) => id === pageIds[index])) {
+          setPageDropPosition(null)
+          return
+        }
+        setPageDropPosition((current) =>
+          current?.pageId === position.pageId && current.edge === position.edge ? current : position
+        )
+      },
+      onDragLeave: (event: React.DragEvent<HTMLOListElement>) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+        setPageDropPosition(null)
+      },
+      onDrop: (event: React.DragEvent<HTMLOListElement>) => {
+        if (!event.dataTransfer.types.includes(PAGE_DRAG_TYPE)) return
+        event.preventDefault()
+        const draggedId = event.dataTransfer.getData(PAGE_DRAG_TYPE)
+        const position = positionFromPointer(event)
+        setPageDropPosition(null)
+        if (!draggedId || !position) return
+        // The target is a gap, not a page replacement. Remove the dragged
+        // page first, then insert directly before/after the hovered page in
+        // the remaining order.
+        const next = pageOrderForDrop(draggedId, position)
+        if (next && !next.every((id, index) => id === pageIds[index])) onReorderPages(next)
+      },
+    }
+  }
+
+  function pageDragHandlers(pageId: string) {
+    return {
+      draggable: pageIds.length > 1,
+      onDragStart: (event: React.DragEvent) => {
+        if ((event.target as HTMLElement).closest('[data-page-no-drag]')) {
+          event.preventDefault()
+          return
+        }
+        draggedPageIdRef.current = pageId
+        event.dataTransfer.setData(PAGE_DRAG_TYPE, pageId)
+        event.dataTransfer.effectAllowed = 'move'
+      },
+      onDragEnd: () => {
+        draggedPageIdRef.current = null
+        setPageDropPosition(null)
+      },
+    }
+  }
+
   if (collapsed) {
     return (
       <aside className="scripture-layers-panel is-collapsed" aria-label="Pages and layers">
@@ -281,6 +757,7 @@ export function LayersPanel({
 
   return (
     <aside
+      ref={panelRef}
       className="scripture-layers-panel"
       aria-label="Pages and layers"
       style={{ width: `${panelWidth / 16}rem`, minWidth: `${panelWidth / 16}rem` }}
@@ -292,50 +769,175 @@ export function LayersPanel({
         </Button>
       </div>
 
-      <section className="scripture-layers-section" aria-labelledby="pages-heading">
+      <section
+        className="scripture-layers-section is-pages"
+        aria-labelledby="pages-heading"
+        style={{ height: `${pagesHeight / 16}rem` }}
+      >
         <div className="scripture-section-heading">
           <h2 id="pages-heading">Pages</h2>
-          <Button variant="ghost" size="icon-xs" onClick={onAddPage} aria-label="Add page">
-            <Plus />
-          </Button>
-        </div>
-        <ol className="scripture-pages-list">
-          {pageIds.map((pageId, index) => (
-            <li
-              key={pageId}
-              className={pageId === activePageId ? 'scripture-page-row is-active' : 'scripture-page-row'}
-              draggable
-              onDragStart={(event) => event.dataTransfer.setData(PAGE_DRAG_TYPE, pageId)}
-              onDragOver={(event) => {
-                if (event.dataTransfer.types.includes(PAGE_DRAG_TYPE)) event.preventDefault()
-              }}
-              onDrop={(event) => {
-                const draggedId = event.dataTransfer.getData(PAGE_DRAG_TYPE)
-                if (!draggedId || draggedId === pageId) return
-                event.preventDefault()
-                const next = pageIds.filter((id) => id !== draggedId)
-                next.splice(next.indexOf(pageId), 0, draggedId)
-                onReorderPages(next)
-              }}
+          <div className="scripture-section-heading-actions">
+            <Button
+              variant={pagesViewMode === 'grid' ? 'secondary' : 'ghost'}
+              size="icon-xs"
+              onClick={togglePagesViewMode}
+              aria-label={pagesViewMode === 'grid' ? 'Switch to list view' : 'Switch to presentation view'}
+              aria-pressed={pagesViewMode === 'grid'}
             >
-              <button type="button" className="scripture-page-row-label" onClick={() => onSelectPage(pageId)}>
-                <FileCode />
-                Page {index + 1}
-              </button>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                disabled={pageIds.length <= 1}
-                onClick={() => setPendingDelete(pageId)}
-                aria-label={`Delete page ${index + 1}`}
+              <LayoutGrid />
+            </Button>
+            <Button variant="ghost" size="icon-xs" onClick={onAddPage} aria-label="Add page">
+              <Plus />
+            </Button>
+          </div>
+        </div>
+        <div className="scripture-pages-scroll">
+        {pagesViewMode === 'grid' ? (
+          <ol className="scripture-pages-grid" {...pageListDropHandlers()}>
+            {pageMountOrder.map((pageId) => {
+              const index = pageIds.indexOf(pageId)
+              const displayedPageNumber = resolvePageNumber(pageIds, pageId, pageNumberSettings)
+              return (
+              <PageContextMenu
+                key={pageId}
+                canDelete={pageIds.length > 1}
+                onRename={() => beginPageRename(pageId)}
+                onDuplicate={() => void onDuplicatePage(pageId)}
+                onDelete={() => setPendingDelete(pageId)}
               >
-                <Trash2 />
-              </Button>
-            </li>
-          ))}
-        </ol>
+                <li
+                  data-page-id={pageId}
+                  style={{ order: index }}
+                  aria-posinset={index + 1}
+                  aria-setsize={pageIds.length}
+                  className={[
+                    'scripture-page-card',
+                    pageId === activePageId && 'is-active',
+                    pageDropPosition?.pageId === pageId && `is-drop-${pageDropPosition.edge}`,
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  {...pageDragHandlers(pageId)}
+                >
+                  <div className="scripture-page-card-thumb">
+                    <PageThumbnail
+                      pageId={pageId}
+                      activePageId={activePageId}
+                      pageNumber={displayedPageNumber?.number}
+                      pageNumberSettings={pageNumberSettings}
+                    />
+                    <button
+                      type="button"
+                      className="scripture-page-card-open"
+                      onClick={() => onSelectPage(pageId)}
+                      aria-label={pageNames[pageId] || `Page ${index + 1}`}
+                      {...pageKeyboardReorderHandlers(pageId)}
+                    />
+                  </div>
+                  <div className="scripture-page-card-footer">
+                    <span className="scripture-page-card-label">
+                      <span className="scripture-page-number">{index + 1}</span>
+                      {renamingPageId === pageId ? (
+                        pageNameEditor(pageId, index + 1)
+                      ) : (
+                        <button
+                          type="button"
+                          className="scripture-page-name"
+                          onClick={() => onSelectPage(pageId)}
+                          onDoubleClick={() => beginPageRename(pageId)}
+                          title="Double-click to rename"
+                        >
+                          {pageNames[pageId] || 'Untitled'}
+                        </button>
+                      )}
+                    </span>
+                    <span className="scripture-page-card-actions">
+                      <PageActionsMenu
+                        pageNumber={index + 1}
+                        canDelete={pageIds.length > 1}
+                        onRename={() => beginPageRename(pageId)}
+                        onDuplicate={() => void onDuplicatePage(pageId)}
+                        onDelete={() => setPendingDelete(pageId)}
+                      />
+                    </span>
+                  </div>
+                </li>
+              </PageContextMenu>
+              )
+            })}
+          </ol>
+        ) : (
+          <ol className="scripture-pages-list" {...pageListDropHandlers()}>
+            {pageMountOrder.map((pageId) => {
+              const index = pageIds.indexOf(pageId)
+              return (
+              <PageContextMenu
+                key={pageId}
+                canDelete={pageIds.length > 1}
+                onRename={() => beginPageRename(pageId)}
+                onDuplicate={() => void onDuplicatePage(pageId)}
+                onDelete={() => setPendingDelete(pageId)}
+              >
+                <li
+                  data-page-id={pageId}
+                  style={{ order: index }}
+                  aria-posinset={index + 1}
+                  aria-setsize={pageIds.length}
+                  className={[
+                    'scripture-page-row',
+                    pageId === activePageId && 'is-active',
+                    pageDropPosition?.pageId === pageId && `is-drop-${pageDropPosition.edge}`,
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  {...pageDragHandlers(pageId)}
+                >
+                  {renamingPageId === pageId ? (
+                    <div className="scripture-page-row-label">
+                      <span className="scripture-page-number">{index + 1}</span>
+                      {pageNameEditor(pageId, index + 1)}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="scripture-page-row-label"
+                      onClick={() => onSelectPage(pageId)}
+                      onDoubleClick={() => beginPageRename(pageId)}
+                      {...pageKeyboardReorderHandlers(pageId)}
+                    >
+                      <span className="scripture-page-number">{index + 1}</span>
+                      <span className="scripture-page-name">{pageNames[pageId] || 'Untitled'}</span>
+                    </button>
+                  )}
+                  <PageActionsMenu
+                    pageNumber={index + 1}
+                    canDelete={pageIds.length > 1}
+                    onRename={() => beginPageRename(pageId)}
+                    onDuplicate={() => void onDuplicatePage(pageId)}
+                    onDelete={() => setPendingDelete(pageId)}
+                  />
+                </li>
+              </PageContextMenu>
+              )
+            })}
+          </ol>
+        )}
+        </div>
         {error && <p className="scripture-panel-error" role="alert">{error}</p>}
       </section>
+
+      <div
+        className="scripture-panel-hresize-handle"
+        onPointerDown={beginPagesResize}
+        onKeyDown={resizePagesFromKeyboard}
+        role="separator"
+        tabIndex={0}
+        aria-orientation="horizontal"
+        aria-label="Resize Pages and Layers panels"
+        aria-valuemin={Math.round(MIN_PAGES_HEIGHT)}
+        aria-valuemax={Math.round(pagesMaxHeight)}
+        aria-valuenow={Math.round(pagesHeight)}
+      />
 
       <section className="scripture-layers-section is-tree" aria-labelledby="layers-heading">
         <div className="scripture-section-heading">
@@ -399,9 +1001,14 @@ export function LayersPanel({
       <div
         className="scripture-panel-resize-handle"
         onPointerDown={beginResize}
+        onKeyDown={resizePanelFromKeyboard}
         role="separator"
+        tabIndex={0}
         aria-orientation="vertical"
         aria-label="Resize Pages and Layers panel"
+        aria-valuemin={MIN_PANEL_WIDTH}
+        aria-valuemax={MAX_PANEL_WIDTH}
+        aria-valuenow={Math.round(panelWidth)}
       />
     </aside>
   )

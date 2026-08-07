@@ -36,6 +36,11 @@ import {
   RemoveFormatting,
   Type,
   ChevronDown,
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  ArrowLeft,
 } from 'lucide-react'
 import type {
   LayoutNode,
@@ -43,6 +48,7 @@ import type {
   FlexAlign,
   FlexJustify,
   ChildLayout,
+  CanvasSizeMode,
   PageSize,
   TextFontSource,
 } from '@/lib/layout/types'
@@ -84,6 +90,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
+import { Toggle } from '@/components/ui/toggle'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
@@ -114,8 +121,13 @@ import { ChromeStylePicker } from '@/components/ui/chrome-style-picker'
 import { LanguagePicker } from '@/components/ui/language-picker'
 import { FontPicker } from '@/components/editor/font-picker'
 import {
+  ColorPicker,
+  HIGHLIGHT_PRESETS,
   InlineFormattingControls,
+  TEXT_COLOR_PRESETS,
 } from '@/components/editor/bubble-toolbar'
+import { FontWeightPicker } from '@/components/editor/font-weight-picker'
+import { GoogleFontLoader } from '@/components/editor/google-font-loader'
 import { useEditorRegistry } from '@/components/editor/editor-registry'
 import { IconField } from '@/components/ui/icon-field'
 import { RadiusIcon } from '@/components/ui/radius-icon'
@@ -134,6 +146,18 @@ import {
   useTransparentExport,
   type ExportQuality,
 } from '@/lib/app-preferences'
+import {
+  DEFAULT_PAGE_NUMBER_TYPOGRAPHY,
+  type PageNumberHorizontalPosition,
+  type PageNumberNumeralStyle,
+  type PageNumberSettings,
+  type PageNumberTypography,
+  type PageNumberVerticalPosition,
+} from '@/lib/documents/manifest'
+import {
+  formatPageNumber,
+  pageNumberTypographyStyle,
+} from '@/lib/documents/page-numbers'
 
 interface InspectorPanelProps {
   docId: string
@@ -151,6 +175,10 @@ interface InspectorPanelProps {
   exporting: 'pdf' | 'png' | null
   exportError: string | null
   onSetEditing: (id: string | null) => void
+  pageNumberSettings: PageNumberSettings
+  onPageNumberSettingsChange: (settings: PageNumberSettings) => void
+  pageIds: string[]
+  pageNames: Record<string, string>
 }
 
 const GUTTER_CLICK_MODE_OPTIONS: Array<{ value: GutterClickMode; label: string }> = [
@@ -165,6 +193,26 @@ const PAGE_SIZE_OPTIONS: Array<{ value: PageSize; label: string }> = [
   { value: 'letter', label: 'Letter' },
   { value: 'custom', label: 'Custom' },
 ]
+
+const CANVAS_SIZE_PRESETS = [
+  { value: 'auto', label: 'Default · 3:2', width: DEFAULT_CANVAS_WIDTH, height: DEFAULT_CANVAS_HEIGHT },
+  { value: 'slides-16-9', label: 'Slides · 16:9', width: 1280, height: 720 },
+  { value: 'slides-4-3', label: 'Slides · 4:3', width: 1024, height: 768 },
+  { value: 'square', label: 'Square · 1:1', width: 1080, height: 1080 },
+  { value: 'portrait-4-5', label: 'Portrait · 4:5', width: 1080, height: 1350 },
+  { value: 'story-9-16', label: 'Story · 9:16', width: 1080, height: 1920 },
+] as const
+
+function canvasSizePresetValue(node: LayoutNode): string {
+  if ((node.pageSize ?? 'content') !== 'content') return 'export-sized'
+  if (node.canvasSizeMode === 'custom') return 'custom'
+  if (node.canvasSizeMode && CANVAS_SIZE_PRESETS.some((preset) => preset.value === node.canvasSizeMode)) {
+    return node.canvasSizeMode
+  }
+  const width = node.width ?? DEFAULT_CANVAS_WIDTH
+  const height = node.height ?? DEFAULT_CANVAS_HEIGHT
+  return CANVAS_SIZE_PRESETS.find((preset) => preset.width === width && preset.height === height)?.value ?? 'custom'
+}
 
 const TEXT_FONT_SIZE_OPTIONS = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96]
 const TEXT_LINE_HEIGHT_OPTIONS = [1, 1.15, 1.25, 1.4, 1.5, 1.6, 1.75, 2, 2.5]
@@ -384,6 +432,10 @@ function SizeSection({ node, docId }: { node: LayoutNode; docId: string }) {
       : node.kind === 'frame' && node.childLayout === 'canvas'
         ? DEFAULT_CANVAS_HEIGHT
         : 0
+  const updateSize = (size: { width?: number; height?: number }) => {
+    updateNodeSize(doc, node.id, size)
+    if (node.id === ROOT_ID) updateFrameProps(doc, node.id, { canvasSizeMode: 'custom' })
+  }
   return (
     <div className="scripture-inspector-section">
       <h3>Size</h3>
@@ -393,18 +445,21 @@ function SizeSection({ node, docId }: { node: LayoutNode; docId: string }) {
           title="Width"
           value={node.width ?? autoWidth}
           min={MIN_NODE_SIZE}
-          onChange={(width) => updateNodeSize(doc, node.id, { width })}
+          onChange={(width) => updateSize({ width })}
         />
         <IconField
           icon={<MoveVertical size={14} />}
           title="Height"
           value={node.height ?? autoHeight}
           min={MIN_NODE_SIZE}
-          onChange={(height) => updateNodeSize(doc, node.id, { height })}
+          onChange={(height) => updateSize({ height })}
         />
       </div>
       {hasCustomSize && (
-        <Button variant="ghost" size="sm" onClick={() => updateNodeSize(doc, node.id, { width: null, height: null })}>
+        <Button variant="ghost" size="sm" onClick={() => {
+          updateNodeSize(doc, node.id, { width: null, height: null })
+          if (node.id === ROOT_ID) updateFrameProps(doc, node.id, { canvasSizeMode: 'auto' })
+        }}>
           Reset to auto
         </Button>
       )}
@@ -963,6 +1018,223 @@ function TextTypographyControls({
   )
 }
 
+function PageNumberTypographyControls({
+  settings,
+  onChange,
+}: {
+  settings: PageNumberSettings
+  onChange: (settings: PageNumberSettings) => void
+}) {
+  const typography = settings.typography
+  const absoluteLineHeight = Number((typography.lineHeight * typography.fontSize).toFixed(2))
+  const fontSizeOptions = withCurrentOption(TEXT_FONT_SIZE_OPTIONS, typography.fontSize, false)
+  const lineHeightOptions = withCurrentOption(
+    TEXT_LINE_HEIGHT_OPTIONS.map((height) => Number((height * typography.fontSize).toFixed(2))),
+    absoluteLineHeight,
+    false
+  )
+  const letterSpacingOptions = withCurrentOption(TEXT_LETTER_SPACING_OPTIONS, typography.letterSpacing, false)
+  const updateTypography = (patch: Partial<PageNumberTypography>) => {
+    onChange({ ...settings, typography: { ...typography, ...patch } })
+  }
+
+  return (
+    <>
+      <div className="scripture-inspector-stack">
+        <Label>Font</Label>
+        <FontPicker
+          value={{ family: typography.fontFamily, source: typography.fontSource }}
+          onChange={(font) => updateTypography({ fontFamily: font.family, fontSource: font.source })}
+        />
+      </div>
+      <div className="scripture-text-metrics" aria-label="Page number size, line height, and letter spacing">
+        <div className="scripture-text-metric">
+          <Type aria-hidden="true" />
+          <TextMetricPicker
+            value={typography.fontSize}
+            options={fontSizeOptions}
+            min={8}
+            max={512}
+            step={1}
+            unit="px"
+            ariaLabel="Page number font size"
+            onChange={(fontSize) => updateTypography({ fontSize })}
+          />
+        </div>
+        <div className="scripture-text-metric">
+          <MoveVertical aria-hidden="true" />
+          <TextMetricPicker
+            value={absoluteLineHeight}
+            options={lineHeightOptions}
+            min={Number((typography.fontSize * 0.5).toFixed(2))}
+            max={Number((typography.fontSize * 4).toFixed(2))}
+            step={0.5}
+            unit="px"
+            ariaLabel="Page number line height"
+            onChange={(lineHeight) => updateTypography({
+              lineHeight: Number((lineHeight / typography.fontSize).toFixed(4)),
+            })}
+          />
+        </div>
+        <div className="scripture-text-metric">
+          <MoveHorizontal aria-hidden="true" />
+          <TextMetricPicker
+            value={typography.letterSpacing}
+            options={letterSpacingOptions}
+            min={-20}
+            max={100}
+            step={0.1}
+            unit="px"
+            ariaLabel="Page number letter spacing"
+            onChange={(letterSpacing) => updateTypography({ letterSpacing })}
+          />
+        </div>
+      </div>
+      <div className="scripture-inspector-stack">
+        <Label>Style</Label>
+        <div className="scripture-inline-format-controls">
+          <FontWeightPicker
+            value={typography.fontWeight}
+            fontFamily={typography.fontFamily}
+            fontSource={typography.fontSource}
+            onChange={(fontWeight) => updateTypography({ fontWeight })}
+          >
+            <Toggle
+              variant="outline"
+              size="sm"
+              pressed={typography.fontWeight >= 600}
+              onPressedChange={(pressed) => updateTypography({ fontWeight: pressed ? 700 : 400 })}
+              aria-label="Bold page number"
+            >
+              <Bold />
+            </Toggle>
+          </FontWeightPicker>
+          <Toggle
+            variant="outline"
+            size="sm"
+            pressed={typography.fontStyle === 'italic'}
+            onPressedChange={(pressed) => updateTypography({ fontStyle: pressed ? 'italic' : 'normal' })}
+            aria-label="Italic page number"
+          >
+            <Italic />
+          </Toggle>
+          <Toggle
+            variant="outline"
+            size="sm"
+            pressed={typography.underline}
+            onPressedChange={(underline) => updateTypography({ underline })}
+            aria-label="Underline page number"
+          >
+            <Underline />
+          </Toggle>
+          <Toggle
+            variant="outline"
+            size="sm"
+            pressed={typography.strike}
+            onPressedChange={(strike) => updateTypography({ strike })}
+            aria-label="Strikethrough page number"
+          >
+            <Strikethrough />
+          </Toggle>
+          <ColorPicker
+            label="Text color"
+            value={typography.textColor === 'currentColor' ? null : typography.textColor}
+            presets={TEXT_COLOR_PRESETS}
+            allowAlpha={false}
+            onChange={(textColor) => updateTypography({ textColor })}
+            onClear={() => updateTypography({ textColor: 'currentColor' })}
+          />
+          <ColorPicker
+            label="Highlight color"
+            value={typography.highlightColor}
+            presets={HIGHLIGHT_PRESETS}
+            allowAlpha
+            onChange={(highlightColor) => updateTypography({ highlightColor })}
+            onClear={() => updateTypography({ highlightColor: null })}
+          />
+        </div>
+        <p className="scripture-inspector-hint">Right-click Bold to choose an exact font weight.</p>
+      </div>
+    </>
+  )
+}
+
+function PageNumberStyleView({
+  settings,
+  previewText,
+  onChange,
+  onBack,
+}: {
+  settings: PageNumberSettings
+  previewText: string
+  onChange: (settings: PageNumberSettings) => void
+  onBack: () => void
+}) {
+  const typography = settings.typography
+  return (
+    <Card className="scripture-inspector scripture-inspector-subview" size="sm">
+      <CardContent className="flex flex-col">
+        <div className="scripture-inspector-subview-header">
+          <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to canvas settings">
+            <ArrowLeft />
+          </Button>
+          <strong>Page number appearance</strong>
+        </div>
+        <GoogleFontLoader families={typography.fontSource === 'google' ? [typography.fontFamily] : []} />
+        <div className="scripture-page-number-style-preview" aria-label="Page number style preview">
+          <small>Preview</small>
+          <div className="scripture-page-number-style-samples">
+            {(['light', 'dark'] as const).map((surface) => (
+              <div key={surface} className={`scripture-page-number-style-sample is-${surface}`}>
+                <span
+                  data-highlighted={typography.highlightColor ? '' : undefined}
+                  style={pageNumberTypographyStyle(typography)}
+                  aria-hidden={surface === 'dark'}
+                >
+                  {previewText}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="scripture-page-number-style-controls">
+          <div className="scripture-inspector-row">
+            <Label>Numerals</Label>
+            <Select
+              value={settings.numeralStyle}
+              onValueChange={(numeralStyle) => onChange({
+                ...settings,
+                numeralStyle: numeralStyle as PageNumberNumeralStyle,
+              })}
+            >
+              <SelectTrigger className="w-36" size="sm" aria-label="Page number numeral style">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="arabic">Arabic · 1, 2, 3</SelectItem>
+                <SelectItem value="roman">Roman · I, II, III</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="scripture-page-number-style-divider" />
+          <PageNumberTypographyControls settings={settings} onChange={onChange} />
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full justify-start"
+          onClick={() => onChange({
+            ...settings,
+            typography: { ...DEFAULT_PAGE_NUMBER_TYPOGRAPHY },
+          })}
+        >
+          <RemoveFormatting /> Reset number style
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
 function TextContentControls({
   blockId,
   onSetEditing,
@@ -1203,11 +1475,21 @@ export function InspectorPanel({
   exporting,
   exportError,
   onSetEditing,
+  pageNumberSettings,
+  onPageNumberSettingsChange,
+  pageIds,
+  pageNames,
 }: InspectorPanelProps) {
   const { measureAll } = useGeometryRegistry()
   const exportQuality = useExportQuality()
   const exportMargin = useExportMargin()
   const transparentExport = useTransparentExport()
+  const [pageNumberStyleOpen, setPageNumberStyleOpen] = useState(false)
+  const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
+
+  useEffect(() => {
+    if (selectedId !== ROOT_ID) setPageNumberStyleOpen(false)
+  }, [selectedId])
 
   if (selectedIds.length > 1) {
     return (
@@ -1215,7 +1497,6 @@ export function InspectorPanel({
     )
   }
 
-  const selectedId = selectedIds[0] ?? null
   const node = selectedId ? findNode(tree, selectedId) : tree
   if (!node) return null
 
@@ -1225,6 +1506,30 @@ export function InspectorPanel({
     const childLayout: ChildLayout = node.childLayout ?? 'flex'
     const isCanvasFrame = childLayout === 'canvas'
     const canUngroup = isCanvasFrame && node.id !== ROOT_ID
+    const configuredStartPageId = pageNumberSettings.startPageId
+    const startPageId = configuredStartPageId && pageIds.includes(configuredStartPageId)
+      ? configuredStartPageId
+      : (pageIds[0] ?? null)
+    const startPageIndex = startPageId ? pageIds.indexOf(startPageId) : 0
+    const currentPageIndex = pageIds.indexOf(docId)
+    const currentPageBeforeStart = currentPageIndex >= 0 && currentPageIndex < startPageIndex
+    const currentPageHidden = pageNumberSettings.hiddenPageIds.includes(docId)
+    const generatedPageNumber = currentPageIndex >= startPageIndex
+      ? formatPageNumber(currentPageIndex - startPageIndex + 1, pageNumberSettings)
+      : 'Not numbered'
+    const stylePreviewText = currentPageIndex >= startPageIndex
+      ? generatedPageNumber
+      : formatPageNumber(1, pageNumberSettings)
+    if (node.id === ROOT_ID && pageNumberStyleOpen) {
+      return (
+        <PageNumberStyleView
+          settings={pageNumberSettings}
+          previewText={stylePreviewText}
+          onChange={onPageNumberSettingsChange}
+          onBack={() => setPageNumberStyleOpen(false)}
+        />
+      )
+    }
     return (
       <InspectorCard context={node.id === ROOT_ID ? 'canvas' : 'frame'}>
         <CardContent className="flex flex-col gap-5">
@@ -1413,6 +1718,176 @@ export function InspectorPanel({
             </div>
           </div>
 
+          {node.id === ROOT_ID && (
+            <>
+              <Separator />
+              <div className="scripture-inspector-section">
+                <h3>Canvas size</h3>
+                <div className="scripture-inspector-row">
+                  <Label>Format</Label>
+                  <Select
+                    value={canvasSizePresetValue(node)}
+                    onValueChange={(value) => {
+                      if (value === 'custom') {
+                        updateFrameProps(doc, node.id, { pageSize: 'content', canvasSizeMode: 'custom' })
+                        return
+                      }
+                      const preset = CANVAS_SIZE_PRESETS.find((candidate) => candidate.value === value)
+                      if (!preset) return
+                      updateFrameProps(doc, node.id, {
+                        pageSize: 'content',
+                        canvasSizeMode: value as CanvasSizeMode,
+                      })
+                      updateNodeSize(
+                        doc,
+                        node.id,
+                        value === 'auto'
+                          ? { width: null, height: null }
+                          : { width: preset.width, height: preset.height }
+                      )
+                    }}
+                  >
+                    <SelectTrigger className="w-40" size="sm" aria-label="Canvas format">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CANVAS_SIZE_PRESETS.map((preset) => (
+                        <SelectItem key={preset.value} value={preset.value} className="text-xs">
+                          {preset.label}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="custom" className="text-xs">Custom</SelectItem>
+                      <SelectItem value="export-sized" className="text-xs" disabled>Controlled by export</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="scripture-inspector-hint">
+                  Presets resize the artboard and use that same shape for content-sized exports. Fine-tune the exact
+                  dimensions below; Custom stays explicit even when its dimensions match a preset.
+                </p>
+              </div>
+            </>
+          )}
+
+          {node.id === ROOT_ID && (
+            <>
+              <Separator />
+              <div className="scripture-inspector-section">
+                <h3>Page numbers</h3>
+                <div className="scripture-inspector-row">
+                  <Label>Enable numbering</Label>
+                  <Switch
+                    checked={pageNumberSettings.enabled}
+                    onCheckedChange={(enabled) =>
+                      onPageNumberSettingsChange({ ...pageNumberSettings, enabled })
+                    }
+                    aria-label="Show page numbers"
+                  />
+                </div>
+                {pageNumberSettings.enabled && (
+                  <>
+                    <div className="scripture-inspector-row">
+                      <Label>Show on this page</Label>
+                      <Switch
+                        checked={!currentPageBeforeStart && !currentPageHidden}
+                        disabled={currentPageBeforeStart}
+                        onCheckedChange={(visible) => {
+                          const hiddenPageIds = visible
+                            ? pageNumberSettings.hiddenPageIds.filter((pageId) => pageId !== docId)
+                            : [...new Set([...pageNumberSettings.hiddenPageIds, docId])]
+                          onPageNumberSettingsChange({ ...pageNumberSettings, hiddenPageIds })
+                        }}
+                        aria-label="Show page number on this page"
+                      />
+                    </div>
+                    {currentPageBeforeStart && (
+                      <p className="scripture-inspector-hint">This page is before the numbering start page.</p>
+                    )}
+                    <div className="scripture-inspector-stack">
+                      <Label>Start numbering on</Label>
+                      <Select
+                        value={startPageId ?? ''}
+                        onValueChange={(nextStartPageId) => onPageNumberSettingsChange({
+                          ...pageNumberSettings,
+                          startPageId: nextStartPageId,
+                        })}
+                      >
+                        <SelectTrigger className="w-full" size="sm" aria-label="Page numbering start page">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {pageIds.map((pageId, index) => (
+                            <SelectItem key={pageId} value={pageId}>
+                              {index + 1}. {pageNames[pageId] || 'Untitled'}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="scripture-inspector-stack">
+                      <Label>Position</Label>
+                      <ToggleGroup
+                        type="single"
+                        variant="outline"
+                        size="sm"
+                        spacing={0}
+                        className="w-full"
+                        value={pageNumberSettings.vertical}
+                        onValueChange={(vertical) =>
+                          vertical && onPageNumberSettingsChange({
+                            ...pageNumberSettings,
+                            vertical: vertical as PageNumberVerticalPosition,
+                          })
+                        }
+                        aria-label="Page number vertical position"
+                      >
+                        <ToggleGroupItem value="top" className="flex-1">Top</ToggleGroupItem>
+                        <ToggleGroupItem value="bottom" className="flex-1">Bottom</ToggleGroupItem>
+                      </ToggleGroup>
+                      <ToggleGroup
+                        type="single"
+                        variant="outline"
+                        size="sm"
+                        spacing={0}
+                        className="w-full"
+                        value={pageNumberSettings.horizontal}
+                        onValueChange={(horizontal) =>
+                          horizontal && onPageNumberSettingsChange({
+                            ...pageNumberSettings,
+                            horizontal: horizontal as PageNumberHorizontalPosition,
+                          })
+                        }
+                        aria-label="Page number horizontal position"
+                      >
+                        <ToggleGroupItem value="left" className="flex-1" aria-label="Left">
+                          <AlignLeft />
+                        </ToggleGroupItem>
+                        <ToggleGroupItem value="center" className="flex-1" aria-label="Center">
+                          <AlignCenter />
+                        </ToggleGroupItem>
+                        <ToggleGroupItem value="right" className="flex-1" aria-label="Right">
+                          <AlignRight />
+                        </ToggleGroupItem>
+                      </ToggleGroup>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="scripture-page-number-appearance-button"
+                      onClick={() => setPageNumberStyleOpen(true)}
+                    >
+                      <Type />
+                      Edit appearance…
+                    </Button>
+                  </>
+                )}
+                <p className="scripture-inspector-hint">
+                  The start page is 1 or I. Hidden pages keep their place in the count, and numbering is included in previews and exports.
+                </p>
+              </div>
+            </>
+          )}
+
           {/* For the root frame, manual width/height only affects a
               Content-sized export. Fixed paper formats own their dimensions,
               so the Size controls are hidden for those formats. */}
@@ -1433,7 +1908,10 @@ export function InspectorPanel({
                   <Select
                     value={node.pageSize ?? 'content'}
                     onValueChange={(v) => {
-                      updateFrameProps(doc, node.id, { pageSize: v as PageSize })
+                      updateFrameProps(doc, node.id, {
+                        pageSize: v as PageSize,
+                        ...(v !== 'content' ? { canvasSizeMode: 'auto' as const } : {}),
+                      })
                       // A manual width/height override only ever does anything at
                       // export time while Content-sized -- the fixed formats force
                       // their own paper width regardless (see

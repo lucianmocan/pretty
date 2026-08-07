@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Fragment, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { LoaderCircle, Plus } from 'lucide-react'
 import { FrameNode } from '@/components/canvas/frame-node'
@@ -32,7 +32,13 @@ import {
   renameDocument,
   touchDocument,
   getPageIds,
+  getPageNames,
+  getPageNumberSettings,
+  setPageNumberSettings as persistPageNumberSettings,
+  DEFAULT_PAGE_NUMBER_SETTINGS,
+  type PageNumberSettings,
   addPage,
+  renamePage,
   reorderPages,
 } from '@/lib/documents/manifest'
 import { AppMenubar } from '@/components/layout/app-menubar'
@@ -41,9 +47,10 @@ import { CustomizeDialog } from '@/components/customize/customize-dialog'
 import { LayersPanel } from '@/components/layout/layers-panel'
 import { GeometryRegistryProvider } from '@/components/canvas/geometry-registry'
 import { deletePage } from '@/lib/documents/delete-service'
+import { duplicatePage } from '@/lib/documents/duplicate-page'
+import { resolvePageNumber } from '@/lib/documents/page-numbers'
 import { findNode, findParent } from '@/lib/layout/tree-utils'
 import { deleteUploadedImage } from '@/lib/images/client'
-import { refreshDocumentPreview } from '@/lib/documents/preview'
 import { TEMPLATES, type Template } from '@/lib/templates'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
@@ -59,7 +66,12 @@ export default function DocumentEditorPage() {
   const { docId } = useParams<{ docId: string }>()
   const router = useRouter()
   const [pageIds, setPageIds] = useState<string[]>([])
+  const [pageNames, setPageNames] = useState<Record<string, string>>({})
+  const [pageNumberSettings, setPageNumberSettings] = useState<PageNumberSettings>(DEFAULT_PAGE_NUMBER_SETTINGS)
   const [activePageId, setActivePageId] = useState<string | null>(null)
+  const activePageNumber = activePageId
+    ? resolvePageNumber(pageIds, activePageId, pageNumberSettings)
+    : null
   const tree = useLayoutTree(activePageId)
   const treeMounted = Boolean(tree)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -131,6 +143,8 @@ export default function DocumentEditorPage() {
     setDocName(meta.name)
     const ids = getPageIds(docId)
     setPageIds(ids)
+    setPageNames(getPageNames(docId))
+    setPageNumberSettings(getPageNumberSettings(docId))
     setActivePageId(ids[0])
   }, [docId])
 
@@ -154,22 +168,29 @@ export default function DocumentEditorPage() {
     const { doc, synced } = getYDoc(activePageId)
     let timeout: ReturnType<typeof setTimeout> | null = null
     let cancelled = false
+    let pendingTouch = false
     void synced.then(() => {
       if (!cancelled) setSaveState('saved')
     })
     const handler = () => {
       setSaveState('saving')
+      pendingTouch = true
       if (timeout) clearTimeout(timeout)
       timeout = setTimeout(() => {
         touchDocument(docId)
+        pendingTouch = false
+        timeout = null
         setSaveState('saved')
-        void refreshDocumentPreview(docId)
       }, 800)
     }
     doc.on('update', handler)
     return () => {
       doc.off('update', handler)
       if (timeout) clearTimeout(timeout)
+      // A page switch or route change can happen inside the debounce window.
+      // Persist the metadata revision so dashboard preview caches cannot remain
+      // valid after the underlying Yjs document has already changed.
+      if (pendingTouch) touchDocument(docId)
       cancelled = true
     }
   }, [docId, activePageId])
@@ -460,12 +481,47 @@ export default function DocumentEditorPage() {
     await deletePage(docId, pageId)
     const next = pageIds.filter((id) => id !== pageId)
     setPageIds(next)
+    setPageNames((current) => {
+      const nextNames = { ...current }
+      delete nextNames[pageId]
+      return nextNames
+    })
+    setPageNumberSettings(getPageNumberSettings(docId))
     if (activePageId === pageId) handleSwitchPage(next[Math.max(0, pageIds.indexOf(pageId) - 1)])
+  }
+
+  async function handleDuplicatePage(pageId: string) {
+    setOperationError(null)
+    try {
+      const duplicatePageId = await duplicatePage(docId, pageId)
+      setPageIds(getPageIds(docId))
+      setPageNames(getPageNames(docId))
+      setPageNumberSettings(getPageNumberSettings(docId))
+      handleSwitchPage(duplicatePageId)
+    } catch (cause) {
+      setOperationError(cause instanceof Error ? cause.message : 'The page could not be duplicated.')
+    }
   }
 
   function handleReorderPages(next: string[]) {
     reorderPages(docId, next)
     setPageIds(next)
+  }
+
+  function handleRenamePage(pageId: string, name: string) {
+    renamePage(docId, pageId, name)
+    setPageNames((current) => {
+      const next = { ...current }
+      const trimmedName = name.trim()
+      if (trimmedName) next[pageId] = trimmedName
+      else delete next[pageId]
+      return next
+    })
+  }
+
+  function handlePageNumberSettingsChange(settings: PageNumberSettings) {
+    setPageNumberSettings(settings)
+    persistPageNumberSettings(docId, settings)
   }
 
   function handleRename(name: string) {
@@ -834,119 +890,137 @@ export default function DocumentEditorPage() {
         )}
 
         {tree ? (
-          <div className="scripture-workspace" key={activePageId}>
+          <div className="scripture-workspace">
             <LayersPanel
               tree={tree}
               pageIds={pageIds}
+              pageNames={pageNames}
+              pageNumberSettings={pageNumberSettings}
               activePageId={activePageId as string}
               selectedIds={selectedIds}
               onAddPage={handleAddPage}
               onSelectPage={handleSwitchPage}
               onDeletePage={handleRemovePage}
+              onDuplicatePage={handleDuplicatePage}
+              onRenamePage={handleRenamePage}
               onReorderPages={handleReorderPages}
               onSelectNode={handleSelect}
               onSetEditing={setEditingId}
               onReorderNode={handleReorder}
             />
-            <div className="scripture-canvas-stage">
-              <div
-                ref={canvasAreaRef}
-                className={spacePressed ? 'scripture-canvas-area is-pan-ready' : 'scripture-canvas-area'}
-                onClick={() => handleSelectionChange([ROOT_ID])}
-                onPointerDownCapture={beginCanvasPan}
-                onAuxClick={(event) => event.preventDefault()}
-              >
+            {/* Keyed on activePageId so the canvas/inspector local state
+                (selection, editor registries, etc.) resets cleanly per page.
+                LayersPanel sits outside this boundary -- it already reacts to
+                activePageId via props and must not remount every switch, or
+                every page thumbnail loses its loaded image and dirty tracking. */}
+            <Fragment key={activePageId}>
+              <div className="scripture-canvas-stage">
                 <div
-                  className="scripture-canvas-scale-box"
-                  style={
-                    naturalSize
-                      ? { width: naturalSize.width * zoom, height: naturalSize.height * zoom }
-                      : undefined
-                  }
+                  ref={canvasAreaRef}
+                  className={spacePressed ? 'scripture-canvas-area is-pan-ready' : 'scripture-canvas-area'}
+                  onClick={() => handleSelectionChange([ROOT_ID])}
+                  onPointerDownCapture={beginCanvasPan}
+                  onAuxClick={(event) => event.preventDefault()}
                 >
                   <div
-                    ref={viewportRef}
-                    className="scripture-canvas-viewport"
+                    className="scripture-canvas-scale-box"
                     style={
-                      {
-                        transform: `scale(${zoom})`,
-                        // Selection/hover strokes live inside this transformed
-                        // tree. Counter-scale their local thickness so they
-                        // remain one physical screen pixel at every zoom.
-                        '--scripture-canvas-stroke': `${1 / Math.max(zoom, 0.01)}px`,
-                      } as CSSProperties
+                      naturalSize
+                        ? { width: naturalSize.width * zoom, height: naturalSize.height * zoom }
+                        : undefined
                     }
                   >
-                    <CanvasRoot>
-                      <FrameNode
-                        node={tree}
-                        docId={activePageId as string}
-                        selectedIds={selectedIds}
-                        onSelect={handleSelect}
-                        onSelectionChange={handleSelectionChange}
-                        onMove={handleMove}
-                        onDuplicate={handleDuplicate}
-                        onRemove={handleRemove}
-                        onReorder={handleReorder}
-                        onResizeNode={handleResizeNode}
-                        onRepositionNode={handleRepositionNode}
-                        parentChildLayout="flex"
-                        gutterClickMode={gutterClickMode}
-                        onGutterClick={handleGutterClick}
-                        zoom={zoom}
-                        editingId={editingId}
-                        onSetEditing={setEditingId}
-                        parentId={null}
-                        onAddBlockToFrame={handleAddBlockToFrame}
-                      />
-                    </CanvasRoot>
+                    <div
+                      ref={viewportRef}
+                      className="scripture-canvas-viewport"
+                      style={
+                        {
+                          transform: `scale(${zoom})`,
+                          // Selection/hover strokes live inside this transformed
+                          // tree. Counter-scale their local thickness so they
+                          // remain one physical screen pixel at every zoom.
+                          '--scripture-canvas-stroke': `${1 / Math.max(zoom, 0.01)}px`,
+                        } as CSSProperties
+                      }
+                    >
+                      <CanvasRoot>
+                        <FrameNode
+                          node={tree}
+                          docId={activePageId as string}
+                          selectedIds={selectedIds}
+                          onSelect={handleSelect}
+                          onSelectionChange={handleSelectionChange}
+                          onMove={handleMove}
+                          onDuplicate={handleDuplicate}
+                          onRemove={handleRemove}
+                          onReorder={handleReorder}
+                          onResizeNode={handleResizeNode}
+                          onRepositionNode={handleRepositionNode}
+                          parentChildLayout="flex"
+                          gutterClickMode={gutterClickMode}
+                          onGutterClick={handleGutterClick}
+                          zoom={zoom}
+                          editingId={editingId}
+                          onSetEditing={setEditingId}
+                          parentId={null}
+                          onAddBlockToFrame={handleAddBlockToFrame}
+                          pageNumber={activePageNumber
+                            ? { number: activePageNumber.number, settings: pageNumberSettings }
+                            : undefined}
+                        />
+                      </CanvasRoot>
+                    </div>
                   </div>
                 </div>
+                <ZoomControls
+                  zoom={zoom}
+                  onZoomIn={handleZoomIn}
+                  onZoomOut={handleZoomOut}
+                  onReset={handleZoomReset}
+                  onRecenter={handleRecenter}
+                />
+                <CanvasToolbar
+                  docId={activePageId as string}
+                  tree={tree}
+                  selectedIds={selectedIds}
+                  onSelectionChange={handleSelectionChange}
+                  onSetEditing={setEditingId}
+                />
+                {(deleteNotice || (canvasOverflows && panHintVisible)) && (
+                  <div className="scripture-canvas-notices">
+                    {deleteNotice && (
+                      <div className="scripture-delete-toast" role="status">
+                        <span>{deleteNotice.count === 1 ? 'Layer deleted' : `${deleteNotice.count} layers deleted`}</span>
+                        <button type="button" onClick={handleUndoDelete}>Undo</button>
+                      </div>
+                    )}
+                    {canvasOverflows && panHintVisible && (
+                      <div className="scripture-pan-hint" role="status">
+                        Hold <kbd>Space</kbd> and drag to pan
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              <ZoomControls
-                zoom={zoom}
-                onZoomIn={handleZoomIn}
-                onZoomOut={handleZoomOut}
-                onReset={handleZoomReset}
-                onRecenter={handleRecenter}
-              />
-              <CanvasToolbar
+              <InspectorPanel
                 docId={activePageId as string}
                 tree={tree}
                 selectedIds={selectedIds}
                 onSelectionChange={handleSelectionChange}
+                gutterClickMode={gutterClickMode}
+                onGutterClickModeChange={setGutterClickMode}
+                onOpenCustomize={handleOpenCustomize}
+                onExportPdf={() => handleExport('pdf')}
+                onExportPng={() => handleExport('png')}
+                exporting={exporting}
+                exportError={exportError}
                 onSetEditing={setEditingId}
+                pageNumberSettings={pageNumberSettings}
+                onPageNumberSettingsChange={handlePageNumberSettingsChange}
+                pageIds={pageIds}
+                pageNames={pageNames}
               />
-              {(deleteNotice || (canvasOverflows && panHintVisible)) && (
-                <div className="scripture-canvas-notices">
-                  {deleteNotice && (
-                    <div className="scripture-delete-toast" role="status">
-                      <span>{deleteNotice.count === 1 ? 'Layer deleted' : `${deleteNotice.count} layers deleted`}</span>
-                      <button type="button" onClick={handleUndoDelete}>Undo</button>
-                    </div>
-                  )}
-                  {canvasOverflows && panHintVisible && (
-                    <div className="scripture-pan-hint" role="status">
-                      Hold <kbd>Space</kbd> and drag to pan
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            <InspectorPanel
-              docId={activePageId as string}
-              tree={tree}
-              selectedIds={selectedIds}
-              onSelectionChange={handleSelectionChange}
-              gutterClickMode={gutterClickMode}
-              onGutterClickModeChange={setGutterClickMode}
-              onOpenCustomize={handleOpenCustomize}
-              onExportPdf={() => handleExport('pdf')}
-              onExportPng={() => handleExport('png')}
-              exporting={exporting}
-              exportError={exportError}
-              onSetEditing={setEditingId}
-            />
+            </Fragment>
           </div>
         ) : (
           <div className="scripture-editor-loading">Loading…</div>
@@ -955,7 +1029,11 @@ export default function DocumentEditorPage() {
       </EditorRegistryProvider>
       {exporting && (
         <>
-          <BrowserExportSurfaces pageIds={pageIds} rootRef={exportSurfaceRootRef} />
+          <BrowserExportSurfaces
+            pageIds={pageIds}
+            pageNumberSettings={pageNumberSettings}
+            rootRef={exportSurfaceRootRef}
+          />
           <div className="scripture-export-overlay" role="status" aria-live="polite" aria-busy="true">
             <div className="scripture-export-progress">
               <LoaderCircle aria-hidden="true" />

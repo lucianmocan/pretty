@@ -1,48 +1,29 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { FileCode } from 'lucide-react'
+import { useEffect } from 'react'
 import type { DocumentMeta } from '@/lib/documents/manifest'
-import { loadDocumentPreview } from '@/lib/documents/preview'
+import { PagePreviewSurface } from '@/components/export/page-preview-surface'
+import { clearDocumentPreview } from '@/lib/documents/preview'
+import { getPageNumberSettings } from '@/lib/documents/manifest'
+import { resolvePageNumber } from '@/lib/documents/page-numbers'
 
 export function DocumentPreview({ documentMeta }: { documentMeta: DocumentMeta }) {
-  const [dataUrl, setDataUrl] = useState<string | null>(null)
+  const pageId = documentMeta.pageIds?.[0] ?? documentMeta.id
+  const pageIds = documentMeta.pageIds?.length ? documentMeta.pageIds : [documentMeta.id]
+  const pageNumberSettings = getPageNumberSettings(documentMeta.id)
+  const pageNumber = resolvePageNumber(pageIds, pageId, pageNumberSettings)
 
   useEffect(() => {
-    let cancelled = false
-    void loadDocumentPreview(documentMeta).then((preview) => {
-      if (!cancelled) setDataUrl(preview)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [documentMeta])
-
-  if (dataUrl) {
-    return (
-      // Generated locally from this document's own first page; decorative
-      // because the surrounding button already names the document.
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        className="scripture-doc-card-preview-image"
-        src={dataUrl}
-        alt=""
-        draggable={false}
-      />
-    )
-  }
+    // Clean up the data-URL cache used by the retired bitmap renderer.
+    clearDocumentPreview(documentMeta.id)
+  }, [documentMeta.id])
 
   return (
-    <span className="scripture-doc-card-preview-fallback" aria-hidden="true">
-      <span className="scripture-doc-card-preview-icon">
-        <FileCode />
-      </span>
-      <span className="scripture-doc-card-code">
-        <i />
-        <i />
-        <i />
-        <i />
-      </span>
-    </span>
+    <PagePreviewSurface
+      key={`${pageId}:${documentMeta.updatedAt}`}
+      pageId={pageId}
+      pageNumber={pageNumber?.number}
+      pageNumberSettings={pageNumberSettings}
+    />
   )
 }

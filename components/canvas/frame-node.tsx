@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ContextMenu as ContextMenuPrimitive, DropdownMenu as DropdownMenuPrimitive } from 'radix-ui'
-import { GripVertical, ChevronUp, ChevronDown, Copy, MoreHorizontal, Trash2 } from 'lucide-react'
+import { GripVertical, ChevronUp, ChevronDown, Copy, LocateFixed, MoreHorizontal, Trash2 } from 'lucide-react'
 import type { ChildLayout, LayoutNode } from '@/lib/layout/types'
 import { frameOuterStyle, frameInnerStyle, outerBoxStyle, contentOverflowStyle } from '@/lib/layout/frame-style'
 import { snapPosition } from '@/lib/layout/canvas-snap'
@@ -29,6 +29,8 @@ import { ImageBlock } from './image-block'
 import { OverflowFade } from './overflow-fade'
 import { useOverflowFade } from '@/lib/use-overflow-fade'
 import type { PositionPatch, SizePatch } from '@/lib/layout/resize-geometry'
+import type { PageNumberSettings } from '@/lib/documents/manifest'
+import { CanvasPageNumber } from '@/components/canvas/canvas-page-number'
 import { useGeometryRegistry } from './geometry-registry'
 
 interface FrameNodeProps {
@@ -71,6 +73,7 @@ interface FrameNodeProps {
   onSetEditing: (id: string | null) => void
   parentId?: string | null
   onAddBlockToFrame: (frameId: string, kind: 'code' | 'text' | 'image') => void
+  pageNumber?: { number: number; settings: PageNumberSettings }
 }
 
 function classNames(...parts: Array<string | false | undefined>) {
@@ -103,42 +106,85 @@ interface GripHandlers {
   onPointerDown?: (e: React.PointerEvent) => void
 }
 
-function NodeControls({
-  id,
-  anchorRef,
-  visible,
-  onMove,
-  onDuplicate,
-  onRemove,
-  gripHandlers,
-  showGrip,
-  showReorderActions,
-  zoom,
-}: {
-  id: string
-  anchorRef: React.RefObject<HTMLElement | null>
-  visible: boolean
-  onMove: (id: string, direction: 'up' | 'down') => void
-  onDuplicate: (id: string) => void
-  onRemove: (id: string) => void
-  gripHandlers: GripHandlers
-  // false for canvas-mode nodes -- dragging works directly on the block
-  // itself there (see beginMoveDrag wired to the block's own onPointerDown),
-  // so a separate grip handle would be redundant chrome. Still shown for
-  // flex-mode nodes, where the grip is what starts native drag-and-drop
-  // reordering (a different interaction, not a position drag).
-  showGrip: boolean
-  showReorderActions: boolean
-  zoom: number
-}) {
-  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
+interface ClipStrip {
+  top: number
+  left: number
+  width: number
+  height: number
+}
+
+interface AnchorGeometry {
+  rect: DOMRect
+  // True once the anchor's own box no longer overlaps its immediate DOM
+  // parent's box at all -- i.e. it's not just clipped at an edge, it's
+  // entirely outside the region its parent's overflow:hidden paints/hit-
+  // tests. Meaningless (always false) for anything not canvas-positioned,
+  // since flex/root nodes never leave their parent's box.
+  isOutsideParent: boolean
+  // True if ANY part of the box falls outside the parent -- a partially
+  // clipped block still has this true even though isOutsideParent is false.
+  isClipped: boolean
+  // The parts of `rect` that fall outside the parent's box, as up to four
+  // rectangular strips (top/bottom/left/right overhang; corners can appear
+  // in two strips at once, which is harmless -- both just start the same
+  // drag). Each strip only covers area the parent's overflow:hidden never
+  // paints, so it can never overlap real on-screen content underneath.
+  clipStrips: ClipStrip[]
+}
+
+/** Tracks an anchor element's live viewport rect and clipping state relative
+ * to its immediate DOM parent (see AnchorGeometry), for chrome that's
+ * portaled to document.body (so it renders outside any ancestor's overflow
+ * clip) but still needs to sit exactly on top of the element it belongs to. */
+function useAnchorGeometry(anchorRef: React.RefObject<HTMLElement | null>, visible: boolean) {
+  const [geometry, setGeometry] = useState<AnchorGeometry | null>(null)
 
   useEffect(() => {
     if (!visible) return
     const anchor = anchorRef.current
     if (!anchor) return
 
-    const update = () => setAnchorRect(anchor.getBoundingClientRect())
+    const update = () => {
+      const rect = anchor.getBoundingClientRect()
+      const parentRect = anchor.parentElement?.getBoundingClientRect()
+      if (!parentRect) {
+        setGeometry({ rect, isOutsideParent: false, isClipped: false, clipStrips: [] })
+        return
+      }
+      const isOutsideParent =
+        rect.right <= parentRect.left ||
+        rect.left >= parentRect.right ||
+        rect.bottom <= parentRect.top ||
+        rect.top >= parentRect.bottom
+
+      const clipStrips: ClipStrip[] = []
+      if (rect.top < parentRect.top) {
+        clipStrips.push({
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: Math.min(rect.bottom, parentRect.top) - rect.top,
+        })
+      }
+      if (rect.bottom > parentRect.bottom) {
+        const top = Math.max(rect.top, parentRect.bottom)
+        clipStrips.push({ top, left: rect.left, width: rect.width, height: rect.bottom - top })
+      }
+      if (rect.left < parentRect.left) {
+        clipStrips.push({
+          top: rect.top,
+          left: rect.left,
+          width: Math.min(rect.right, parentRect.left) - rect.left,
+          height: rect.height,
+        })
+      }
+      if (rect.right > parentRect.right) {
+        const left = Math.max(rect.left, parentRect.right)
+        clipStrips.push({ top: rect.top, left, width: rect.right - left, height: rect.height })
+      }
+
+      setGeometry({ rect, isOutsideParent, isClipped: clipStrips.length > 0, clipStrips })
+    }
     update()
     window.addEventListener('resize', update)
     // Capture is intentional: scroll events do not bubble, and the clipping
@@ -154,12 +200,99 @@ function NodeControls({
       observer.disconnect()
       mutationObserver.disconnect()
     }
-  }, [anchorRef, visible, zoom])
+  }, [anchorRef, visible])
 
-  if (!visible || !anchorRect) return null
+  return geometry
+}
 
-  const toolbarLeft = Math.max(72, Math.min(window.innerWidth - 72, anchorRect.left + anchorRect.width / 2))
-  const preferredTop = anchorRect.top >= 42 ? anchorRect.top - 34 : anchorRect.bottom + 6
+/** A selected block's own ::after outline (see .scripture-selected::after in
+ * globals.css) is clipped along with everything else once part of a canvas-
+ * mode block crosses its parent's overflow:hidden edge -- content should
+ * disappear there, but the selection border is how you see where the block
+ * went so you can drag it back. Portaling a lookalike border to document.body
+ * escapes that clip entirely; it just overlaps the real one pixel-for-pixel
+ * whenever the block is still fully on-screen.
+ *
+ * The clipped-away part of the block also stops receiving pointer events --
+ * clipped content isn't hit-tested, only painted-away -- so dragging
+ * directly on the block only works through whatever sliver is still inside
+ * the parent, which is exactly the "why can I only drag the visible part"
+ * problem. `clipStrips` are laid over precisely the invisible part (never
+ * the visible part, so this never steals clicks meant for the block's own
+ * content -- double-click-to-edit, image upload, buttons in callouts) and
+ * forward to the same onStartDrag used for normal in-bounds dragging, so
+ * grabbing anywhere the block "would be," visible or not, moves it. */
+function SelectionOutline({
+  anchorRef,
+  visible,
+  onStartDrag,
+}: {
+  anchorRef: React.RefObject<HTMLElement | null>
+  visible: boolean
+  onStartDrag?: (e: React.PointerEvent) => void
+}) {
+  const geometry = useAnchorGeometry(anchorRef, visible)
+  if (!visible || !geometry) return null
+  const { rect, isClipped, clipStrips } = geometry
+
+  return createPortal(
+    <>
+      <div
+        className={classNames('scripture-selection-outline', isClipped && 'is-clipped')}
+        style={{ top: rect.top, left: rect.left, width: rect.width, height: rect.height }}
+      />
+      {onStartDrag &&
+        clipStrips.map((strip, index) => (
+          <div
+            key={index}
+            className="scripture-selection-outline-grab"
+            style={{ top: strip.top, left: strip.left, width: strip.width, height: strip.height }}
+            onPointerDown={onStartDrag}
+          />
+        ))}
+    </>,
+    document.body
+  )
+}
+
+function NodeControls({
+  id,
+  anchorRef,
+  visible,
+  onMove,
+  onDuplicate,
+  onRemove,
+  gripHandlers,
+  showGrip,
+  showReorderActions,
+  onBringIntoView,
+}: {
+  id: string
+  anchorRef: React.RefObject<HTMLElement | null>
+  visible: boolean
+  onMove: (id: string, direction: 'up' | 'down') => void
+  onDuplicate: (id: string) => void
+  onRemove: (id: string) => void
+  gripHandlers: GripHandlers
+  // false for canvas-mode nodes -- dragging works directly on the block
+  // itself there (see beginMoveDrag wired to the block's own onPointerDown),
+  // so a separate grip handle would be redundant chrome. Still shown for
+  // flex-mode nodes, where the grip is what starts native drag-and-drop
+  // reordering (a different interaction, not a position drag).
+  showGrip: boolean
+  showReorderActions: boolean
+  // Only provided for canvas-mode blocks; the menu item that calls it is
+  // only shown once this same geometry check finds part of the block outside
+  // its parent's box (see AnchorGeometry / useAnchorGeometry above).
+  onBringIntoView?: () => void
+}) {
+  const geometry = useAnchorGeometry(anchorRef, visible)
+
+  if (!visible || !geometry) return null
+  const { rect, isClipped } = geometry
+
+  const toolbarLeft = Math.max(72, Math.min(window.innerWidth - 72, rect.left + rect.width / 2))
+  const preferredTop = rect.top >= 42 ? rect.top - 34 : rect.bottom + 6
   const toolbarTop = Math.max(8, Math.min(window.innerHeight - 38, preferredTop))
 
   return createPortal(
@@ -229,6 +362,12 @@ function NodeControls({
             sideOffset={5}
             collisionPadding={8}
           >
+            {onBringIntoView && isClipped && (
+              <DropdownMenuPrimitive.Item className="scripture-node-menu-item" onSelect={onBringIntoView}>
+                <LocateFixed />
+                Bring into view
+              </DropdownMenuPrimitive.Item>
+            )}
             <DropdownMenuPrimitive.Item
               className="scripture-node-menu-item is-destructive"
               onSelect={() => onRemove(id)}
@@ -315,6 +454,7 @@ export function FrameNode({
   onSetEditing,
   parentId = null,
   onAddBlockToFrame,
+  pageNumber,
 }: FrameNodeProps) {
   const isRoot = node.id === ROOT_ID
   const resolvedCodeBackground = node.kind === 'code' ? resolveThemeBackground(node.theme) : undefined
@@ -464,6 +604,11 @@ export function FrameNode({
     />
   )
 
+  // Also passed to SelectionOutline as its drag handle: once a canvas-mode
+  // block is entirely outside its parent's box, the block itself stops
+  // receiving pointer events there (clipped-away content isn't hit-tested),
+  // so the portaled outline is the only thing left to grab. Its target is
+  // never inside a button/input, so the guard below never fires for it.
   function beginMoveDrag(e: React.PointerEvent) {
     if (!e.isPrimary || e.button !== 0 || activeDragCleanupRef.current) return
     if ((e.target as HTMLElement).closest('button, input, textarea, select, a, [data-node-drag-ignore]')) return
@@ -717,6 +862,23 @@ export function FrameNode({
   const showGrip = parentChildLayout !== 'canvas'
   const showReorderActions = parentChildLayout !== 'canvas'
 
+  // Resets a canvas-mode block's stored x/y to the nearest position fully
+  // inside its parent's box -- the on-demand version of the boundary clamp
+  // snapPosition used to always enforce (see canvas-snap.ts's doc comment).
+  // Only meaningful once dragging is free to leave that box.
+  function bringIntoView() {
+    const el = elementRef.current
+    const parentEl = el?.parentElement
+    if (!el || !parentEl) return
+    const width = el.getBoundingClientRect().width / zoom
+    const height = el.getBoundingClientRect().height / zoom
+    const maxX = Math.max(0, parentEl.clientWidth - width)
+    const maxY = Math.max(0, parentEl.clientHeight - height)
+    const x = Math.min(Math.max(0, node.x ?? 0), maxX)
+    const y = Math.min(Math.max(0, node.y ?? 0), maxY)
+    onRepositionNode(node.id, { x, y })
+  }
+
   function enterTextEditing(e: React.MouseEvent) {
     e.stopPropagation()
     onSelect(node.id, false)
@@ -816,18 +978,25 @@ export function FrameNode({
         {...dragTargetHandlers}
       >
         {!isRoot && (
-          <NodeControls
-            id={node.id}
-            anchorRef={elementRef}
-            visible={showSelectionControls}
-            onMove={onMove}
-            onDuplicate={onDuplicate}
-            onRemove={onRemove}
-            gripHandlers={gripHandlers}
-            showGrip={showGrip}
-            showReorderActions={showReorderActions}
-            zoom={zoom}
-          />
+          <>
+            <NodeControls
+              id={node.id}
+              anchorRef={elementRef}
+              visible={showSelectionControls}
+              onMove={onMove}
+              onDuplicate={onDuplicate}
+              onRemove={onRemove}
+              gripHandlers={gripHandlers}
+              showGrip={showGrip}
+              showReorderActions={showReorderActions}
+              onBringIntoView={isCanvasChild ? bringIntoView : undefined}
+            />
+            <SelectionOutline
+              anchorRef={elementRef}
+              visible={isSelected}
+              onStartDrag={isCanvasChild ? beginMoveDrag : undefined}
+            />
+          </>
         )}
         {/* Flex layout + scroll/clip live on this INNER wrapper, not the
             outer box above -- see frameInnerStyle's doc comment for why:
@@ -835,7 +1004,10 @@ export function FrameNode({
             by this frame's own overflow once it has an explicit size. */}
         <div
           ref={contentRef}
-          className="scripture-frame-content"
+          className={classNames(
+            'scripture-frame-content',
+            isRoot && 'scripture-page-number-host'
+          )}
           style={frameInnerStyle(renderedNode)}
           onPointerDown={beginMarquee}
         >
@@ -888,6 +1060,9 @@ export function FrameNode({
                 height: marquee.height,
               }}
             />
+          )}
+          {isRoot && pageNumber && (
+            <CanvasPageNumber number={pageNumber.number} settings={pageNumber.settings} />
           )}
         </div>
         <OverflowFade state={overflowFade} />
@@ -952,7 +1127,12 @@ export function FrameNode({
         gripHandlers={gripHandlers}
         showGrip={showGrip}
         showReorderActions={showReorderActions}
-        zoom={zoom}
+        onBringIntoView={isCanvasChild ? bringIntoView : undefined}
+      />
+      <SelectionOutline
+        anchorRef={elementRef}
+        visible={isSelected}
+        onStartDrag={isCanvasChild ? beginMoveDrag : undefined}
       />
       {/* Scroll/clip lives on this INNER wrapper, not the outer box above --
           see contentOverflowStyle's doc comment: NodeControls/resizeHandles

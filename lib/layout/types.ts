@@ -29,6 +29,14 @@ export interface CalloutAnnotation {
 // same content onto a fixed-size page instead of resizing it to fill one
 // (see app/api/export/route.ts).
 export type PageSize = 'content' | 'a4' | 'letter' | 'custom'
+export type CanvasSizeMode =
+  | 'auto'
+  | 'slides-16-9'
+  | 'slides-4-3'
+  | 'square'
+  | 'portrait-4-5'
+  | 'story-9-16'
+  | 'custom'
 
 export interface FrameProps {
   direction: FlexDirection
@@ -47,6 +55,7 @@ export interface FrameProps {
   pageSize: PageSize
   customPageWidthMm: number
   customPageHeightMm: number
+  canvasSizeMode: CanvasSizeMode
 }
 
 export type LayoutNodeKind = 'frame' | 'code' | 'text' | 'image'
@@ -118,6 +127,7 @@ export interface LayoutNode {
   pageSize?: PageSize
   customPageWidthMm?: number
   customPageHeightMm?: number
+  canvasSizeMode?: CanvasSizeMode
   children?: LayoutNode[]
   // code-only
   language?: string
@@ -252,6 +262,7 @@ export const DEFAULT_FRAME_PROPS: FrameProps = {
   pageSize: 'content',
   customPageWidthMm: 210,
   customPageHeightMm: 297,
+  canvasSizeMode: 'auto',
 }
 
 export const DEFAULT_ROOT_FRAME_PROPS: FrameProps = {
@@ -272,4 +283,5 @@ export const DEFAULT_ROOT_FRAME_PROPS: FrameProps = {
   pageSize: 'content',
   customPageWidthMm: 210,
   customPageHeightMm: 297,
+  canvasSizeMode: 'auto',
 }

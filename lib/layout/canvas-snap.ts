@@ -109,16 +109,13 @@ function nearestAlignment(
  * (an alignment match wins over plain grid snapping) -- the same "smart
  * guides" technique design tools use, scoped down to axis-aligned comparisons.
  *
- * When `containerSize` is given, the result is also clamped so the box's
- * edges never leave [0, containerSize] on either axis -- the exact border
- * of the canvas container, no extra inset. Without this, a block (and the
- * floating NodeControls/tooltip cluster that renders outside its own top
- * edge) could be dragged to a negative x/y -- content positioned there
- * renders above/left of the scrollable canvas area's own scroll bounds
- * (which are only ever sized to cover non-negative content), so scrollTop/
- * scrollLeft can never reach back to 0 or below to reveal it again. That's
- * functionally indistinguishable from the block just disappearing, even
- * though nothing is technically clipped by an overflow:hidden rule.
+ * When `containerSize` is given, it also seeds a center-alignment candidate
+ * (the box's x/y snaps to the container's own horizontal/vertical center,
+ * same as it would to a sibling's center) -- it does not clamp the result.
+ * Canvas content is allowed to be dragged past the container's edges; the
+ * frame's own `overflow: hidden` (see frameInnerStyle in frame-style.ts)
+ * clips anything that ends up outside, so it's a visual clip, not a hard
+ * boundary on where a block can be positioned.
  *
  * `snapThreshold` is expressed in the same parent-local coordinate system as
  * the boxes. The caller divides the desired screen-pixel threshold by canvas
@@ -172,21 +169,6 @@ export function snapPosition(
   if (yAlignment) {
     y = yAlignment.position
     guideY = yAlignment.guides
-  }
-
-  if (containerSize) {
-    // Math.max(0, ...) first, so a box bigger than the container (maxX < 0)
-    // still clamps to the top-left corner instead of a negative position.
-    const maxX = Math.max(0, containerSize.width - dragged.width)
-    const maxY = Math.max(0, containerSize.height - dragged.height)
-    const clampedX = Math.min(Math.max(0, x), maxX)
-    const clampedY = Math.min(Math.max(0, y), maxY)
-    // A boundary clamp can override the sibling snap. If so, suppress its
-    // guide—the line must only describe the position the block will land at.
-    if (clampedX !== x) guideX = []
-    if (clampedY !== y) guideY = []
-    x = clampedX
-    y = clampedY
   }
 
   return { x, y, guides: { x: guideX, y: guideY } }

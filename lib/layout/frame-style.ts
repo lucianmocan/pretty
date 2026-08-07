@@ -89,6 +89,7 @@ export function frameOuterStyle(node: LayoutNode): CSSProperties {
 }
 
 export function frameInnerStyle(node: LayoutNode): CSSProperties {
+  const isCanvas = node.childLayout === 'canvas'
   const base: CSSProperties = {
     display: 'flex',
     flexDirection: node.direction ?? 'column',
@@ -100,13 +101,17 @@ export function frameInnerStyle(node: LayoutNode): CSSProperties {
     // the wrapper in normal flow preserves a frame's intrinsic width when
     // only its height is explicit; an absolute `inset: 0` wrapper made such
     // frames collapse horizontally because it contributed no intrinsic size.
-    position: node.childLayout === 'canvas' ? 'relative' : undefined,
+    position: isCanvas ? 'relative' : undefined,
+    // Canvas children can be freely dragged past the frame's own bounds --
+    // clip them at the frame edge instead of scrolling, regardless of
+    // whether the frame has an explicit size.
+    ...(isCanvas && { overflow: 'hidden' }),
   }
   if (node.width == null && node.height == null) return base
   return {
     ...base,
     ...(node.width != null && { width: '100%', minWidth: 0 }),
     ...(node.height != null && { height: '100%', minHeight: 0 }),
-    overflow: 'auto',
+    overflow: isCanvas ? 'hidden' : 'auto',
   }
 }

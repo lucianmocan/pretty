@@ -824,6 +824,49 @@ html[data-scripture-reduced-motion='true'] *::after {
   position: relative;
 }
 
+.scripture-page-number-host {
+  /* The number belongs to the actual artboard, not CanvasRoot's outer export
+     gutter or a thumbnail wrapper. This is already relative for free-form
+     canvases; the explicit rule also covers root frames using flex layout. */
+  position: relative;
+}
+
+.scripture-canvas-page-number {
+  position: absolute;
+  z-index: 20;
+  min-width: 1.5rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+}
+
+.scripture-canvas-page-number[data-highlighted] {
+  padding: 0.15em 0.3em;
+  border-radius: 0.2em;
+}
+
+.scripture-canvas-page-number.is-top {
+  top: 1rem;
+}
+
+.scripture-canvas-page-number.is-bottom {
+  bottom: 1rem;
+}
+
+.scripture-canvas-page-number.is-left {
+  left: 1rem;
+}
+
+.scripture-canvas-page-number.is-center {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.scripture-canvas-page-number.is-right {
+  right: 1rem;
+}
+
 .scripture-leaf {
   position: relative;
   border-radius: 4px;
@@ -896,28 +939,58 @@ html[data-scripture-reduced-motion='true'] *::after {
   z-index: 39;
   border-radius: inherit;
   pointer-events: none;
-  opacity: 0;
-  box-shadow: inset 0 0 0 var(--scripture-canvas-stroke, 1px) transparent;
-  transition: opacity 100ms ease, box-shadow 100ms ease;
+  border: var(--scripture-canvas-stroke, 1px) solid transparent;
+  transition: border-color 100ms ease;
 }
 
 .scripture-frame:hover::after,
 .scripture-leaf:hover::after {
-  opacity: 1;
-  box-shadow: inset 0 0 0 var(--scripture-canvas-stroke, 1px) var(--border);
+  border-color: var(--border);
 }
 
 .scripture-frame.is-drag-over::after {
-  opacity: 1;
-  box-shadow: inset 0 0 0 calc(2 * var(--scripture-canvas-stroke, 1px)) var(--ring);
+  border-width: calc(2 * var(--scripture-canvas-stroke, 1px));
+  border-color: var(--ring);
 }
 
 .scripture-frame.scripture-selected::after,
 .scripture-leaf.scripture-selected::after {
-  opacity: 1;
-  box-shadow:
-    inset 0 0 0 var(--scripture-canvas-stroke, 1px)
-    color-mix(in srgb, var(--ring) 78%, transparent);
+  border-color: color-mix(in srgb, var(--ring) 78%, transparent);
+}
+
+/* Portaled to document.body (see SelectionOutline in frame-node.tsx) so a
+   selected block's border stays visible even once dragged past a canvas
+   frame's overflow:hidden edge, where the ::after outline above gets
+   clipped along with everything else. Fixed position, screen coordinates
+   from getBoundingClientRect -- overlaps the ::after outline pixel-for-pixel
+   whenever the block is still on-screen. */
+.scripture-selection-outline {
+  position: fixed;
+  z-index: 39;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--ring) 78%, transparent);
+}
+
+/* A dashed border is the visual cue that part of this block is clipped away
+   -- see .scripture-selection-outline-grab below for the actual drag
+   surface covering that clipped-away part. */
+.scripture-selection-outline.is-clipped {
+  border-style: dashed;
+}
+
+/* One per clipped-away edge (see ClipStrip/ clipStrips in frame-node.tsx) --
+   exactly covers the part of a selected block that's outside its parent's
+   box, so it can never overlap the block's own on-screen content under it.
+   Invisible; the dashed outline above already communicates the clipped
+   state, this only needs to be grabbable. */
+.scripture-selection-outline-grab {
+  position: fixed;
+  z-index: 39;
+  cursor: grab;
+}
+
+.scripture-selection-outline-grab:active {
+  cursor: grabbing;
 }
 
 /* Resize handles -- shown on the selected frame/block, Figma-style. See
@@ -1278,6 +1351,11 @@ html[data-scripture-panning] .scripture-node-controls {
 .scripture-node-menu-item.is-destructive[data-highlighted] {
   background: color-mix(in srgb, var(--destructive) 12%, transparent);
   color: var(--destructive);
+}
+
+.scripture-node-menu-item[data-disabled] {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .scripture-node-menu-item svg {
@@ -2062,6 +2140,12 @@ html[data-scripture-panning] .scripture-node-controls {
   background: color-mix(in srgb, var(--ring) 35%, transparent);
 }
 
+.scripture-panel-resize-handle:focus-visible,
+.scripture-panel-hresize-handle:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--ring) 55%, transparent);
+}
+
 .scripture-layers-panel.is-collapsed {
   width: 2.5rem;
   min-width: 2.5rem;
@@ -2097,6 +2181,25 @@ html[data-scripture-panning] .scripture-node-controls {
   min-height: 0;
   flex: 1;
   overflow: hidden;
+}
+
+.scripture-layers-section.is-pages {
+  flex-shrink: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.scripture-panel-hresize-handle {
+  flex-shrink: 0;
+  height: 0.375rem;
+  margin: -0.1875rem 0;
+  cursor: row-resize;
+  position: relative;
+  z-index: 4;
+}
+
+.scripture-panel-hresize-handle:hover {
+  background: color-mix(in srgb, var(--ring) 35%, transparent);
 }
 
 .scripture-section-heading {
@@ -2160,6 +2263,7 @@ html[data-scripture-panning] .scripture-node-controls {
 }
 
 .scripture-pages-list,
+.scripture-pages-grid,
 .scripture-layers-tree,
 .scripture-layers-tree ul {
   list-style: none;
@@ -2172,6 +2276,263 @@ html[data-scripture-panning] .scripture-node-controls {
   overflow: auto;
 }
 
+/* A flex/grid child sizing itself via overflow:auto is a known WebKit
+   trouble spot -- Safari can compress the grid's row tracks to fit instead
+   of letting it overflow into a scrollbar. Decoupling the scroller from the
+   flex sizing algorithm with position:absolute sidesteps that entirely: this
+   wrapper gets a hard size from flex:1 inside the fixed-height Pages
+   section, and the actual scrolling list is sized purely by `inset:0`
+   against it, independent of its own content. */
+.scripture-pages-scroll {
+  position: relative;
+  flex: 1;
+  /* Safari doesn't reliably treat a flex-grown height as "definite" for an
+     absolutely positioned child's containing block unless an explicit
+     height is also present -- flex-grow then stretches this 0 to fill. */
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.scripture-pages-list,
+.scripture-pages-grid {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+}
+
+.scripture-pages-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-auto-rows: min-content;
+  gap: 0.5rem;
+  align-content: start;
+  padding: 0.3125rem 0.125rem;
+}
+
+.scripture-pages-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0.125rem 0;
+}
+
+.scripture-page-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-sm);
+  overflow: visible;
+  cursor: default;
+  background: transparent;
+}
+
+.scripture-page-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border: 1px solid var(--border);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.scripture-page-card:hover::after {
+  border-color: var(--ring);
+}
+
+.scripture-page-card.is-active::after {
+  border-width: 2px;
+  border-color: var(--ring);
+}
+
+.scripture-page-card::before,
+.scripture-page-row::before {
+  content: '';
+  position: absolute;
+  z-index: 6;
+  left: 0.375rem;
+  right: 0.375rem;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--ring);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.scripture-page-card.is-drop-before::before {
+  top: -0.3125rem;
+  opacity: 1;
+}
+
+.scripture-page-card.is-drop-after::before {
+  bottom: -0.3125rem;
+  opacity: 1;
+}
+
+.scripture-page-row.is-drop-before::before {
+  top: -1px;
+  opacity: 1;
+}
+
+.scripture-page-row.is-drop-after::before {
+  bottom: -1px;
+  opacity: 1;
+}
+
+.scripture-page-card-thumb {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: transparent;
+}
+
+.scripture-page-card-open,
+.scripture-doc-card-preview-open {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.scripture-page-card-open:focus-visible,
+.scripture-doc-card-preview-open:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -3px;
+}
+
+.scripture-page-preview-surface {
+  position: relative;
+  display: block;
+  flex: 1;
+  contain: layout paint;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background-color: color-mix(in srgb, var(--background) 88%, var(--muted));
+  background-image: radial-gradient(color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px);
+  background-size: 0.75rem 0.75rem;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 70%, transparent);
+  user-select: none;
+}
+
+.scripture-page-preview-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--muted) 72%, var(--background));
+}
+
+.scripture-page-preview-placeholder.is-error {
+  color: var(--muted-foreground);
+  font-size: 0.625rem;
+}
+
+.scripture-page-preview-document {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 1;
+  display: block;
+  width: max-content;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(var(--scripture-preview-scale, 1));
+  transform-origin: center;
+}
+
+.scripture-page-preview-document.is-ready {
+  opacity: 1;
+}
+
+.scripture-page-card-footer {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  height: 1.5rem;
+  padding: 0 0.25rem 0 0.5rem;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: var(--muted);
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+}
+
+.scripture-page-card-label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.scripture-page-number {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.scripture-page-name {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.scripture-page-name {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.scripture-page-name-input {
+  flex: 1;
+  min-width: 0;
+  height: 1.125rem;
+  padding: 0 0.25rem;
+  border: 1px solid var(--ring);
+  border-radius: 0.1875rem;
+  outline: none;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+}
+
+.scripture-page-card.is-active .scripture-page-card-footer {
+  color: var(--foreground);
+}
+
+.scripture-page-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.0625rem;
+}
+
+.scripture-page-card[draggable='true'],
+.scripture-page-row[draggable='true'] {
+  cursor: grab;
+}
+
+.scripture-page-card[draggable='true']:active,
+.scripture-page-row[draggable='true']:active {
+  cursor: grabbing;
+}
+
 .scripture-page-row,
 .scripture-layer-row {
   display: flex;
@@ -2179,6 +2540,10 @@ html[data-scripture-panning] .scripture-node-controls {
   min-height: 1.75rem;
   border-radius: var(--radius-sm);
   color: var(--muted-foreground);
+}
+
+.scripture-page-row {
+  position: relative;
 }
 
 .scripture-page-row:hover,
@@ -2211,6 +2576,10 @@ html[data-scripture-panning] .scripture-node-controls {
   padding: 0 0.375rem;
   font-size: 0.75rem;
   text-align: left;
+}
+
+.scripture-page-row-label > .scripture-page-name-input {
+  height: 1.375rem;
 }
 
 .scripture-page-row-label svg,
@@ -2312,6 +2681,112 @@ html[data-scripture-panning] .scripture-node-controls {
    made the narrow panel feel fragmented and spent too much vertical space. */
 .scripture-inspector [data-slot='card-content'] {
   gap: 0;
+}
+
+.scripture-inspector-subview [data-slot='card-content'] {
+  gap: 1rem;
+}
+
+.scripture-inspector-subview-header {
+  position: sticky;
+  top: -0.75rem;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2.75rem;
+  margin: -0.75rem -0.75rem 0;
+  padding: 0.375rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+.scripture-inspector-subview-header strong {
+  color: var(--foreground);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.scripture-page-number-style-preview {
+  position: relative;
+  min-height: 8rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #808080;
+}
+
+.scripture-page-number-style-preview > small {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.625rem;
+  z-index: 1;
+  padding: 0.125rem 0.3rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #ffffff;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.scripture-page-number-style-samples {
+  display: grid;
+  min-height: 8rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.scripture-page-number-style-sample {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.scripture-page-number-style-sample.is-light {
+  background: #ffffff;
+  color: #111111;
+}
+
+.scripture-page-number-style-sample.is-dark {
+  border-left: 1px solid rgba(255, 255, 255, 0.18);
+  background: #111111;
+  color: #ffffff;
+}
+
+.scripture-page-number-style-sample > span {
+  min-width: 1.5rem;
+  text-align: center;
+}
+
+.scripture-page-number-style-sample > span[data-highlighted] {
+  padding: 0.15em 0.3em;
+  border-radius: 0.2em;
+}
+
+.scripture-page-number-style-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.scripture-page-number-style-controls .scripture-inline-format-controls {
+  justify-content: flex-start;
+  gap: 0.25rem;
+}
+
+.scripture-page-number-style-divider {
+  height: 1px;
+  background: var(--border);
+}
+
+.scripture-inspector .scripture-page-number-appearance-button {
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
 }
 
 .scripture-inspector [data-slot='separator'] {
@@ -3515,8 +3990,7 @@ html[data-scripture-panning] .scripture-node-controls {
   box-shadow: var(--shadow-md);
 }
 
-.scripture-empty-preview-icon,
-.scripture-doc-card-preview-icon {
+.scripture-empty-preview-icon {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3528,22 +4002,19 @@ html[data-scripture-panning] .scripture-node-controls {
   color: var(--foreground);
 }
 
-.scripture-empty-preview-icon svg,
-.scripture-doc-card-preview-icon svg {
+.scripture-empty-preview-icon svg {
   width: 0.9375rem;
   height: 0.9375rem;
 }
 
-.scripture-empty-preview-lines,
-.scripture-doc-card-code {
+.scripture-empty-preview-lines {
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: 0.4375rem;
 }
 
-.scripture-empty-preview-lines i,
-.scripture-doc-card-code i {
+.scripture-empty-preview-lines i {
   display: block;
   width: 78%;
   height: 0.1875rem;
@@ -3551,14 +4022,12 @@ html[data-scripture-panning] .scripture-node-controls {
   background: color-mix(in srgb, var(--muted-foreground) 35%, transparent);
 }
 
-.scripture-empty-preview-lines i:nth-child(2),
-.scripture-doc-card-code i:nth-child(2) {
+.scripture-empty-preview-lines i:nth-child(2) {
   width: 100%;
   background: color-mix(in srgb, var(--ring) 50%, transparent);
 }
 
-.scripture-empty-preview-lines i:nth-child(3),
-.scripture-doc-card-code i:nth-child(3) {
+.scripture-empty-preview-lines i:nth-child(3) {
   width: 62%;
 }
 
@@ -3635,40 +4104,17 @@ html[data-scripture-panning] .scripture-node-controls {
 }
 
 .scripture-doc-card-preview {
-  display: block;
+  position: relative;
+  display: flex;
+  box-sizing: border-box;
   width: 100%;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 16 / 9;
   padding: 0;
   overflow: hidden;
-  border: 0;
   border-bottom: 1px solid var(--border);
   background-color: color-mix(in srgb, var(--background) 82%, var(--card));
   background-image: radial-gradient(color-mix(in srgb, var(--border) 62%, transparent) 1px, transparent 1px);
   background-size: 0.9375rem 0.9375rem;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.scripture-doc-card-preview-image {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transition: transform 180ms ease;
-}
-
-.scripture-doc-card:hover .scripture-doc-card-preview-image {
-  transform: scale(1.015);
-}
-
-.scripture-doc-card-preview-fallback {
-  display: flex;
-  align-items: center;
-  gap: 0.8125rem;
-  width: 100%;
-  height: 100%;
-  padding: 1rem;
 }
 
 .scripture-doc-card-content {

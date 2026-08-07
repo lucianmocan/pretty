@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type RefObject } from 'react'
+import { memo, useEffect, useState, type RefObject } from 'react'
 import { yXmlFragmentToProsemirrorJSON } from '@tiptap/y-tiptap'
 import {
   ExportDocument,
@@ -13,6 +13,8 @@ import type { LayoutNode } from '@/lib/layout/types'
 import { plainTextFromDocument } from '@/lib/tiptap/syntax-document'
 import { tokenizeCodeInWorker } from '@/lib/shiki/client-tokenizer'
 import { resolveThemeArg } from '@/lib/presets/custom-syntax-themes'
+import type { PageNumberSettings } from '@/lib/documents/manifest'
+import { resolvePageNumber } from '@/lib/documents/page-numbers'
 
 function collectCodeNodes(node: LayoutNode, result: LayoutNode[] = []): LayoutNode[] {
   if (node.kind === 'code') result.push(node)
@@ -20,7 +22,19 @@ function collectCodeNodes(node: LayoutNode, result: LayoutNode[] = []): LayoutNo
   return result
 }
 
-function BrowserExportPage({ pageId, margin }: { pageId: string; margin: number }) {
+export const BrowserExportPage = memo(function BrowserExportPage({
+  pageId,
+  margin,
+  priority = 'focused',
+  allowSyntaxFallback = false,
+  pageNumber,
+}: {
+  pageId: string
+  margin: number
+  priority?: 'focused' | 'background'
+  allowSyntaxFallback?: boolean
+  pageNumber?: { number: number; settings: PageNumberSettings }
+}) {
   const tree = useLayoutTree(pageId)
   const [prepared, setPrepared] = useState<{
     tree: LayoutNode
@@ -43,7 +57,7 @@ function BrowserExportPage({ pageId, margin }: { pageId: string; margin: number 
           plainTextFromDocument(document),
           node.language ?? 'plaintext',
           resolveThemeArg(node.theme),
-          { signal: controller.signal, priority: 'focused' }
+          { signal: controller.signal, priority }
         )
         return [node.id, result.ranges] as const
       })
@@ -67,42 +81,58 @@ function BrowserExportPage({ pageId, margin }: { pageId: string; margin: number 
       })
 
     return () => controller.abort()
-  }, [pageId, tree])
+  }, [pageId, priority, tree])
 
   const syntaxSnapshots = prepared?.tree === tree ? prepared.syntaxSnapshots : null
   const syntaxError = prepared?.tree === tree ? prepared.error : null
+  const renderableSnapshots = syntaxSnapshots ?? (allowSyntaxFallback && syntaxError ? {} : null)
 
   return (
     <div
       className="scripture-browser-export-page"
       data-export-page-id={pageId}
-      data-export-ready={Boolean(tree && syntaxSnapshots)}
-      data-export-error={syntaxError ?? undefined}
+      data-export-ready={Boolean(tree && renderableSnapshots)}
+      data-export-error={!allowSyntaxFallback ? (syntaxError ?? undefined) : undefined}
     >
-      {tree && syntaxSnapshots && (
+      {tree && renderableSnapshots && (
         <ExportDocument
           tree={tree}
           ydoc={getYDoc(pageId).doc}
           margin={margin}
-          syntaxSnapshots={syntaxSnapshots}
+          syntaxSnapshots={renderableSnapshots}
+          pageNumber={pageNumber}
         />
       )}
     </div>
   )
-}
+})
 
 export function BrowserExportSurfaces({
   pageIds,
+  pageNumberSettings,
   rootRef,
 }: {
   pageIds: string[]
+  pageNumberSettings: PageNumberSettings
   rootRef: RefObject<HTMLDivElement | null>
 }) {
   const margin = useExportMargin()
 
   return (
     <div ref={rootRef} className="scripture-browser-export-surfaces" aria-hidden="true">
-      {pageIds.map((pageId) => <BrowserExportPage key={pageId} pageId={pageId} margin={margin} />)}
+      {pageIds.map((pageId) => {
+        const pageNumber = resolvePageNumber(pageIds, pageId, pageNumberSettings)
+        return (
+          <BrowserExportPage
+            key={pageId}
+            pageId={pageId}
+            margin={margin}
+            pageNumber={pageNumber
+              ? { number: pageNumber.number, settings: pageNumberSettings }
+              : undefined}
+          />
+        )
+      })}
     </div>
   )
 }

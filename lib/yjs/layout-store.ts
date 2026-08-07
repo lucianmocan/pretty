@@ -123,6 +123,7 @@ function setFrameFields(map: Y.Map<unknown>, props: FrameProps) {
   map.set('pageSize', props.pageSize)
   map.set('customPageWidthMm', props.customPageWidthMm)
   map.set('customPageHeightMm', props.customPageHeightMm)
+  map.set('canvasSizeMode', props.canvasSizeMode)
 }
 
 function setCodeFields(map: Y.Map<unknown>, props: CodeBlockProps) {
@@ -227,6 +228,7 @@ function buildYNode(plain: LayoutNode): Y.Map<unknown> {
       pageSize: plain.pageSize ?? DEFAULT_FRAME_PROPS.pageSize,
       customPageWidthMm: plain.customPageWidthMm ?? DEFAULT_FRAME_PROPS.customPageWidthMm,
       customPageHeightMm: plain.customPageHeightMm ?? DEFAULT_FRAME_PROPS.customPageHeightMm,
+      canvasSizeMode: plain.canvasSizeMode ?? DEFAULT_FRAME_PROPS.canvasSizeMode,
     })
     const children = new Y.Array<Y.Map<unknown>>()
     children.push((plain.children ?? []).map(buildYNode))
@@ -610,6 +612,9 @@ export function updateNodeGeometry(
   doc.transact(() => {
     if (size.width !== undefined) node.set('width', Math.max(MIN_NODE_SIZE, Math.round(size.width)))
     if (size.height !== undefined) node.set('height', Math.max(MIN_NODE_SIZE, Math.round(size.height)))
+    if (id === ROOT_ID && (size.width !== undefined || size.height !== undefined)) {
+      node.set('canvasSizeMode', 'custom')
+    }
     if (position?.x !== undefined) node.set('x', Math.max(0, Math.round(position.x)))
     if (position?.y !== undefined) node.set('y', Math.max(0, Math.round(position.y)))
   }, LAYOUT_MUTATION_ORIGIN)

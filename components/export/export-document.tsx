@@ -25,6 +25,8 @@ import { codeLineFontSizes } from '@/lib/tiptap/line-font-sizes'
 import { googleFontsInDocument } from '@/lib/google-fonts'
 import { GoogleFontStylesheet } from '@/components/editor/google-font-loader'
 import { textBlockStyle } from '@/lib/layout/text-style'
+import type { PageNumberSettings } from '@/lib/documents/manifest'
+import { CanvasPageNumber } from '@/components/canvas/canvas-page-number'
 
 export type ExportSyntaxSnapshots = Record<string, SyntaxStyleRange[]>
 
@@ -53,7 +55,8 @@ function renderNode(
   node: LayoutNode,
   ydoc: Y.Doc,
   syntaxSnapshots: ExportSyntaxSnapshots,
-  parentChildLayout: ChildLayout = 'flex'
+  parentChildLayout: ChildLayout = 'flex',
+  pageNumber?: { number: number; settings: PageNumberSettings }
 ): ReactNode {
   if (node.kind === 'frame') {
     const isRoot = node.id === ROOT_ID
@@ -71,8 +74,16 @@ function renderNode(
           .join(' ')}
         style={{ ...frameOuterStyle(node), ...canvasPositionStyle(node, isRoot, parentChildLayout) }}
       >
-        <div className="scripture-frame-content" style={frameInnerStyle(node)}>
+        <div
+          className={isRoot
+            ? 'scripture-frame-content scripture-page-number-host'
+            : 'scripture-frame-content'}
+          style={frameInnerStyle(node)}
+        >
           {(node.children ?? []).map((child) => renderNode(child, ydoc, syntaxSnapshots, childLayout))}
+          {isRoot && pageNumber && (
+            <CanvasPageNumber number={pageNumber.number} settings={pageNumber.settings} />
+          )}
         </div>
         {renderCallouts(node)}
       </div>
@@ -189,14 +200,19 @@ export function ExportDocument({
   ydoc,
   margin,
   syntaxSnapshots = {},
+  pageNumber,
 }: {
   tree: LayoutNode
   ydoc: Y.Doc
   margin?: number
   syntaxSnapshots?: ExportSyntaxSnapshots
+  pageNumber?: { number: number; settings: PageNumberSettings }
 }) {
   const googleFonts = new Set<string>()
   collectExportGoogleFonts(tree, ydoc, googleFonts)
+  if (pageNumber?.settings.typography.fontSource === 'google') {
+    googleFonts.add(pageNumber.settings.typography.fontFamily)
+  }
   return (
     <>
       <GoogleFontStylesheet families={[...googleFonts]} />
@@ -207,7 +223,7 @@ export function ExportDocument({
         customPageHeightMm={tree.customPageHeightMm}
         exportMarginPx={margin}
       >
-        {renderNode(tree, ydoc, syntaxSnapshots)}
+        {renderNode(tree, ydoc, syntaxSnapshots, 'flex', pageNumber)}
       </CanvasRoot>
     </>
   )

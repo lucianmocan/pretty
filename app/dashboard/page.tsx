@@ -256,14 +256,15 @@ export default function DocumentsDashboardPage() {
                         {pinnedDocs.map((doc) => (
                           <li key={doc.id}>
                             <Card className="scripture-doc-card" size="sm">
-                              <button
-                                type="button"
-                                className="scripture-doc-card-preview"
-                                onClick={() => router.push(`/doc/${doc.id}`)}
-                                aria-label={`Open ${doc.name}`}
-                              >
+                              <div className="scripture-doc-card-preview">
                                 <DocumentPreview documentMeta={doc} />
-                              </button>
+                                <button
+                                  type="button"
+                                  className="scripture-doc-card-preview-open"
+                                  onClick={() => router.push(`/doc/${doc.id}`)}
+                                  aria-label={`Open ${doc.name}`}
+                                />
+                              </div>
                               <CardContent className="scripture-doc-card-content">
                                 {editingId === doc.id ? (
                                   <Input
