@@ -1,6 +1,22 @@
 import type { CSSProperties } from 'react'
 import type { LayoutNode } from './types'
 
+/** Default authored text uses currentColor. When a user gives a frame an
+ * explicit background, provide a readable inherited foreground for that
+ * default without touching any explicitly formatted text color. Null canvas
+ * backgrounds continue to use the app's light/dark foreground token. */
+function foregroundForBackground(background: string | null | undefined): string | undefined {
+  if (!background) return undefined
+  const match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(background)
+  if (!match) return undefined
+  const channels = match.slice(1).map((channel) => Number.parseInt(channel, 16) / 255)
+  const [red, green, blue] = channels.map((channel) =>
+    channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  )
+  const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+  return luminance > 0.179 ? '#111111' : '#ffffff'
+}
+
 /**
  * Pure data -> CSS mapping, the single source of truth for how a frame's
  * stored props become flexbox styling. The split outer/inner helpers below
@@ -34,6 +50,7 @@ export function frameStyle(node: LayoutNode): CSSProperties {
     alignItems: node.align ?? 'flex-start',
     justifyContent: node.justify ?? 'flex-start',
     background: node.background ?? undefined,
+    color: foregroundForBackground(node.background),
     borderRadius: node.radius ?? 0,
     ...sizeStyle(node),
   }
@@ -83,6 +100,7 @@ export function contentOverflowStyle(node: LayoutNode): CSSProperties {
 export function frameOuterStyle(node: LayoutNode): CSSProperties {
   return {
     background: node.background ?? undefined,
+    color: foregroundForBackground(node.background),
     borderRadius: node.radius ?? 0,
     ...outerBoxStyle(node),
   }

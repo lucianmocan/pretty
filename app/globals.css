@@ -13,6 +13,7 @@
 --------------------------------------------------------------------------- */
 
 :root {
+  color-scheme: light;
   --scripture-ui-scale: 1;
   --scripture-ui-rem: 16px;
   /* Content-space defaults for auto-sized authoring surfaces. These stay in
@@ -54,6 +55,7 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --scripture-link-foreground: oklch(0.49 0.22 264);
 
   /* shadcn's font convention expects a variable literally named
      --font-sans; this project's next/font setup (app/layout.tsx) names its
@@ -117,6 +119,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -148,6 +151,7 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  --scripture-link-foreground: oklch(0.72 0.16 255);
 }
 
 @layer base {
@@ -162,6 +166,23 @@
     /* rem-based primitives and portals scale together without introducing a
        transformed coordinate system around the interactive canvas. */
     font-size: var(--scripture-ui-rem);
+  }
+
+  /* Native controls do not consistently inherit foreground/placeholder
+     colors across browsers. Raw inputs and shared primitives now use the
+     same semantic light/dark tokens. More specific authored surfaces (for
+     example a callout input) can still override the foreground normally. */
+  input,
+  textarea,
+  select,
+  button {
+    color: var(--foreground);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--muted-foreground);
+    opacity: 1;
   }
 }
 
@@ -382,6 +403,7 @@ html[data-scripture-reduced-motion='true'] *::after {
    overrides it. */
 .scripture-card {
   background: var(--background);
+  color: var(--foreground);
   box-shadow: none;
 }
 
@@ -472,13 +494,13 @@ html[data-scripture-reduced-motion='true'] *::after {
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+  background: color-mix(in srgb, currentColor 3%, transparent);
 }
 
 .scripture-chrome-vscode {
   padding: 0;
-  background: rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, currentColor 4%, transparent);
 }
 
 .scripture-chrome-tab {
@@ -487,11 +509,11 @@ html[data-scripture-reduced-motion='true'] *::after {
   gap: 6px;
   padding: 8px 14px 7px;
   border-bottom: 2px solid var(--primary);
-  color: var(--foreground);
+  color: inherit;
 }
 
 .scripture-chrome-terminal {
-  color: rgba(255, 255, 255, 0.5);
+  color: color-mix(in srgb, var(--scripture-code-foreground, currentColor) 62%, transparent);
 }
 
 .scripture-dot {
@@ -518,7 +540,7 @@ html[data-scripture-reduced-motion='true'] *::after {
   margin-left: 4px;
   font-family: var(--font-geist-sans), sans-serif;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.45);
+  color: color-mix(in srgb, var(--scripture-code-foreground, currentColor) 55%, transparent);
 }
 
 .scripture-code-body {
@@ -640,7 +662,7 @@ html[data-scripture-reduced-motion='true'] *::after {
      real text underneath regardless of what's actually behind it. */
   backdrop-filter: blur(5px) saturate(0.5);
   background: rgba(128, 128, 128, 0.5);
-  color: var(--muted-foreground);
+  color: color-mix(in srgb, var(--scripture-code-foreground, currentColor) 72%, transparent);
   font-size: 12px;
   font-family: var(--font-geist-sans), sans-serif;
   cursor: pointer;
@@ -742,7 +764,7 @@ html[data-scripture-reduced-motion='true'] *::after {
 }
 
 .scripture-text-editor ul[data-type='taskList'] li[data-checked='true'] > div {
-  color: var(--muted-foreground);
+  color: color-mix(in srgb, var(--scripture-text-color, currentColor) 58%, transparent);
   text-decoration: line-through;
 }
 
@@ -762,7 +784,7 @@ html[data-scripture-reduced-motion='true'] *::after {
 }
 
 .scripture-text-editor a {
-  color: #3b82f6;
+  color: var(--scripture-link-foreground);
   text-decoration: underline;
   text-underline-offset: 0.15em;
 }
@@ -800,7 +822,7 @@ html[data-scripture-reduced-motion='true'] *::after {
   position: absolute;
   inset: 0 auto auto 0;
   z-index: 1;
-  color: rgba(128, 128, 128, 0.82);
+  color: color-mix(in srgb, currentColor 55%, transparent);
   font-size: 14px;
   line-height: var(--scripture-code-line-height, 1.65);
   pointer-events: none;
@@ -2586,7 +2608,9 @@ button.scripture-page-name {
 
 .scripture-page-row.is-active {
   background: color-mix(in srgb, var(--ring) 24%, transparent);
-  box-shadow: inset 3px 0 var(--ring);
+  box-shadow:
+    inset 0 0 0 2px var(--ring),
+    inset 0 0 0 3px color-mix(in srgb, var(--ring) 22%, transparent);
 }
 
 .scripture-page-row-label,

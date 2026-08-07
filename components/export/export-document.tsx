@@ -161,6 +161,7 @@ function renderNode(
           lineNumberColor={
             node.themeLineNumberForeground ?? resolveThemeLineNumberForeground(node.theme)
           }
+          foregroundColor={resolveThemeForeground(node.theme)}
           lineCount={lineCount}
           lineFontSizes={codeLineFontSizes(docJSON)}
           startLineNumber={node.startLineNumber ?? 1}

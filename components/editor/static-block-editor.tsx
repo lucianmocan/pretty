@@ -226,6 +226,7 @@ export const StaticBlockEditor = memo(function StaticBlockEditor({
       customChrome={customChrome}
       showLineNumbers={showLineNumbers}
       lineNumberColor={resolveThemeLineNumberForeground(theme)}
+      foregroundColor={resolveThemeForeground(theme)}
       lineCount={text.split('\n').length}
       lineFontSizes={codeLineFontSizes(document)}
       startLineNumber={startLineNumber}

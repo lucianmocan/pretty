@@ -26,6 +26,7 @@ interface CodeChromeProps {
   chromeStyle: ChromeStyle
   showLineNumbers: boolean
   lineNumberColor?: string
+  foregroundColor?: string
   lineCount: number
   lineFontSizes?: number[]
   startLineNumber: number
@@ -134,6 +135,7 @@ export function CodeChrome({
   customChrome,
   showLineNumbers,
   lineNumberColor = '#8b949e',
+  foregroundColor = 'currentColor',
   lineCount,
   lineFontSizes = [],
   startLineNumber,
@@ -159,6 +161,8 @@ export function CodeChrome({
     '--scripture-code-line-height': lineHeight,
     '--scripture-code-letter-spacing': `${letterSpacing}px`,
     '--scripture-line-number-color': lineNumberColor,
+    '--scripture-code-foreground': foregroundColor,
+    color: foregroundColor,
   } as CSSProperties
 
   const highlightSet = rangesToSet(highlightLines)

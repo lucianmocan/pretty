@@ -553,6 +553,7 @@ function InteractiveBlockEditor({
       customChrome={customChrome}
       showLineNumbers={showLineNumbers}
       lineNumberColor={resolveThemeLineNumberForeground(theme)}
+      foregroundColor={resolveThemeForeground(theme)}
       lineCount={lineCount}
       lineFontSizes={lineFontSizes}
       startLineNumber={startLineNumber}
