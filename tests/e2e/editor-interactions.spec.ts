@@ -94,3 +94,46 @@ test('a free-form code block can be re-entered after switching syntax theme', as
   await page.keyboard.type('\nconst next = answer + 1')
   await expect(reenteredEditor).toContainText('const next = answer + 1')
 })
+
+test('an out-of-view selection stays beneath the docked editor chrome', async ({ page }) => {
+  await openFreshDocument(page)
+  await page.locator('.scripture-canvas-toolbar').getByRole('button', { name: 'Add code block' }).click()
+  await page.keyboard.press('Escape')
+
+  const block = page.locator('.scripture-code-leaf')
+  const layersPanel = page.getByRole('complementary', { name: 'Pages and layers' })
+  const [blockBox, panelBox] = await Promise.all([block.boundingBox(), layersPanel.boundingBox()])
+  expect(blockBox).not.toBeNull()
+  expect(panelBox).not.toBeNull()
+  if (!blockBox || !panelBox) return
+
+  await page.mouse.move(blockBox.x + blockBox.width / 2, blockBox.y + blockBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(panelBox.x + panelBox.width / 2, blockBox.y + blockBox.height / 2, { steps: 8 })
+  await page.mouse.up()
+
+  const outline = page.locator('.scripture-selection-outline')
+  await expect(outline).toHaveClass(/is-clipped/)
+  const outlineBox = await outline.boundingBox()
+  expect(outlineBox).not.toBeNull()
+  if (!outlineBox) return
+
+  const overlap = {
+    left: Math.max(outlineBox.x, panelBox.x),
+    right: Math.min(outlineBox.x + outlineBox.width, panelBox.x + panelBox.width),
+    top: Math.max(outlineBox.y, panelBox.y),
+    bottom: Math.min(outlineBox.y + outlineBox.height, panelBox.y + panelBox.height),
+  }
+  expect(overlap.right).toBeGreaterThan(overlap.left)
+  expect(overlap.bottom).toBeGreaterThan(overlap.top)
+
+  const panelOwnsOverlap = await page.evaluate(({ x, y }) => {
+    const panel = document.querySelector('.scripture-layers-panel')
+    const topmost = document.elementFromPoint(x, y)
+    return Boolean(panel && topmost && panel.contains(topmost))
+  }, {
+    x: (overlap.left + overlap.right) / 2,
+    y: (overlap.top + overlap.bottom) / 2,
+  })
+  expect(panelOwnsOverlap).toBe(true)
+})

@@ -23,15 +23,15 @@ test('uses the supplied local threshold so snapping stays screen-pixel consisten
   assert.equal(snapPosition(dragged, siblings, undefined, 3).x, 104)
 })
 
-test('does not display a sibling guide when a container boundary overrides that snap', () => {
+test('keeps sibling snapping active beyond the container boundary', () => {
   const result = snapPosition(
     { x: -3, y: 20, width: 20, height: 20 },
     [{ x: -2, y: 100, width: 20, height: 20 }],
     { width: 200, height: 200 }
   )
 
-  assert.equal(result.x, 0)
-  assert.deepEqual(result.guides.x, [])
+  assert.equal(result.x, -2)
+  assert.deepEqual(result.guides.x, [-2, 8, 18])
 })
 
 test('snaps the dragged center to both parent frame center axes', () => {

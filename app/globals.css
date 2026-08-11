@@ -985,10 +985,12 @@ html[data-scripture-reduced-motion='true'] *::after {
    frame's overflow:hidden edge, where the ::after outline above gets
    clipped along with everything else. Fixed position, screen coordinates
    from getBoundingClientRect -- overlaps the ::after outline pixel-for-pixel
-   whenever the block is still on-screen. */
+   whenever the block is still on-screen. Keep this below the canvas chrome
+   (30) and docked application chrome (31) so an overhanging outline remains
+   recoverable within the canvas without painting through side panels. */
 .scripture-selection-outline {
   position: fixed;
-  z-index: 39;
+  z-index: 29;
   pointer-events: none;
   border: 1px solid color-mix(in srgb, var(--ring) 78%, transparent);
 }
@@ -1007,7 +1009,7 @@ html[data-scripture-reduced-motion='true'] *::after {
    state, this only needs to be grabbable. */
 .scripture-selection-outline-grab {
   position: fixed;
-  z-index: 39;
+  z-index: 29;
   cursor: grab;
 }
 
@@ -2025,6 +2027,8 @@ html[data-scripture-panning] .scripture-node-controls {
 }
 
 .scripture-app-menubar {
+  position: relative;
+  z-index: 31;
   display: flex;
   align-items: center;
   gap: 0.625rem;
@@ -2108,6 +2112,8 @@ html[data-scripture-panning] .scripture-node-controls {
 }
 
 .scripture-operation-error {
+  position: relative;
+  z-index: 31;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2138,6 +2144,7 @@ html[data-scripture-panning] .scripture-node-controls {
 
 .scripture-layers-panel {
   position: relative;
+  z-index: 31;
   display: flex;
   flex-direction: column;
   width: 15rem;
