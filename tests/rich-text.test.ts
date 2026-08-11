@@ -77,4 +77,5 @@ test('Google font discovery includes both block defaults and marked ranges', () 
     'https://fonts.googleapis.com/css2?family=Crimson+Pro&family=Source+Serif+4&display=swap'
   )
   assert.equal(textFontFamilyCss('Geist Sans', 'local'), 'var(--font-geist-sans), sans-serif')
+  assert.equal(textFontFamilyCss('Avenir Next', 'system'), "'Avenir Next', var(--font-geist-sans), sans-serif")
 })

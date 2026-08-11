@@ -783,7 +783,7 @@ function effectiveTypography(
   defaults: TextTypographyDefaults
 ) {
   const family = typeof attributes?.fontFamily === 'string' ? attributes.fontFamily : defaults.family
-  const source = attributes?.fontSource === 'google' || attributes?.fontSource === 'local'
+  const source = attributes?.fontSource === 'google' || attributes?.fontSource === 'local' || attributes?.fontSource === 'system'
     ? attributes.fontSource
     : defaults.source
   const size = numericFormatValue(attributes?.fontSize) ?? defaults.size
@@ -1286,14 +1286,14 @@ function TextContentControls({
       ) ?? 'left'
       const format = current.getAttributes('format')
       const heading = current.isActive('heading')
+      const parsedFontWeight = Number.parseInt(String(format.fontWeight), 10)
+      const fontWeight = Number.isFinite(parsedFontWeight) ? parsedFontWeight : heading ? 700 : 400
       return {
         list,
         block: block ? `heading-${block}` : current.isActive('blockquote') ? 'quote' : 'paragraph',
         alignment,
-        bold: current.isActive('bold') || heading,
-        fontWeight: Number.isFinite(Number.parseInt(String(format.fontWeight), 10))
-          ? Number.parseInt(String(format.fontWeight), 10)
-          : heading ? 700 : 400,
+        bold: current.isActive('bold') || fontWeight >= 600,
+        fontWeight,
         italic: current.isActive('italic'),
         underline: current.isActive('underline'),
         strike: current.isActive('strike'),
@@ -1302,7 +1302,10 @@ function TextContentControls({
         textColor: typeof format.textColor === 'string' ? format.textColor : null,
         href: (current.getAttributes('link').href as string | undefined) ?? '',
         fontFamily: typeof format.fontFamily === 'string' ? format.fontFamily : fontFamily,
-        fontSource: format.fontSource === 'google' ? 'google' : fontSource,
+        fontSource:
+          format.fontSource === 'google' || format.fontSource === 'system'
+            ? format.fontSource
+            : fontSource,
       }
     },
   })

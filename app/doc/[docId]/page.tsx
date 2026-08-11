@@ -54,6 +54,7 @@ import { findNode, findParent } from '@/lib/layout/tree-utils'
 import { deleteUploadedImage } from '@/lib/images/client'
 import { TEMPLATES, type Template } from '@/lib/templates'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { NotificationChip } from '@/components/ui/notification-chip'
 
 const ZOOM_MIN = 0.1
 const ZOOM_MAX = 2
@@ -98,6 +99,7 @@ export default function DocumentEditorPage() {
   const [gutterClickMode, setGutterClickMode] = useState<GutterClickMode>('highlight')
   const [zoom, setZoom] = useState(1)
   const zoomRef = useRef(1)
+  const previousZoomRef = useRef(1)
   const [customizeOpen, setCustomizeOpen] = useState(false)
   const [showStarterPicker, setShowStarterPicker] = useState(false)
   const [applyingTemplate, setApplyingTemplate] = useState(false)
@@ -371,6 +373,22 @@ export default function DocumentEditorPage() {
     const timeout = window.setTimeout(() => setPanHintVisible(false), 5000)
     return () => window.clearTimeout(timeout)
   }, [panHintVisible])
+
+  // Overflow can already be true when the first hint times out. A later
+  // zoom-in therefore cannot rely on the overflow observer's false -> true
+  // transition to show it again; check the post-zoom layout explicitly.
+  useEffect(() => {
+    const previousZoom = previousZoomRef.current
+    previousZoomRef.current = zoom
+    if (zoom <= previousZoom) return
+    const frame = requestAnimationFrame(() => {
+      const area = canvasAreaRef.current
+      if (!area) return
+      const overflows = area.scrollWidth > area.clientWidth + 1 || area.scrollHeight > area.clientHeight + 1
+      if (overflows) setPanHintVisible(true)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [zoom])
 
   useEffect(() => {
     if (!deleteNotice) return
@@ -1026,21 +1044,20 @@ export default function DocumentEditorPage() {
                     onSelectionChange={handleSelectionChange}
                     onSetEditing={setEditingId}
                   />
-                  {(deleteNotice || (canvasOverflows && panHintVisible)) && (
-                    <div className="scripture-canvas-notices">
-                      {deleteNotice && (
-                        <div className="scripture-delete-toast" role="status">
-                          <span>{deleteNotice.count === 1 ? 'Layer deleted' : `${deleteNotice.count} layers deleted`}</span>
-                          <button type="button" onClick={handleUndoDelete}>Undo</button>
-                        </div>
-                      )}
-                      {canvasOverflows && panHintVisible && (
-                        <div className="scripture-pan-hint" role="status">
-                          Hold <kbd>Space</kbd> and drag to pan
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <div id="scripture-notification-host" className="scripture-canvas-notices">
+                    {deleteNotice && (
+                      <NotificationChip
+                        action={<button type="button" onClick={handleUndoDelete}>Undo</button>}
+                      >
+                        {deleteNotice.count === 1 ? 'Layer deleted' : `${deleteNotice.count} layers deleted`}
+                      </NotificationChip>
+                    )}
+                    {canvasOverflows && panHintVisible && (
+                      <NotificationChip>
+                        Hold <kbd className="scripture-keycap">Space</kbd> and drag to pan
+                      </NotificationChip>
+                    )}
+                  </div>
                 </div>
                 <InspectorPanel
                   docId={activePageId as string}

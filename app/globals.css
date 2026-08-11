@@ -278,7 +278,10 @@ html[data-scripture-reduced-motion='true'] *::after {
   pointer-events: none;
 }
 
-.scripture-pan-hint {
+.scripture-notification-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
   padding: 0.4375rem 0.625rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -292,8 +295,19 @@ html[data-scripture-reduced-motion='true'] *::after {
   pointer-events: none;
 }
 
+.scripture-notification-chip[data-has-action] {
+  pointer-events: auto;
+}
+
+.scripture-notification-chip-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex: none;
+  stroke-width: 2;
+}
+
 .scripture-keycap,
-.scripture-pan-hint kbd {
+.scripture-notification-chip kbd {
   display: inline-flex;
   min-width: 1.5rem;
   justify-content: center;
@@ -308,7 +322,7 @@ html[data-scripture-reduced-motion='true'] *::after {
   white-space: nowrap;
 }
 
-.scripture-pan-hint kbd {
+.scripture-notification-chip kbd {
   min-width: 2.75rem;
   margin-inline: 0.1875rem;
 }
@@ -404,7 +418,11 @@ html[data-scripture-reduced-motion='true'] *::after {
 .scripture-card {
   background: var(--background);
   color: var(--foreground);
-  box-shadow: none;
+  /* box-shadow instead of a real border: doesn't affect layout/sizing, and
+     keeps the card's edge visible against the canvas area's own --card
+     background -- in light mode both are pure white, so without this the
+     card has no visible boundary at all. */
+  box-shadow: 0 0 0 1px var(--border);
 }
 
 .scripture-card.scripture-auto-width {
@@ -1178,51 +1196,6 @@ html[data-scripture-moving] * {
   height: 1px;
 }
 
-/* Shown on whichever edge(s) of a resized block currently hide content past
-   them (see lib/use-overflow-fade.ts) -- a block that's been resized
-   smaller than its own content would otherwise clip the rest with no visual
-   sign anything's missing. A neutral, semi-transparent dark gradient reads
-   reasonably as "more content this way" regardless of the block's own
-   background color/theme underneath. pointer-events: none so it never
-   blocks scrolling/clicking the content itself. */
-.scripture-overflow-fade {
-  position: absolute;
-  pointer-events: none;
-  z-index: 5;
-}
-
-.scripture-overflow-fade-top {
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 20px;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.18), transparent);
-}
-
-.scripture-overflow-fade-bottom {
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 20px;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.18), transparent);
-}
-
-.scripture-overflow-fade-left {
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 20px;
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.18), transparent);
-}
-
-.scripture-overflow-fade-right {
-  top: 0;
-  bottom: 0;
-  right: 0;
-  width: 20px;
-  background: linear-gradient(to left, rgba(0, 0, 0, 0.18), transparent);
-}
-
 /* A small floating arrow+caption (components/canvas/callout.tsx) -- the
    "tail" is a CSS-triangle speech-bubble point rather than a dynamically
    drawn line toward a target (see that file's comment for why). */
@@ -1399,24 +1372,7 @@ html[data-scripture-panning] .scripture-node-controls {
   background: var(--border);
 }
 
-.scripture-delete-toast {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  min-height: 2.25rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--popover) 92%, transparent);
-  color: var(--muted-foreground);
-  box-shadow: var(--shadow-sm);
-  backdrop-filter: blur(0.375rem);
-  font-family: var(--font-geist-sans), sans-serif;
-  font-size: 0.75rem;
-  pointer-events: auto;
-}
-
-.scripture-delete-toast button {
+.scripture-notification-chip button {
   border: 0;
   background: transparent;
   color: inherit;
@@ -1425,8 +1381,26 @@ html[data-scripture-panning] .scripture-node-controls {
   cursor: pointer;
 }
 
-.scripture-delete-toast button:hover {
+.scripture-notification-chip button:hover {
   color: var(--foreground);
+}
+
+.scripture-notification-chip[data-variant='error'] {
+  max-width: min(32rem, calc(100vw - 2rem));
+  border-color: color-mix(in srgb, var(--destructive) 45%, var(--border));
+  background: color-mix(in srgb, var(--destructive) 12%, var(--popover));
+  color: color-mix(in srgb, var(--destructive) 72%, var(--foreground));
+  white-space: normal;
+}
+
+.scripture-notification-chip[data-variant='error'] > span {
+  line-height: 1.4;
+}
+
+.scripture-notification-chip[data-variant='success'] {
+  border-color: color-mix(in srgb, #16a34a 52%, var(--border));
+  background: color-mix(in srgb, #22c55e 17%, var(--popover));
+  color: color-mix(in srgb, #15803d 82%, var(--foreground));
 }
 
 .scripture-editor-loading {
@@ -1458,6 +1432,16 @@ html[data-scripture-panning] .scripture-node-controls {
   min-height: 38px;
 }
 
+.scripture-bubble-menu .scripture-bubble-inline-format-controls {
+  justify-content: flex-start;
+  gap: 0.25rem;
+}
+
+.scripture-bubble-menu .scripture-bubble-weight-anchor {
+  flex: none;
+  vertical-align: middle;
+}
+
 .scripture-bubble-style-toggle[data-state='on'] {
   background: color-mix(in srgb, var(--foreground) 12%, var(--background));
   color: var(--foreground);
@@ -1473,40 +1457,42 @@ html[data-scripture-panning] .scripture-node-controls {
 .scripture-bubble-weight-anchor {
   position: relative;
   display: inline-flex;
+  align-items: stretch;
 }
 
-.scripture-bubble-weight-anchor::after {
-  content: '';
-  position: absolute;
-  right: -3px;
-  bottom: -3px;
-  display: grid;
-  width: 0.28rem;
-  height: 0.28rem;
-  border-right: 1.5px solid var(--foreground);
-  border-bottom: 1.5px solid var(--foreground);
-  border-radius: 999px;
-  transform: translate(-0.22rem, -0.22rem) rotate(45deg);
-  pointer-events: none;
-  z-index: 2;
+.scripture-bubble-weight-anchor:has(.scripture-bubble-weight-trigger) > [data-slot='toggle'] {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
-.scripture-bubble-weight-anchor::before {
-  content: '';
-  position: absolute;
-  right: -4px;
-  bottom: -4px;
-  width: 0.72rem;
-  height: 0.72rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--background);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 20%, transparent);
-  pointer-events: none;
-  z-index: 1;
+.scripture-bubble-weight-trigger {
+  display: inline-flex;
+  width: 1.125rem;
+  min-height: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--input);
+  border-left: 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.scripture-bubble-weight-trigger:hover,
+.scripture-bubble-weight-trigger[aria-expanded='true'] {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.scripture-bubble-weight-trigger > svg {
+  width: 0.625rem;
+  height: 0.625rem;
 }
 
 .scripture-font-weight-picker {
+  z-index: 80;
   width: 10rem;
   padding: 0.375rem;
   font-family: var(--font-geist-sans), sans-serif;
@@ -1823,6 +1809,7 @@ html[data-scripture-panning] .scripture-node-controls {
 
 .scripture-font-picker {
   width: 330px;
+  gap: 0.25rem;
   padding: 8px;
   font-family: var(--font-geist-sans), sans-serif;
   font-size: 0.6875rem;
@@ -1864,6 +1851,22 @@ html[data-scripture-panning] .scripture-node-controls {
   overscroll-behavior: contain;
 }
 
+.scripture-font-picker .scripture-font-picker-device-button {
+  color: #000;
+}
+
+.scripture-font-picker .scripture-font-picker-device-button > span {
+  flex: 1;
+  text-align: left;
+}
+
+.scripture-font-picker .scripture-font-picker-device-button[aria-disabled='true'] {
+  opacity: 1;
+  color: var(--muted-foreground);
+  cursor: default;
+  pointer-events: none;
+}
+
 .scripture-font-picker-label {
   padding: 8px 8px 3px;
   font-weight: 600;
@@ -1872,15 +1875,42 @@ html[data-scripture-panning] .scripture-node-controls {
   font-size: 0.5625rem;
 }
 
+.scripture-font-picker-device-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.scripture-font-picker-device-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1875rem;
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.scripture-font-picker-device-status > svg {
+  width: 0.625rem;
+  height: 0.625rem;
+  stroke-width: 2;
+}
+
 .scripture-font-picker-row small {
   margin-left: auto;
   color: var(--muted-foreground);
   font-size: 0.5625rem;
 }
 
-.scripture-font-picker-row > svg {
+.scripture-font-picker .scripture-font-picker-row-icon {
   width: 14px;
+  height: 14px;
   margin-left: auto;
+  flex-shrink: 0;
+  stroke-width: 2;
 }
 
 .scripture-font-picker-status {
@@ -1895,6 +1925,12 @@ html[data-scripture-panning] .scripture-node-controls {
 
 .scripture-font-picker-status svg { width: 16px; }
 .scripture-font-picker-status.is-error { color: var(--destructive); }
+.scripture-font-picker-status.is-compact {
+  min-height: 0;
+  justify-content: flex-start;
+  padding: 0.5rem;
+  line-height: 1.4;
+}
 .scripture-font-picker-hint { margin: 0; padding: 2px 6px 0; }
 
 /* ---------------------------------------------------------------------------
@@ -3085,6 +3121,14 @@ button.scripture-page-name {
 
 .scripture-inline-format-controls {
   justify-content: space-between;
+}
+
+.scripture-inspector .scripture-inline-format-controls {
+  gap: 0.25rem;
+}
+
+.scripture-inspector .scripture-bubble-weight-trigger {
+  width: 0.875rem;
 }
 
 .scripture-inline-format-controls [data-slot='toggle'] {

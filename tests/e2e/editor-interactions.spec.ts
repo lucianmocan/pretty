@@ -137,3 +137,52 @@ test('an out-of-view selection stays beneath the docked editor chrome', async ({
   })
   expect(panelOwnsOverlap).toBe(true)
 })
+
+test('device fonts can be granted, searched, and applied to text', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'queryLocalFonts', {
+      configurable: true,
+      value: async () => [
+        {
+          family: 'Studio Sans',
+          fullName: 'Studio Sans Regular',
+          postscriptName: 'StudioSans-Regular',
+          style: 'Regular',
+        },
+        {
+          family: 'Studio Sans',
+          fullName: 'Studio Sans Bold',
+          postscriptName: 'StudioSans-Bold',
+          style: 'Bold',
+        },
+        {
+          family: 'Workstation Serif',
+          fullName: 'Workstation Serif',
+          postscriptName: 'WorkstationSerif-Regular',
+          style: 'Regular',
+        },
+      ],
+    })
+  })
+  await openFreshDocument(page)
+  await page.locator('.scripture-canvas-toolbar').getByRole('button', { name: 'Add text block' }).click()
+  await page.keyboard.press('Escape')
+
+  const fontPicker = page.locator('.scripture-inspector .scripture-font-picker-trigger')
+  await fontPicker.click()
+  await page.getByRole('button', { name: 'Use fonts from this device' }).click()
+
+  await expect(page.locator('.scripture-font-picker-row[data-font-source="system"]')).toHaveCount(2)
+  await page.getByRole('textbox', { name: 'Search fonts' }).fill('Studio Sans')
+  const studioSans = page.locator(
+    '.scripture-font-picker-row[data-font-source="system"][data-font-family="Studio Sans"]'
+  )
+  await expect(studioSans).toContainText('2 styles')
+  await studioSans.click()
+
+  await expect(fontPicker).toContainText('Studio Sans')
+  const resolvedFont = await page.locator('.scripture-editor-wrapper').evaluate((element) =>
+    element.style.getPropertyValue('--scripture-text-font')
+  )
+  expect(resolvedFont).toBe("'Studio Sans', var(--font-geist-sans), sans-serif")
+})

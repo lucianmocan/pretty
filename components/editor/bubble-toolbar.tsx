@@ -348,10 +348,12 @@ export function InlineFormattingControls({
   editor,
   kind,
   state,
+  surface = 'inspector',
 }: {
   editor: Editor
   kind: BlockKind
   state: InlineFormattingState
+  surface?: 'inspector' | 'bubble'
 }) {
   return (
     <>
@@ -359,7 +361,9 @@ export function InlineFormattingControls({
         value={state.fontWeight}
         fontFamily={state.fontFamily}
         fontSource={state.fontSource}
-        onChange={(weight) => editor.chain().focus().setFontWeight(weight).run()}
+        surface={surface}
+        showTrigger={surface === 'bubble'}
+        onChange={(weight) => editor.chain().focus().unsetBold().setFontWeight(weight).run()}
       >
         <Toggle
           variant="outline"
@@ -367,7 +371,9 @@ export function InlineFormattingControls({
           size="sm"
           pressed={state.bold}
           onMouseDown={(event) => event.preventDefault()}
-          onPressedChange={() => editor.chain().focus().toggleBold().run()}
+          onPressedChange={(pressed) => {
+            editor.chain().focus().unsetBold().setFontWeight(pressed ? 700 : 400).run()
+          }}
           aria-label="Bold"
         >
           <Bold />
@@ -459,21 +465,24 @@ export function BubbleToolbar({
     selector: ({ editor: currentEditor }) => {
       const format = currentEditor.getAttributes('format')
       const heading = currentEditor.isActive('heading')
+      const parsedFontWeight = Number.parseInt(String(format.fontWeight), 10)
+      const fontWeight = Number.isFinite(parsedFontWeight) ? parsedFontWeight : heading ? 700 : 400
       return {
-        bold: currentEditor.isActive('bold') || heading,
+        bold: currentEditor.isActive('bold') || fontWeight >= 600,
         italic: currentEditor.isActive('italic'),
         underline: currentEditor.isActive('underline'),
         strike: currentEditor.isActive('strike'),
         code: currentEditor.isActive('code'),
-        fontWeight: Number.isFinite(Number.parseInt(String(format.fontWeight), 10))
-          ? Number.parseInt(String(format.fontWeight), 10)
-          : heading ? 700 : 400,
+        fontWeight,
         fontSize: currentFontSize(currentEditor, fallbackFontSize),
         highlight: typeof format.highlight === 'string' ? format.highlight : null,
         textColor: typeof format.textColor === 'string' ? format.textColor : null,
         href: (currentEditor.getAttributes('link').href as string | undefined) ?? '',
         fontFamily: typeof format.fontFamily === 'string' ? format.fontFamily : (fontFamily ?? 'Geist Sans'),
-        fontSource: format.fontSource === 'google' ? 'google' : (fontSource ?? 'local'),
+        fontSource:
+          format.fontSource === 'google' || format.fontSource === 'system'
+            ? format.fontSource
+            : (fontSource ?? 'local'),
       }
     },
   })
@@ -490,7 +499,9 @@ export function BubbleToolbar({
       appendTo={() => document.body}
       options={{ placement: 'top', offset: 10, flip: true, strategy: 'fixed' }}
     >
-      <InlineFormattingControls editor={editor} kind={kind} state={toolbarState} />
+      <div className="scripture-inline-format-controls scripture-bubble-inline-format-controls">
+        <InlineFormattingControls editor={editor} kind={kind} state={toolbarState} surface="bubble" />
+      </div>
 
       {kind === 'code' && (
         <>

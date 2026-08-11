@@ -6,7 +6,7 @@ export type PageNumberNumeralStyle = 'arabic' | 'roman'
 
 export interface PageNumberTypography {
   fontFamily: string
-  fontSource: 'local' | 'google'
+  fontSource: 'local' | 'google' | 'system'
   fontWeight: number
   fontStyle: 'normal' | 'italic'
   fontSize: number
@@ -141,7 +141,10 @@ export function getPageNumberSettings(id: string): PageNumberSettings {
       fontFamily: typeof typography?.fontFamily === 'string'
         ? typography.fontFamily
         : DEFAULT_PAGE_NUMBER_TYPOGRAPHY.fontFamily,
-      fontSource: typography?.fontSource === 'google' ? 'google' : DEFAULT_PAGE_NUMBER_TYPOGRAPHY.fontSource,
+      fontSource:
+        typography?.fontSource === 'google' || typography?.fontSource === 'system'
+          ? typography.fontSource
+          : DEFAULT_PAGE_NUMBER_TYPOGRAPHY.fontSource,
       fontWeight: typeof typography?.fontWeight === 'number'
         ? typography.fontWeight
         : DEFAULT_PAGE_NUMBER_TYPOGRAPHY.fontWeight,

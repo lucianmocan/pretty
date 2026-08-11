@@ -1,8 +1,10 @@
 'use client'
 
 import { useEffect, useState, type ReactNode } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
-import { loadGoogleFontCatalog } from '@/lib/google-fonts'
+import { loadGoogleFontCatalog, textFontFamilyCss } from '@/lib/google-fonts'
+import { getCachedSystemFontCatalog, systemFontWeightsForFamily } from '@/lib/system-fonts'
 import type { TextFontSource } from '@/lib/layout/types'
 
 const LOCAL_FONT_WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900]
@@ -20,12 +22,16 @@ export function FontWeightPicker({
   onChange,
   fontFamily,
   fontSource,
+  surface = 'inspector',
+  showTrigger = true,
   children,
 }: {
   value: number
   onChange: (weight: number) => void
   fontFamily: string
   fontSource: TextFontSource
+  surface?: 'inspector' | 'bubble'
+  showTrigger?: boolean
   children: ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -50,9 +56,11 @@ export function FontWeightPicker({
   const key = `${fontSource}:${fontFamily}`
   const weights = fontSource === 'local'
     ? LOCAL_FONT_WEIGHTS
-    : catalogKey?.startsWith(key + ':')
-      ? catalogKey.slice(key.length + 1).split(',').filter(Boolean).map(Number)
-      : null
+    : fontSource === 'system'
+      ? systemFontWeightsForFamily(getCachedSystemFontCatalog(), fontFamily)
+      : catalogKey?.startsWith(key + ':')
+        ? catalogKey.slice(key.length + 1).split(',').filter(Boolean).map(Number)
+        : null
   const uniqueWeights = weights ? [...new Set(weights)] : null
 
   return (
@@ -66,12 +74,25 @@ export function FontWeightPicker({
           }}
         >
           {children}
+          {showTrigger && (
+            <button
+              type="button"
+              className="scripture-bubble-weight-trigger"
+              aria-label="Choose font weight"
+              aria-expanded={open}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setOpen((current) => !current)}
+            >
+              <ChevronDown aria-hidden="true" />
+            </button>
+          )}
         </span>
       </PopoverAnchor>
       <PopoverContent
         className="scripture-font-weight-picker"
         align="start"
-        sideOffset={6}
+        alignOffset={surface === 'bubble' ? -6 : 0}
+        sideOffset={surface === 'bubble' ? 12 : 6}
         onOpenAutoFocus={(event) => {
           if (!(event.currentTarget instanceof HTMLElement)) return
           const selected = event.currentTarget.querySelector<HTMLButtonElement>('[data-selected]')
@@ -89,7 +110,10 @@ export function FontWeightPicker({
                 type="button"
                 className="scripture-font-weight-option"
                 data-selected={value === weight || undefined}
-                style={{ fontWeight: weight }}
+                style={{
+                  fontFamily: textFontFamilyCss(fontFamily, fontSource),
+                  fontWeight: weight,
+                }}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
                   onChange(weight)

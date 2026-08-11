@@ -149,8 +149,8 @@ export interface LayoutNode {
   // 1-based line number -> diff marker for that line.
   diffLines?: Record<number, 'add' | 'remove'>
   // text-only -- deliberately separate from the code properties above.
-  // Google font family names are stored verbatim so newly-added families do
-  // not require a document migration or a new app release.
+  // Google and system font family names are stored verbatim so newly-added
+  // or device-specific families do not require a document migration.
   textFontFamily?: string
   textFontSource?: TextFontSource
   textFontWeight?: number
@@ -164,7 +164,7 @@ export interface LayoutNode {
   alt?: string
 }
 
-export type TextFontSource = 'local' | 'google'
+export type TextFontSource = 'local' | 'google' | 'system'
 export type TextFontStyle = 'normal' | 'italic'
 
 export interface TextBlockProps {

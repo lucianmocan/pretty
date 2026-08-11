@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ContextMenu as ContextMenuPrimitive, DropdownMenu as DropdownMenuPrimitive } from 'radix-ui'
 import { GripVertical, ChevronUp, ChevronDown, Copy, LocateFixed, MoreHorizontal, Trash2 } from 'lucide-react'
@@ -26,8 +26,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ResizeHandles } from './resize-handles'
 import { Callout } from './callout'
 import { ImageBlock } from './image-block'
-import { OverflowFade } from './overflow-fade'
-import { useOverflowFade } from '@/lib/use-overflow-fade'
 import type { PositionPatch, SizePatch } from '@/lib/layout/resize-geometry'
 import type { PageNumberSettings } from '@/lib/documents/manifest'
 import { CanvasPageNumber } from '@/components/canvas/canvas-page-number'
@@ -136,10 +134,14 @@ interface AnchorGeometry {
  * to its immediate DOM parent (see AnchorGeometry), for chrome that's
  * portaled to document.body (so it renders outside any ancestor's overflow
  * clip) but still needs to sit exactly on top of the element it belongs to. */
-function useAnchorGeometry(anchorRef: React.RefObject<HTMLElement | null>, visible: boolean) {
+function useAnchorGeometry(
+  anchorRef: React.RefObject<HTMLElement | null>,
+  visible: boolean,
+  zoom: number
+) {
   const [geometry, setGeometry] = useState<AnchorGeometry | null>(null)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!visible) return
     const anchor = anchorRef.current
     if (!anchor) return
@@ -194,13 +196,24 @@ function useAnchorGeometry(anchorRef: React.RefObject<HTMLElement | null>, visib
     observer.observe(anchor)
     const mutationObserver = new MutationObserver(update)
     mutationObserver.observe(anchor, { attributes: true, attributeFilter: ['class', 'style'] })
+    // Canvas zoom changes the viewport ancestor's transform without changing
+    // the anchor's layout box, so neither ResizeObserver nor the anchor's own
+    // MutationObserver fires. Track that transform explicitly so portaled
+    // selection chrome stays on the node while zooming.
+    const canvasViewport = anchor.closest('.scripture-canvas-viewport')
+    const viewportMutationObserver = canvasViewport ? new MutationObserver(update) : null
+    viewportMutationObserver?.observe(canvasViewport, {
+      attributes: true,
+      attributeFilter: ['style'],
+    })
     return () => {
       window.removeEventListener('resize', update)
       window.removeEventListener('scroll', update, true)
       observer.disconnect()
       mutationObserver.disconnect()
+      viewportMutationObserver?.disconnect()
     }
-  }, [anchorRef, visible])
+  }, [anchorRef, visible, zoom])
 
   return geometry
 }
@@ -225,22 +238,26 @@ function useAnchorGeometry(anchorRef: React.RefObject<HTMLElement | null>, visib
 function SelectionOutline({
   anchorRef,
   visible,
+  zoom,
   onStartDrag,
 }: {
   anchorRef: React.RefObject<HTMLElement | null>
   visible: boolean
+  zoom: number
   onStartDrag?: (e: React.PointerEvent) => void
 }) {
-  const geometry = useAnchorGeometry(anchorRef, visible)
+  const geometry = useAnchorGeometry(anchorRef, visible, zoom)
   if (!visible || !geometry) return null
   const { rect, isClipped, clipStrips } = geometry
 
   return createPortal(
     <>
-      <div
-        className={classNames('scripture-selection-outline', isClipped && 'is-clipped')}
-        style={{ top: rect.top, left: rect.left, width: rect.width, height: rect.height }}
-      />
+      {isClipped && (
+        <div
+          className="scripture-selection-outline is-clipped"
+          style={{ top: rect.top, left: rect.left, width: rect.width, height: rect.height }}
+        />
+      )}
       {onStartDrag &&
         clipStrips.map((strip, index) => (
           <div
@@ -259,6 +276,7 @@ function NodeControls({
   id,
   anchorRef,
   visible,
+  zoom,
   onMove,
   onDuplicate,
   onRemove,
@@ -270,6 +288,7 @@ function NodeControls({
   id: string
   anchorRef: React.RefObject<HTMLElement | null>
   visible: boolean
+  zoom: number
   onMove: (id: string, direction: 'up' | 'down') => void
   onDuplicate: (id: string) => void
   onRemove: (id: string) => void
@@ -286,7 +305,7 @@ function NodeControls({
   // its parent's box (see AnchorGeometry / useAnchorGeometry above).
   onBringIntoView?: () => void
 }) {
-  const geometry = useAnchorGeometry(anchorRef, visible)
+  const geometry = useAnchorGeometry(anchorRef, visible, zoom)
 
   if (!visible || !geometry) return null
   const { rect, isClipped } = geometry
@@ -517,13 +536,8 @@ export function FrameNode({
     resolvedLineNumberForeground,
   ])
 
-  // The inner content wrapper (.scripture-frame-content/.scripture-leaf-
-  // content) -- overflow-fade tracks THIS element's scroll state, since
-  // it's the one that actually has overflow once either dimension is fixed
-  // (see lib/layout/frame-style.ts's contentOverflowStyle/frameInnerStyle).
   const contentRef = useRef<HTMLDivElement>(null)
   const renderedNode = liveSize ? { ...node, ...liveSize } : node
-  const overflowFade = useOverflowFade(contentRef, renderedNode.width != null || renderedNode.height != null)
   // Holds the currently active move-drag's own cleanup, if any -- an unmount
   // mid-drag (deleting this node, e.g. via Delete/Backspace, or switching
   // pages while still holding it) would otherwise leave the window-level
@@ -983,6 +997,7 @@ export function FrameNode({
               id={node.id}
               anchorRef={elementRef}
               visible={showSelectionControls}
+              zoom={zoom}
               onMove={onMove}
               onDuplicate={onDuplicate}
               onRemove={onRemove}
@@ -994,6 +1009,7 @@ export function FrameNode({
             <SelectionOutline
               anchorRef={elementRef}
               visible={isSelected}
+              zoom={zoom}
               onStartDrag={isCanvasChild ? beginMoveDrag : undefined}
             />
           </>
@@ -1065,7 +1081,6 @@ export function FrameNode({
             <CanvasPageNumber number={pageNumber.number} settings={pageNumber.settings} />
           )}
         </div>
-        <OverflowFade state={overflowFade} />
         {(node.callouts ?? []).map((callout) => (
           <Callout
             key={callout.id}
@@ -1121,6 +1136,7 @@ export function FrameNode({
         id={node.id}
         anchorRef={elementRef}
         visible={showSelectionControls}
+        zoom={zoom}
         onMove={onMove}
         onDuplicate={onDuplicate}
         onRemove={onRemove}
@@ -1132,6 +1148,7 @@ export function FrameNode({
       <SelectionOutline
         anchorRef={elementRef}
         visible={isSelected}
+        zoom={zoom}
         onStartDrag={isCanvasChild ? beginMoveDrag : undefined}
       />
       {/* Scroll/clip lives on this INNER wrapper, not the outer box above --
@@ -1178,7 +1195,6 @@ export function FrameNode({
           />
         )}
       </div>
-      <OverflowFade state={overflowFade} />
       {resizeHandles}
       {guideOverlay}
     </div>

@@ -64,17 +64,31 @@ export function googleFontsStylesheetUrl(
       .map(Number)
       .filter((weight) => Number.isFinite(weight))
       .sort((a, b) => a - b)
-    const weights = [...new Set(numericWeights)].join(';')
+    const uniqueWeights = [...new Set(numericWeights)]
+    const weights = uniqueWeights.join(';')
+    const hasNormal = metadata.styles.includes('normal')
     const hasItalic = metadata.styles.includes('italic')
-    const axis = metadata.variable
-      ? hasItalic
-        ? 'ital,wght@0,100..900;1,100..900'
-        : 'wght@100..900'
-      : numericWeights.length > 0
-        ? hasItalic
-          ? `ital,wght@0,${weights};1,${weights}`
-          : `wght@${weights}`
-        : null
+    let axis: string | null = null
+    if (uniqueWeights.length > 0) {
+      if (metadata.variable) {
+        const min = uniqueWeights[0]
+        const max = uniqueWeights[uniqueWeights.length - 1]
+        const range = min === max ? `${min}` : `${min}..${max}`
+        const variants = [
+          ...(hasNormal ? [`0,${range}`] : []),
+          ...(hasItalic ? [`1,${range}`] : []),
+        ]
+        axis = hasItalic ? `ital,wght@${variants.join(';')}` : `wght@${range}`
+      } else if (hasItalic) {
+        const variants = uniqueWeights.flatMap((weight) => [
+          ...(hasNormal ? [`0,${weight}`] : []),
+          `1,${weight}`,
+        ])
+        axis = `ital,wght@${variants.join(';')}`
+      } else {
+        axis = `wght@${weights}`
+      }
+    }
     params.append('family', axis ? `${family}:${axis}` : family)
   }
   params.set('display', 'swap')
@@ -82,7 +96,7 @@ export function googleFontsStylesheetUrl(
 }
 
 export function textFontFamilyCss(family: string | undefined, source: TextFontSource | undefined): string {
-  if (!family || source !== 'google') return 'var(--font-geist-sans), sans-serif'
+  if (!family || source === 'local' || !source) return 'var(--font-geist-sans), sans-serif'
   const safeFamily = family.replaceAll('\\', '\\\\').replaceAll("'", "\\'")
   return `'${safeFamily}', var(--font-geist-sans), sans-serif`
 }
