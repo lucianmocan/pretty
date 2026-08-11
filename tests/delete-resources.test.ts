@@ -13,7 +13,7 @@ test('page cleanup removes unique images and server data before local IndexedDB'
         children: [
           { id: 'a', kind: 'image', src: '/api/images/one' },
           { id: 'b', kind: 'frame', children: [{ id: 'c', kind: 'image', src: '/api/images/one' }] },
-          { id: 'd', kind: 'image', src: '/api/images/two' },
+          { id: 'd', kind: 'image', src: '/api/images/two', retainedSources: ['/api/images/old'] },
         ],
       }
     },
@@ -32,6 +32,7 @@ test('page cleanup removes unique images and server data before local IndexedDB'
     'load:page-1',
     'image:/api/images/one',
     'image:/api/images/two',
+    'image:/api/images/old',
     'server:page-1',
     'local:page-1',
   ])
@@ -57,4 +58,3 @@ test('page cleanup keeps local data when remote cleanup fails', async () => {
   )
   assert.deepEqual(calls, ['server'])
 })
-

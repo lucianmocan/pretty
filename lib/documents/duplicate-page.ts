@@ -37,7 +37,7 @@ export async function duplicatePage(docId: string, sourcePageId: string): Promis
         duplicatedBySource.set(sourceSrc, duplicatedSrc)
         duplicatedImageUrls.push(duplicatedSrc)
       }
-      updateImageProps(duplicate.doc, imageNode.id, { src: duplicatedSrc })
+      updateImageProps(duplicate.doc, imageNode.id, { src: duplicatedSrc, retainedSources: [] })
     }
 
     insertDuplicatedPage(docId, sourcePageId, duplicatePageId)

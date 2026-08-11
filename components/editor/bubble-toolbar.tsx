@@ -20,6 +20,7 @@ import {
 import { Toggle } from '@/components/ui/toggle'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Slider } from '@/components/ui/slider'
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { BlockKind } from './block-editor'
@@ -243,19 +244,15 @@ export function ColorPicker({
               <span>Opacity</span>
               <output>{Math.round(alpha * 100)}%</output>
             </div>
-            <input
+            <Slider
               className="scripture-color-alpha-slider"
-              type="range"
-              min="1"
-              max="100"
-              step="1"
-              value={Math.round(alpha * 100)}
-              style={{
-                background: `linear-gradient(to right, var(--primary) 0%, var(--primary) ${Math.round(alpha * 100)}%, var(--muted) ${Math.round(alpha * 100)}%, var(--muted) 100%)`,
-              }}
+              min={1}
+              max={100}
+              step={1}
+              value={[Math.round(alpha * 100)]}
               aria-label="Highlight opacity"
-              onChange={(event) => {
-                const next = Number(event.target.value) / 100
+              onValueChange={([value]) => {
+                const next = value / 100
                 setAlpha(next)
                 apply(hex, next)
               }}

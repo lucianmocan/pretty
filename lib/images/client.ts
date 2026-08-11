@@ -1,3 +1,10 @@
+/** Shared PDF-vs-image file detection -- used both by the image block's own
+ * file input/drop zone and by canvas-wide file drops, so a dropped PDF
+ * always routes to the page-picker dialog instead of being uploaded as-is. */
+export function isPdfFile(file: File): boolean {
+  return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+}
+
 /** Client-side counterpart to lib/images/store.ts -- best-effort deletion of
  * an uploaded image via its stored src URL (always `/api/images/{id}`, see
  * app/api/images/route.ts). Nothing in the app called this anywhere before,
@@ -18,6 +25,20 @@ const IMAGE_EXTENSION_BY_TYPE: Record<string, string> = {
   'image/svg+xml': 'svg',
 }
 
+/** Shared upload path for anything that ends up as an image block's `src`
+ * -- a plain file picker pick, a canvas file drop, or a PDF page converted
+ * to SVG client-side. Every caller gets back the same short `/api/images/{id}`
+ * URL (see app/api/images/route.ts), never a data URI. */
+export async function uploadImageFile(file: File | Blob, filename?: string): Promise<string> {
+  const formData = new FormData()
+  formData.append('file', file, filename)
+  const response = await fetch('/api/images', { method: 'POST', body: formData })
+  if (!response.ok) throw new Error(`Upload failed (${response.status})`)
+  const result = (await response.json()) as { url?: unknown }
+  if (typeof result.url !== 'string') throw new Error('The upload did not return a valid URL.')
+  return result.url
+}
+
 /** Creates a separately-owned copy of an uploaded image. Pages must not
  * share the same stored URL: deleting either page also deletes its image
  * resources, which would otherwise leave the remaining page broken. */
@@ -27,12 +48,5 @@ export async function duplicateUploadedImage(src: string): Promise<string> {
 
   const blob = await sourceResponse.blob()
   const extension = IMAGE_EXTENSION_BY_TYPE[blob.type] ?? 'png'
-  const formData = new FormData()
-  formData.append('file', blob, `duplicate.${extension}`)
-
-  const uploadResponse = await fetch('/api/images', { method: 'POST', body: formData })
-  if (!uploadResponse.ok) throw new Error(`Could not copy an image while duplicating the page (${uploadResponse.status})`)
-  const result = (await uploadResponse.json()) as { url?: unknown }
-  if (typeof result.url !== 'string') throw new Error('The duplicated image did not return a valid URL.')
-  return result.url
+  return uploadImageFile(blob, `duplicate.${extension}`)
 }

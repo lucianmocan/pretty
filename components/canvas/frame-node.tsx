@@ -30,6 +30,7 @@ import type { PositionPatch, SizePatch } from '@/lib/layout/resize-geometry'
 import type { PageNumberSettings } from '@/lib/documents/manifest'
 import { CanvasPageNumber } from '@/components/canvas/canvas-page-number'
 import { useGeometryActions } from './geometry-registry'
+import type { ImageEffectPreview } from '@/lib/layout/image-effects'
 
 interface FrameNodeProps {
   node: LayoutNode
@@ -71,7 +72,14 @@ interface FrameNodeProps {
   onSetEditing: (id: string | null) => void
   parentId?: string | null
   onAddBlockToFrame: (frameId: string, kind: 'code' | 'text' | 'image') => void
+  // A PDF was picked/dropped for an image node -- opens the page-picker
+  // dialog instead of uploading directly (see PdfPagePickerDialog).
+  onRequestPdfPicker: (frameId: string, nodeId: string, file: File) => void
+  // OS files (not an internal DRAG_MIME reorder payload) dropped onto this
+  // frame -- images upload directly, PDFs go through onRequestPdfPicker.
+  onDropFiles: (frameId: string, files: File[]) => void
   pageNumber?: { number: number; settings: PageNumberSettings }
+  imageEffectPreview?: ImageEffectPreview | null
 }
 
 function classNames(...parts: Array<string | false | undefined>) {
@@ -202,10 +210,12 @@ function useAnchorGeometry(
     // selection chrome stays on the node while zooming.
     const canvasViewport = anchor.closest('.scripture-canvas-viewport')
     const viewportMutationObserver = canvasViewport ? new MutationObserver(update) : null
-    viewportMutationObserver?.observe(canvasViewport, {
-      attributes: true,
-      attributeFilter: ['style'],
-    })
+    if (canvasViewport && viewportMutationObserver) {
+      viewportMutationObserver.observe(canvasViewport, {
+        attributes: true,
+        attributeFilter: ['style'],
+      })
+    }
     return () => {
       window.removeEventListener('resize', update)
       window.removeEventListener('scroll', update, true)
@@ -473,7 +483,10 @@ export function FrameNode({
   onSetEditing,
   parentId = null,
   onAddBlockToFrame,
+  onRequestPdfPicker,
+  onDropFiles,
   pageNumber,
+  imageEffectPreview,
 }: FrameNodeProps) {
   const isRoot = node.id === ROOT_ID
   const resolvedCodeBackground = node.kind === 'code' ? resolveThemeBackground(node.theme) : undefined
@@ -538,6 +551,9 @@ export function FrameNode({
 
   const contentRef = useRef<HTMLDivElement>(null)
   const renderedNode = liveSize ? { ...node, ...liveSize } : node
+  const previewedImageEffects = imageEffectPreview?.nodeId === node.id
+    ? imageEffectPreview.effects
+    : undefined
   // Holds the currently active move-drag's own cleanup, if any -- an unmount
   // mid-drag (deleting this node, e.g. via Delete/Backspace, or switching
   // pages while still holding it) would otherwise leave the window-level
@@ -946,26 +962,35 @@ export function FrameNode({
       document.body
     )
 
-  const dragTargetHandlers = isRoot
-    ? {}
-    : {
-        onDragOver: (e: React.DragEvent) => {
-          e.preventDefault()
-          e.stopPropagation()
-          setIsDragOver(true)
-        },
-        onDragLeave: (e: React.DragEvent) => {
-          e.stopPropagation()
-          setIsDragOver(false)
-        },
-        onDrop: (e: React.DragEvent) => {
-          e.preventDefault()
-          e.stopPropagation()
-          setIsDragOver(false)
-          const draggedId = e.dataTransfer.getData(DRAG_MIME)
-          if (draggedId) onReorder(draggedId, node.id)
-        },
+  // Where an OS file dropped on THIS node's own box should land -- itself,
+  // if it's a frame, otherwise its containing frame (dropping a file onto
+  // an existing text/code/image block still inserts into that block's
+  // parent, not "into" the block).
+  const dropTargetFrameId = node.kind === 'frame' ? node.id : parentId ?? ROOT_ID
+
+  const dragTargetHandlers = {
+    onDragOver: (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setIsDragOver(true)
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      e.stopPropagation()
+      setIsDragOver(false)
+    },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setIsDragOver(false)
+      const draggedId = e.dataTransfer.getData(DRAG_MIME)
+      if (draggedId && !isRoot) {
+        onReorder(draggedId, node.id)
+        return
       }
+      const files = Array.from(e.dataTransfer.files ?? [])
+      if (files.length > 0) onDropFiles(dropTargetFrameId, files)
+    },
+  }
 
   if (node.kind === 'frame') {
     const children = node.children ?? []
@@ -1064,6 +1089,9 @@ export function FrameNode({
               onSetEditing={onSetEditing}
               parentId={node.id}
               onAddBlockToFrame={onAddBlockToFrame}
+              onRequestPdfPicker={onRequestPdfPicker}
+              onDropFiles={onDropFiles}
+              imageEffectPreview={imageEffectPreview}
             />
           ))}
           {marquee && (
@@ -1160,7 +1188,33 @@ export function FrameNode({
           <ImageBlock
             src={node.src ?? ''}
             alt={node.alt ?? ''}
-            onUploaded={(url) => updateImageProps(getYDoc(docId).doc, node.id, { src: url })}
+            radius={node.radius ?? 0}
+            clipShape={node.clipShape ?? 'none'}
+            cropX={node.cropX ?? 0}
+            cropY={node.cropY ?? 0}
+            cropWidth={node.cropWidth ?? 1}
+            cropHeight={node.cropHeight ?? 1}
+            intrinsicWidth={node.intrinsicWidth ?? 0}
+            intrinsicHeight={node.intrinsicHeight ?? 0}
+            frameWidth={renderedNode.width}
+            frameHeight={renderedNode.height}
+            opacity={previewedImageEffects?.opacity ?? node.opacity ?? 100}
+            brightness={previewedImageEffects?.brightness ?? node.brightness ?? 100}
+            contrast={previewedImageEffects?.contrast ?? node.contrast ?? 100}
+            saturation={previewedImageEffects?.saturation ?? node.saturation ?? 100}
+            hue={previewedImageEffects?.hue ?? node.hue ?? 0}
+            grayscale={previewedImageEffects?.grayscale ?? node.grayscale ?? 0}
+            blur={previewedImageEffects?.blur ?? node.blur ?? 0}
+            onUploaded={(url) => updateImageProps(getYDoc(docId).doc, node.id, {
+              src: url,
+              cropX: 0,
+              cropY: 0,
+              cropWidth: 1,
+              cropHeight: 1,
+              intrinsicWidth: 0,
+              intrinsicHeight: 0,
+            })}
+            onPdfSelected={(file) => onRequestPdfPicker(parentId ?? ROOT_ID, node.id, file)}
           />
         ) : (
           <BlockEditor

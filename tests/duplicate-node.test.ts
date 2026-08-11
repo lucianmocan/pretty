@@ -40,7 +40,7 @@ test('recursively rekeys frame children and remaps internal callout targets', ()
     kind: 'frame',
     children: [
       { id: 'text-1', kind: 'text' },
-      { id: 'image-1', kind: 'image', src: '/image.png' },
+      { id: 'image-1', kind: 'image', src: '/image.png', retainedSources: ['/old-image.png'] },
     ],
     callouts: [{ id: 'callout-1', targetId: 'text-1', dx: 10, dy: 20, text: 'Look here' }],
   }
@@ -50,6 +50,7 @@ test('recursively rekeys frame children and remaps internal callout targets', ()
   assert.equal(result.node.id, 'new-1')
   assert.equal(result.node.children?.[0].id, 'new-2')
   assert.equal(result.node.children?.[1].id, 'new-3')
+  assert.deepEqual(result.node.children?.[1].retainedSources, [])
   assert.equal(result.node.callouts?.[0].id, 'new-4')
   assert.equal(result.node.callouts?.[0].targetId, 'new-2')
   assert.deepEqual(result.contentPairs, [{ sourceId: 'text-1', duplicateId: 'new-2' }])

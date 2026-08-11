@@ -121,6 +121,9 @@ export interface LayoutNode {
   justify?: FlexJustify
   background?: string | null
   backgroundAuto?: boolean
+  // Also doubles as the image-only corner-radius field below (only visible
+  // there when clipShape is 'none') -- no reason to duplicate a plain
+  // numeric corner radius under a second name.
   radius?: number
   childLayout?: ChildLayout
   callouts?: CalloutAnnotation[]
@@ -162,6 +165,29 @@ export interface LayoutNode {
   // image-only
   src?: string
   alt?: string
+  clipShape?: ImageClipShape
+  // Normalized [0,1] window into the image's own natural bounds -- 0,0,1,1
+  // is "uncropped" (the whole image). See components/canvas/image-block.tsx
+  // for how this is rendered.
+  cropX?: number
+  cropY?: number
+  cropWidth?: number
+  cropHeight?: number
+  // Natural source dimensions captured by the crop picker. The shared
+  // canvas/export SVG renderer uses their aspect ratio to preserve pixels
+  // when a cropped frame is resized to a different shape.
+  intrinsicWidth?: number
+  intrinsicHeight?: number
+  // Prior uploads still reachable through Yjs undo. They remain owned by
+  // this page until the page/document resource cleanup can delete them.
+  retainedSources?: string[]
+  opacity?: number
+  brightness?: number
+  contrast?: number
+  saturation?: number
+  hue?: number
+  grayscale?: number
+  blur?: number
 }
 
 export type TextFontSource = 'local' | 'google' | 'system'
@@ -234,14 +260,51 @@ export const DEFAULT_TEXT_BLOCK_PROPS: TextBlockProps = {
   textColor: 'currentColor',
 }
 
+// Non-rectangular preset masks (see lib/layout/image-shapes.ts for the
+// actual clip-path values) -- 'none' means a plain rectangle, optionally
+// rounded via `radius` below.
+export type ImageClipShape = 'none' | 'circle' | 'ellipse' | 'triangle' | 'diamond' | 'hexagon' | 'star'
+
 export interface ImageBlockProps {
   src: string
   alt: string
+  radius: number
+  clipShape: ImageClipShape
+  cropX: number
+  cropY: number
+  cropWidth: number
+  cropHeight: number
+  intrinsicWidth: number
+  intrinsicHeight: number
+  retainedSources: string[]
+  opacity: number
+  brightness: number
+  contrast: number
+  saturation: number
+  hue: number
+  grayscale: number
+  blur: number
 }
 
 export const DEFAULT_IMAGE_BLOCK_PROPS: ImageBlockProps = {
   src: '',
   alt: '',
+  radius: 0,
+  clipShape: 'none',
+  cropX: 0,
+  cropY: 0,
+  cropWidth: 1,
+  cropHeight: 1,
+  intrinsicWidth: 0,
+  intrinsicHeight: 0,
+  retainedSources: [],
+  opacity: 100,
+  brightness: 100,
+  contrast: 100,
+  saturation: 100,
+  hue: 0,
+  grayscale: 0,
+  blur: 0,
 }
 
 export const DEFAULT_FRAME_PROPS: FrameProps = {

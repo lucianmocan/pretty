@@ -34,6 +34,7 @@ export function planNodeDuplicate(
     return {
       ...node,
       id: duplicateId,
+      ...(node.kind === 'image' && { retainedSources: [] }),
       children: node.children?.map(rekey),
       callouts: node.callouts?.map((callout) => ({
         ...callout,

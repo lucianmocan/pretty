@@ -27,6 +27,7 @@ import { GoogleFontStylesheet } from '@/components/editor/google-font-loader'
 import { textBlockStyle } from '@/lib/layout/text-style'
 import type { PageNumberSettings } from '@/lib/documents/manifest'
 import { CanvasPageNumber } from '@/components/canvas/canvas-page-number'
+import { ImageVisual } from '@/components/canvas/image-visual'
 
 export type ExportSyntaxSnapshots = Record<string, SyntaxStyleRange[]>
 
@@ -99,8 +100,29 @@ function renderNode(
         style={{ ...outerBoxStyle(node), ...positionStyle }}
       >
         <div className="scripture-leaf-content" style={contentOverflowStyle(node)}>
-          {/* eslint-disable-next-line @next/next/no-img-element -- export must preserve the source exactly */}
-          {node.src && <img className="scripture-image" src={node.src} alt={node.alt ?? ''} />}
+          {node.src && (
+            <ImageVisual
+              src={node.src}
+              alt={node.alt ?? ''}
+              radius={node.radius ?? 0}
+              clipShape={node.clipShape ?? 'none'}
+              cropX={node.cropX ?? 0}
+              cropY={node.cropY ?? 0}
+              cropWidth={node.cropWidth ?? 1}
+              cropHeight={node.cropHeight ?? 1}
+              intrinsicWidth={node.intrinsicWidth}
+              intrinsicHeight={node.intrinsicHeight}
+              frameWidth={node.width}
+              frameHeight={node.height}
+              opacity={node.opacity}
+              brightness={node.brightness}
+              contrast={node.contrast}
+              saturation={node.saturation}
+              hue={node.hue}
+              grayscale={node.grayscale}
+              blur={node.blur}
+            />
+          )}
         </div>
       </div>
     )

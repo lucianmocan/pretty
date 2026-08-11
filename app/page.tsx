@@ -47,7 +47,7 @@ export default function PrettyHomePage() {
           pretty
         </Link>
         <nav className="scripture-landing-nav-links" aria-label="Main navigation">
-          <a href="https://github.com/lucianmocan/pretty" target="_blank" rel="noopener noreferrer">
+          <a href="https://github.com/lucianmocan/scripture" target="_blank" rel="noopener noreferrer">
             <span className="scripture-github-mark" aria-hidden="true" />
             GitHub
           </a>
@@ -121,7 +121,8 @@ export default function PrettyHomePage() {
         <Link href="/" className="scripture-landing-logo" aria-label="Pretty home">pretty</Link>
         <div>
           <p>Free and open source</p>
-          <a href="https://github.com/lucianmocan/pretty/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0</a>
+          <a href="https://github.com/lucianmocan/scripture/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0</a>
+          <a href="https://github.com/lucianmocan/scripture/blob/main/THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener noreferrer">Third-party licenses</a>
           <button
             type="button"
             className="scripture-landing-theme-toggle"

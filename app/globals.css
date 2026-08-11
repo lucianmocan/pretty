@@ -281,8 +281,8 @@ html[data-scripture-reduced-motion='true'] *::after {
 .scripture-notification-chip {
   display: flex;
   align-items: center;
-  gap: 0.625rem;
-  padding: 0.4375rem 0.625rem;
+  gap: 0.4375rem;
+  padding: 0.375rem 0.5625rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--popover) 92%, transparent);
@@ -299,9 +299,50 @@ html[data-scripture-reduced-motion='true'] *::after {
   pointer-events: auto;
 }
 
+.scripture-notification-operation {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: min(20rem, calc(100vw - 7rem));
+  color: var(--foreground);
+  white-space: nowrap;
+}
+
+.scripture-notification-operation strong {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scripture-notification-operation-percent {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.scripture-notification-progress {
+  display: block;
+  width: 3.25rem;
+  height: 0.25rem;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.scripture-notification-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 180ms ease;
+}
+
 .scripture-notification-chip-icon {
-  width: 0.875rem;
-  height: 0.875rem;
+  width: 0.8125rem;
+  height: 0.8125rem;
   flex: none;
   stroke-width: 2;
 }
@@ -1275,10 +1316,125 @@ html[data-scripture-moving] * {
   border-radius: var(--radius-sm);
 }
 
+.scripture-image-visual {
+  position: relative;
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+}
+
 .scripture-image {
   display: block;
   max-width: 100%;
+  /* Scales to fill its box (preserving aspect ratio via letterboxing rather
+     than cropping) instead of only ever shrinking to it -- without this,
+     once a block has an explicit size (see contentOverflowStyle's width/
+     height: 100% on .scripture-leaf-content), resizing the block larger
+     just reveals empty scrollable space around a picture pinned at its own
+     natural size, never growing the picture itself. */
+  object-fit: contain;
   border-radius: inherit;
+}
+
+/* The final frame owns crop clipping, masks, and radius. Applying those to
+   the translated/enlarged source image makes a crop move the mask itself. */
+.scripture-leaf:not(.scripture-auto-width) .scripture-image-visual {
+  width: 100%;
+}
+.scripture-leaf:not(.scripture-auto-height) .scripture-image-visual {
+  height: 100%;
+}
+
+.scripture-leaf:not(.scripture-auto-width) .scripture-image-visual > .scripture-image {
+  width: 100%;
+}
+.scripture-leaf:not(.scripture-auto-height) .scripture-image-visual > .scripture-image {
+  height: 100%;
+}
+
+.scripture-image-visual.is-shaped > .scripture-image {
+  object-fit: cover;
+}
+
+.scripture-image-visual.is-cropped,
+.scripture-image-visual.is-cropped > .scripture-image {
+  width: 100%;
+  height: 100%;
+}
+
+.scripture-image-cropped-svg {
+  overflow: hidden;
+}
+
+.scripture-image-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border-radius: inherit;
+}
+
+/* ---------------------------------------------------------------------------
+   Crop dialog (components/canvas/image-crop-dialog.tsx)
+--------------------------------------------------------------------------- */
+
+.scripture-crop-canvas {
+  position: relative;
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  user-select: none;
+}
+
+.scripture-crop-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* The container is already sized to the image's own aspect ratio (see
+     previewWidth/previewHeight in image-crop-dialog.tsx), so a plain fill
+     never distorts or letterboxes it. */
+  object-fit: fill;
+  pointer-events: none;
+}
+
+.scripture-crop-rect {
+  position: absolute;
+  border: 2px solid var(--primary);
+  /* A comically large spread paints everything OUTSIDE this rect, dimming
+     the un-selected region without any extra DOM. */
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+  cursor: move;
+}
+
+.scripture-crop-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--primary);
+}
+.scripture-crop-handle-nw {
+  top: -5px;
+  left: -5px;
+  cursor: nwse-resize;
+}
+.scripture-crop-handle-ne {
+  top: -5px;
+  right: -5px;
+  cursor: nesw-resize;
+}
+.scripture-crop-handle-sw {
+  bottom: -5px;
+  left: -5px;
+  cursor: nesw-resize;
+}
+.scripture-crop-handle-se {
+  bottom: -5px;
+  right: -5px;
+  cursor: nwse-resize;
 }
 
 .scripture-node-controls {
@@ -1387,9 +1543,9 @@ html[data-scripture-panning] .scripture-node-controls {
 
 .scripture-notification-chip[data-variant='error'] {
   max-width: min(32rem, calc(100vw - 2rem));
-  border-color: color-mix(in srgb, var(--destructive) 45%, var(--border));
-  background: color-mix(in srgb, var(--destructive) 12%, var(--popover));
-  color: color-mix(in srgb, var(--destructive) 72%, var(--foreground));
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--popover) 92%, transparent);
+  color: var(--foreground);
   white-space: normal;
 }
 
@@ -1398,9 +1554,17 @@ html[data-scripture-panning] .scripture-node-controls {
 }
 
 .scripture-notification-chip[data-variant='success'] {
-  border-color: color-mix(in srgb, #16a34a 52%, var(--border));
-  background: color-mix(in srgb, #22c55e 17%, var(--popover));
-  color: color-mix(in srgb, #15803d 82%, var(--foreground));
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--popover) 92%, transparent);
+  color: var(--foreground);
+}
+
+.scripture-notification-chip[data-variant='error'] .scripture-notification-chip-icon {
+  color: color-mix(in srgb, var(--destructive) 68%, var(--muted-foreground));
+}
+
+.scripture-notification-chip[data-variant='success'] .scripture-notification-chip-icon {
+  color: color-mix(in srgb, #16a34a 62%, var(--muted-foreground));
 }
 
 .scripture-editor-loading {
@@ -1725,38 +1889,7 @@ html[data-scripture-panning] .scripture-node-controls {
 
 .scripture-color-alpha-slider {
   width: 100%;
-  height: 0.25rem;
-  border-radius: 999px;
-  outline: none;
-  appearance: none;
   cursor: pointer;
-}
-
-.scripture-color-alpha-slider::-webkit-slider-thumb {
-  width: 0.875rem;
-  height: 0.875rem;
-  border: 2px solid var(--primary);
-  border-radius: 50%;
-  background: var(--popover);
-  box-shadow: var(--shadow-sm);
-  appearance: none;
-}
-
-.scripture-color-alpha-slider::-moz-range-thumb {
-  width: 0.75rem;
-  height: 0.75rem;
-  border: 2px solid var(--primary);
-  border-radius: 50%;
-  background: var(--popover);
-  box-shadow: var(--shadow-sm);
-}
-
-.scripture-color-alpha-slider:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
-}
-
-.scripture-color-alpha-slider:focus-visible::-moz-range-thumb {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
 }
 
 .scripture-font-picker-row {
@@ -3211,7 +3344,86 @@ button.scripture-page-name {
 .scripture-inspector-actions {
   display: flex;
   flex-direction: row;
+  flex-wrap: wrap;
   gap: 0.375rem;
+}
+
+.scripture-image-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.scripture-image-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.375rem;
+}
+
+.scripture-image-action-grid [data-slot='button'] {
+  width: 100%;
+  min-width: 0;
+}
+
+/* The multi-select Align section (inspector-panel.tsx's MultiSelectPanel)
+   nests two already-horizontal button rows (h-edges, v-edges) -- stack
+   those ROWS vertically, not side by side, or all six buttons cram into a
+   single row's width. */
+.scripture-inspector-align-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.scripture-shape-select-preview {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+
+.scripture-shape-select-preview.is-ellipse {
+  transform: scaleX(1.22) scaleY(0.78);
+}
+
+.scripture-shape-select-content [data-slot='select-item'] {
+  min-height: 1.75rem;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.scripture-image-adjustments {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.scripture-image-adjustment {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+}
+
+.scripture-image-adjustment-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.scripture-image-adjustment-heading output {
+  min-width: 2.75rem;
+  padding: 0.15rem 0.35rem;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--foreground);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.scripture-image-reset-adjustments {
+  align-self: flex-start;
+  margin-top: 0.125rem;
 }
 
 /* ---------------------------------------------------------------------------
@@ -3297,6 +3509,65 @@ button.scripture-page-name {
   min-width: 0;
   overflow-x: auto;
   white-space: pre;
+}
+
+.scripture-pdf-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+  gap: 0.625rem;
+  max-height: 26rem;
+  overflow-y: auto;
+  padding: 0.125rem;
+}
+
+.scripture-pdf-picker-page {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  padding: 0;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.scripture-pdf-picker-page img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.scripture-pdf-picker-page.is-selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
+.scripture-pdf-picker-page-number {
+  position: absolute;
+  bottom: 0.25rem;
+  left: 0.375rem;
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--popover) 85%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 0 0.25rem;
+}
+
+.scripture-pdf-picker-page-check {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
 }
 
 /* CodeChrome normally expands with its authored block. In this compact
@@ -3683,6 +3954,7 @@ button.scripture-page-name {
 
 .scripture-landing-footer > div {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 1.25rem;

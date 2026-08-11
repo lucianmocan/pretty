@@ -41,6 +41,17 @@ import {
   Underline,
   Strikethrough,
   ArrowLeft,
+  Crop,
+  Eraser,
+  LoaderCircle,
+  ImagePlus,
+  RotateCcw,
+  Circle as CircleIcon,
+  Triangle as TriangleIcon,
+  Diamond as DiamondIcon,
+  Hexagon as HexagonIcon,
+  Star as StarIcon,
+  RectangleHorizontal,
 } from 'lucide-react'
 import type {
   LayoutNode,
@@ -51,6 +62,7 @@ import type {
   CanvasSizeMode,
   PageSize,
   TextFontSource,
+  ImageClipShape,
 } from '@/lib/layout/types'
 import {
   DEFAULT_CANVAS_HEIGHT,
@@ -67,7 +79,19 @@ import {
   clearFormatAttributesInStaticBlock,
   staticBlockJSON,
 } from '@/lib/tiptap/static-block-document'
-import { deleteUploadedImage } from '@/lib/images/client'
+import { deleteUploadedImage, uploadImageFile } from '@/lib/images/client'
+import { removeImageBackground } from '@/lib/images/background-removal'
+import { friendlyBackgroundProgress } from '@/lib/images/background-removal-progress'
+import {
+  clearBackgroundRemovalState,
+  getBackgroundRemovalState,
+  setBackgroundRemovalState,
+  useBackgroundRemovalState,
+} from '@/lib/images/background-removal-state'
+import { IMAGE_CLIP_SHAPES } from '@/lib/layout/image-shapes'
+import { croppedImageFrameSize, normalizeImageCrop } from '@/lib/layout/image-crop'
+import { normalizeImageEffects, type ImageEffectPreview } from '@/lib/layout/image-effects'
+import { ImageCropDialog, type CropRequest, type CropResult } from '@/components/canvas/image-crop-dialog'
 import {
   updateFrameProps,
   updateCodeProps,
@@ -81,6 +105,7 @@ import {
   removeNode,
   ROOT_ID,
   type GutterClickMode,
+  toPlainTree,
 } from '@/lib/yjs/layout-store'
 import { FONT_OPTIONS, DEFAULT_LANGUAGE } from '@/lib/presets'
 import {
@@ -92,6 +117,7 @@ import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
 import { Toggle } from '@/components/ui/toggle'
 import { Input } from '@/components/ui/input'
+import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { NumericPresetControl } from '@/components/ui/numeric-preset-control'
@@ -179,6 +205,7 @@ interface InspectorPanelProps {
   onPageNumberSettingsChange: (settings: PageNumberSettings) => void
   pageIds: string[]
   pageNames: Record<string, string>
+  onImageEffectPreviewChange: (preview: ImageEffectPreview | null) => void
 }
 
 const GUTTER_CLICK_MODE_OPTIONS: Array<{ value: GutterClickMode; label: string }> = [
@@ -220,6 +247,67 @@ const TEXT_LETTER_SPACING_OPTIONS = [-1, -0.5, -0.25, 0, 0.25, 0.5, 1, 1.5, 2, 3
 
 function compactNumber(value: number): string {
   return String(Number(value.toFixed(2)))
+}
+
+function ImageAdjustmentControl({
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  unit,
+  onPreview,
+  onChange,
+}: {
+  label: string
+  value: number
+  min: number
+  max: number
+  step?: number
+  unit: string
+  onPreview: (value: number | null) => void
+  onChange: (value: number) => void
+}) {
+  const [draftValue, setDraftValue] = useState(value)
+
+  useEffect(() => {
+    setDraftValue(value)
+  }, [value])
+
+  return (
+    <div className="scripture-image-adjustment">
+      <div className="scripture-image-adjustment-heading">
+        <span>{label}</span>
+        <output>{compactNumber(draftValue)}{unit}</output>
+      </div>
+      <Slider
+        min={min}
+        max={max}
+        step={step}
+        value={[draftValue]}
+        aria-label={label}
+        onValueChange={([next]) => {
+          setDraftValue(next)
+          onPreview(next)
+        }}
+        onValueCommit={([next]) => {
+          onChange(next)
+          onPreview(null)
+        }}
+      />
+    </div>
+  )
+}
+
+function ShapePreview({ shape }: { shape: ImageClipShape }) {
+  const className = 'scripture-shape-select-preview size-4'
+  if (shape === 'circle') return <CircleIcon className={className} aria-hidden="true" />
+  if (shape === 'ellipse') return <CircleIcon className={`${className} is-ellipse`} aria-hidden="true" />
+  if (shape === 'triangle') return <TriangleIcon className={className} aria-hidden="true" />
+  if (shape === 'diamond') return <DiamondIcon className={className} aria-hidden="true" />
+  if (shape === 'hexagon') return <HexagonIcon className={className} aria-hidden="true" />
+  if (shape === 'star') return <StarIcon className={className} aria-hidden="true" />
+  return <RectangleHorizontal className={className} aria-hidden="true" />
 }
 
 function TextMetricPicker({
@@ -377,7 +465,10 @@ function InspectorCard({
       const section = heading.parentElement
       if (!section) continue
       const key = `scripture:inspector-section:${context}:${heading.textContent?.trim() || 'section'}`
-      const collapsed = localStorage.getItem(key) === 'true'
+      const storedPreference = localStorage.getItem(key)
+      const collapsed = storedPreference == null
+        ? section.hasAttribute('data-default-collapsed')
+        : storedPreference === 'true'
       section.classList.toggle('is-collapsed', collapsed)
       heading.tabIndex = 0
       heading.setAttribute('role', 'button')
@@ -537,7 +628,7 @@ function MultiSelectPanel({
             <Separator />
             <div className="scripture-inspector-section">
               <h3>Align</h3>
-              <div className="scripture-inspector-actions">
+              <div className="scripture-inspector-align-rows">
                 <div className="flex gap-1.5">
                   {ALIGN_EDGE_OPTIONS.map((opt) => (
                     <Button
@@ -1482,21 +1573,25 @@ export function InspectorPanel({
   onPageNumberSettingsChange,
   pageIds,
   pageNames,
+  onImageEffectPreviewChange,
 }: InspectorPanelProps) {
   const { measureAll } = useGeometryActions()
   const exportQuality = useExportQuality()
   const exportMargin = useExportMargin()
   const transparentExport = useTransparentExport()
   const [pageNumberStyleOpen, setPageNumberStyleOpen] = useState(false)
+  // Only ever read/set from the image-block branch below, but this whole
+  // component is one big function with many early returns per node.kind --
+  // hooks have to sit here, above all of them, or the hook-call order
+  // breaks the moment the selection switches kind.
+  const [cropRequest, setCropRequest] = useState<CropRequest | null>(null)
+  const replaceImageInputRef = useRef<HTMLInputElement>(null)
+  const [replacingImage, setReplacingImage] = useState(false)
+  const [replaceImageError, setReplaceImageError] = useState<string | null>(null)
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
+  const backgroundRemoval = useBackgroundRemovalState(docId, selectedId)
 
-  useEffect(() => {
-    if (selectedId !== ROOT_ID) setPageNumberStyleOpen(false)
-  }, [selectedId])
-
-  useEffect(() => {
-    setPageNumberStyleOpen(false)
-  }, [docId])
+  useEffect(() => () => onImageEffectPreviewChange(null), [onImageEffectPreviewChange, selectedId])
 
   if (selectedIds.length > 1) {
     return (
@@ -2075,38 +2170,291 @@ export function InspectorPanel({
   }
 
   if (node.kind === 'image') {
+    const clipShape = node.clipShape ?? 'none'
+    const effects = normalizeImageEffects(node)
+    const hasAdjustments = effects.opacity !== 100 || effects.brightness !== 100 || effects.contrast !== 100 ||
+      effects.saturation !== 100 || effects.hue !== 0 || effects.grayscale !== 0 || effects.blur !== 0
+    const imageNodeId = node.id
+
+    function previewImageEffect(key: keyof typeof effects, value: number | null) {
+      onImageEffectPreviewChange(value == null
+        ? null
+        : { nodeId: imageNodeId, effects: { ...effects, [key]: value } })
+    }
+    // Plain values, not `node` itself -- TS's `node.kind === 'image'`
+    // narrowing (away from LayoutNode | null) doesn't carry into these
+    // nested function declarations' bodies.
+    const imageSrc = node.src
+
+    async function handleRemoveBackground() {
+      if (!imageSrc || backgroundRemoval?.status === 'running') return
+      const previousSrc = imageSrc
+      setBackgroundRemovalState(docId, {
+        nodeId: imageNodeId,
+        status: 'running',
+        label: 'Starting background removal',
+        detail: 'Preparing the on-device image model…',
+        progress: 2,
+      })
+      let uploadedUrl: string | null = null
+      try {
+        const blob = await removeImageBackground(previousSrc, (label, current, total) => {
+          const previousProgress = getBackgroundRemovalState(docId, imageNodeId)?.progress ?? 0
+          const friendly = friendlyBackgroundProgress(label, current, total, previousProgress)
+          setBackgroundRemovalState(docId, {
+            nodeId: imageNodeId,
+            status: 'running',
+            ...friendly,
+          })
+        })
+        setBackgroundRemovalState(docId, {
+          nodeId: imageNodeId,
+          status: 'running',
+          label: 'Saving result',
+          detail: 'Adding the transparent image to your document.',
+          progress: 99,
+        })
+        uploadedUrl = await uploadImageFile(blob, 'background-removed.png')
+
+        // Long-running model work can finish after the layer was removed or
+        // its image was replaced. Never overwrite that newer user action.
+        const currentTree = toPlainTree(doc)
+        const currentNode = currentTree ? findNode(currentTree, imageNodeId) : null
+        if (!currentNode || currentNode.kind !== 'image' || currentNode.src !== previousSrc) {
+          await deleteUploadedImage(uploadedUrl)
+          clearBackgroundRemovalState(docId, imageNodeId)
+          return
+        }
+
+        updateImageProps(doc, imageNodeId, {
+          src: uploadedUrl,
+          retainedSources: Array.from(new Set([...(currentNode.retainedSources ?? []), previousSrc])),
+        })
+        setBackgroundRemovalState(docId, {
+          nodeId: imageNodeId,
+          status: 'success',
+          label: 'Background removed',
+          detail: 'The transparent image is ready.',
+          progress: 100,
+        })
+        window.setTimeout(() => {
+          if (getBackgroundRemovalState(docId, imageNodeId)?.status === 'success') {
+            clearBackgroundRemovalState(docId, imageNodeId)
+          }
+        }, 2500)
+      } catch (err) {
+        console.error('Background removal failed', err)
+        if (uploadedUrl) void deleteUploadedImage(uploadedUrl).catch(() => undefined)
+        setBackgroundRemovalState(docId, {
+          nodeId: imageNodeId,
+          status: 'error',
+          label: 'Background removal failed',
+          detail: err instanceof Error ? err.message : 'Try again in a moment.',
+          progress: null,
+        })
+      }
+    }
+
+    async function handleReplaceImage(file: File) {
+      if (!imageSrc || replacingImage) return
+      setReplacingImage(true)
+      setReplaceImageError(null)
+      let uploadedUrl: string | null = null
+      try {
+        uploadedUrl = await uploadImageFile(file)
+        const currentTree = toPlainTree(doc)
+        const currentNode = currentTree ? findNode(currentTree, imageNodeId) : null
+        if (!currentNode || currentNode.kind !== 'image' || currentNode.src !== imageSrc) {
+          await deleteUploadedImage(uploadedUrl)
+          return
+        }
+        clearBackgroundRemovalState(docId, imageNodeId)
+        updateImageProps(doc, imageNodeId, {
+          src: uploadedUrl,
+          cropX: 0,
+          cropY: 0,
+          cropWidth: 1,
+          cropHeight: 1,
+          intrinsicWidth: 0,
+          intrinsicHeight: 0,
+          retainedSources: Array.from(new Set([...(currentNode.retainedSources ?? []), imageSrc])),
+        })
+      } catch (cause) {
+        console.error('Image replacement failed', cause)
+        if (uploadedUrl) void deleteUploadedImage(uploadedUrl).catch(() => undefined)
+        setReplaceImageError(cause instanceof Error ? cause.message : 'The replacement image could not be uploaded.')
+      } finally {
+        setReplacingImage(false)
+      }
+    }
+
+    function handleApplyCrop(result: CropResult) {
+      const crop = normalizeImageCrop(result)
+      updateImageProps(doc, result.nodeId, {
+        ...crop,
+        intrinsicWidth: result.intrinsicWidth,
+        intrinsicHeight: result.intrinsicHeight,
+      })
+      const currentTree = toPlainTree(doc)
+      const targetNode = currentTree ? findNode(currentTree, result.nodeId) : null
+      if (targetNode?.kind === 'image' && targetNode.width == null && targetNode.height == null) {
+        const element = Array.from(document.querySelectorAll<HTMLElement>('[data-node-id]'))
+          .find((candidate) => candidate.dataset.nodeId === result.nodeId)
+        const size = croppedImageFrameSize({
+          renderedWidth: element?.offsetWidth,
+          renderedHeight: element?.offsetHeight,
+          naturalWidth: result.intrinsicWidth,
+          naturalHeight: result.intrinsicHeight,
+          crop,
+        })
+        updateNodeSize(doc, result.nodeId, size)
+      }
+    }
+
     return (
       <InspectorCard context="image">
         <CardContent className="flex flex-col gap-5">
           <div className="scripture-inspector-section">
             <h3>Image block</h3>
-            <div className="scripture-inspector-row">
+            <div className="scripture-inspector-stack">
               <Label>Alt text</Label>
               <Input
-                className="w-36"
                 value={node.alt ?? ''}
                 placeholder="Describe the image"
                 onChange={(e) => updateImageProps(doc, node.id, { alt: e.target.value })}
               />
             </div>
             {node.src && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  // Nothing ever called DELETE on an uploaded image before --
-                  // every "replace" left the old file behind permanently.
-                  deleteUploadedImage(node.src)
-                  updateImageProps(doc, node.id, { src: '' })
-                }}
-              >
-                Replace image
-              </Button>
+              <div className="scripture-image-actions">
+                <input
+                  ref={replaceImageInputRef}
+                  className="hidden"
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    event.target.value = ''
+                    if (file) void handleReplaceImage(file)
+                  }}
+                />
+                <div className="scripture-image-action-grid">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setCropRequest({
+                        nodeId: node.id,
+                        src: node.src!,
+                        cropX: node.cropX ?? 0,
+                        cropY: node.cropY ?? 0,
+                        cropWidth: node.cropWidth ?? 1,
+                        cropHeight: node.cropHeight ?? 1,
+                      })
+                    }
+                  >
+                    <Crop /> Crop
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={replacingImage}
+                    onClick={() => replaceImageInputRef.current?.click()}
+                  >
+                    {replacingImage ? <LoaderCircle className="animate-spin" /> : <ImagePlus />}
+                    Replace
+                  </Button>
+                </div>
+                <Button
+                  className="w-full"
+                  variant="secondary"
+                  size="sm"
+                  disabled={backgroundRemoval?.status === 'running'}
+                  onClick={handleRemoveBackground}
+                >
+                  {backgroundRemoval?.status === 'running' ? <LoaderCircle className="animate-spin" /> : <Eraser />}
+                  {backgroundRemoval?.status === 'error' ? 'Try background removal again' : 'Remove background'}
+                </Button>
+                {replaceImageError && <p className="scripture-error-text" role="alert">{replaceImageError}</p>}
+              </div>
             )}
           </div>
+
+          <Separator />
+          <div className="scripture-inspector-section">
+            <h3>Adjustments</h3>
+            <div className="scripture-image-adjustments">
+              <ImageAdjustmentControl label="Opacity" value={effects.opacity} min={0} max={100} unit="%" onPreview={(value) => previewImageEffect('opacity', value)} onChange={(opacity) => updateImageProps(doc, node.id, { opacity })} />
+              <ImageAdjustmentControl label="Brightness" value={effects.brightness} min={0} max={200} unit="%" onPreview={(value) => previewImageEffect('brightness', value)} onChange={(brightness) => updateImageProps(doc, node.id, { brightness })} />
+              <ImageAdjustmentControl label="Contrast" value={effects.contrast} min={0} max={200} unit="%" onPreview={(value) => previewImageEffect('contrast', value)} onChange={(contrast) => updateImageProps(doc, node.id, { contrast })} />
+              <ImageAdjustmentControl label="Saturation" value={effects.saturation} min={0} max={200} unit="%" onPreview={(value) => previewImageEffect('saturation', value)} onChange={(saturation) => updateImageProps(doc, node.id, { saturation })} />
+              <ImageAdjustmentControl label="Hue" value={effects.hue} min={-180} max={180} unit="°" onPreview={(value) => previewImageEffect('hue', value)} onChange={(hue) => updateImageProps(doc, node.id, { hue })} />
+              <ImageAdjustmentControl label="Grayscale" value={effects.grayscale} min={0} max={100} unit="%" onPreview={(value) => previewImageEffect('grayscale', value)} onChange={(grayscale) => updateImageProps(doc, node.id, { grayscale })} />
+              <ImageAdjustmentControl label="Blur" value={effects.blur} min={0} max={20} step={0.5} unit="px" onPreview={(value) => previewImageEffect('blur', value)} onChange={(blur) => updateImageProps(doc, node.id, { blur })} />
+            </div>
+            <Button
+              variant="ghost"
+              size="xs"
+              className="scripture-image-reset-adjustments"
+              disabled={!hasAdjustments}
+              onClick={() => updateImageProps(doc, node.id, {
+                opacity: 100,
+                brightness: 100,
+                contrast: 100,
+                saturation: 100,
+                hue: 0,
+                grayscale: 0,
+                blur: 0,
+              })}
+            >
+              <RotateCcw /> Reset adjustments
+            </Button>
+          </div>
+
+          <Separator />
+          <div className="scripture-inspector-section is-collapsed" data-default-collapsed>
+            <h3>Mask</h3>
+            <div className="scripture-inspector-row">
+              <Label>Shape</Label>
+              <Select
+                value={clipShape}
+                onValueChange={(value) => updateImageProps(doc, node.id, { clipShape: value as ImageClipShape })}
+              >
+                <SelectTrigger size="sm" className="w-36">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="scripture-shape-select-content">
+                  {IMAGE_CLIP_SHAPES.map((shape) => (
+                    <SelectItem className="scripture-shape-select-item" key={shape.value} value={shape.value}>
+                      <ShapePreview shape={shape.value} />
+                      {shape.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {clipShape === 'none' && (
+              <div className="scripture-inspector-row">
+                <Label>Corner radius</Label>
+                <div className="w-20">
+                  <IconField
+                    icon={<RadiusIcon />}
+                    title="Corner radius"
+                    value={node.radius ?? 0}
+                    onChange={(radius) => updateImageProps(doc, node.id, { radius })}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           <Separator />
           <SizeSection node={node} docId={docId} />
         </CardContent>
+        <ImageCropDialog
+          request={cropRequest?.nodeId === node.id ? cropRequest : null}
+          onOpenChange={(open) => !open && setCropRequest(null)}
+          onApply={handleApplyCrop}
+        />
       </InspectorCard>
     )
   }

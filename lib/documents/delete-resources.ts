@@ -14,7 +14,7 @@ export async function deletePageResources(pageId: string, deps: PageDeletionDepe
     ? Array.from(
         new Set(
           collectByKind(tree, 'image')
-            .map((node) => node.src)
+            .flatMap((node) => [node.src, ...(node.retainedSources ?? [])])
             .filter((src): src is string => Boolean(src))
         )
       )

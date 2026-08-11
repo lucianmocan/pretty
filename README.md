@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://trypretty.dev"><strong>Open Pretty</strong></a>
   ·
-  <a href="https://github.com/lucianmocan/pretty/issues">Report a bug or request a feature</a>
+  <a href="https://github.com/lucianmocan/scripture/issues">Report a bug or request a feature</a>
   ·
   <a href="./LICENSE">GPL-3.0</a>
 </p>
@@ -76,14 +76,16 @@ Pretty is a Next.js App Router application written in TypeScript. Its editor com
 - Shiki for syntax highlighting
 - Tailwind CSS and Radix-based UI components
 - Browser-native SVG/canvas capture plus pdf-lib for hosted-safe exports
+- MuPDF.js for client-side PDF page import
+- IMG.LY background-removal-js for on-device image background removal
 
 ### Run it locally
 
 You will need Node.js 20.9 or newer.
 
 ```bash
-git clone https://github.com/lucianmocan/pretty.git
-cd pretty
+git clone https://github.com/lucianmocan/scripture.git
+cd scripture
 npm install
 npm run dev
 ```
@@ -107,7 +109,7 @@ If Playwright does not have a browser installed yet, run `npx playwright install
 
 Bug reports, focused fixes, and thoughtful feature proposals are welcome.
 
-1. [Open an issue](https://github.com/lucianmocan/pretty/issues) for a bug or larger idea so the problem is clear before implementation begins.
+1. [Open an issue](https://github.com/lucianmocan/scripture/issues) for a bug or larger idea so the problem is clear before implementation begins.
 2. Fork the repository and create a short-lived branch.
 3. Keep the change focused and add coverage for behavior that could regress.
 4. Run the relevant tests, lint, and production build.
@@ -117,7 +119,13 @@ When working in the editor, please preserve the local-first data model and the c
 
 ## License
 
-Pretty is free software licensed under the [GNU General Public License, version 3](./LICENSE). You may use, study, modify, and redistribute it under the terms of that license.
+Pretty's own source code is free software licensed under the [GNU General Public License, version 3](./LICENSE). You may use, study, modify, and redistribute it under the terms of that license.
+
+PDF page import uses the unmodified MuPDF.js package under the [GNU Affero General Public License, version 3 or later](./LICENSES/AGPL-3.0.txt). MuPDF remains under its own license; see [Third-party notices](./THIRD_PARTY_NOTICES.md) for attribution, upstream source, and corresponding-source information.
+
+Client-side background removal uses the unmodified IMG.LY `@imgly/background-removal` package under the GNU Affero General Public License, version 3. It remains under its own license and is also documented in the [third-party notices](./THIRD_PARTY_NOTICES.md).
+
+MuPDF only reads selected source PDFs and converts their pages to SVG images. Pretty's exported PDFs are created separately by `pdf-lib`, so MuPDF is not listed as their producer.
 
 <p align="center">
   The Pretty wordmark is set in <a href="https://fonts.google.com/specimen/Luckiest+Guy">Luckiest Guy</a>.

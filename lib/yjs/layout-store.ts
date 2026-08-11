@@ -165,6 +165,22 @@ function setTextFields(map: Y.Map<unknown>, props: TextBlockProps) {
 function setImageFields(map: Y.Map<unknown>, props: ImageBlockProps) {
   map.set('src', props.src)
   map.set('alt', props.alt)
+  map.set('radius', props.radius)
+  map.set('clipShape', props.clipShape)
+  map.set('cropX', props.cropX)
+  map.set('cropY', props.cropY)
+  map.set('cropWidth', props.cropWidth)
+  map.set('cropHeight', props.cropHeight)
+  map.set('intrinsicWidth', props.intrinsicWidth)
+  map.set('intrinsicHeight', props.intrinsicHeight)
+  map.set('retainedSources', props.retainedSources)
+  map.set('opacity', props.opacity)
+  map.set('brightness', props.brightness)
+  map.set('contrast', props.contrast)
+  map.set('saturation', props.saturation)
+  map.set('hue', props.hue)
+  map.set('grayscale', props.grayscale)
+  map.set('blur', props.blur)
 }
 
 function findNodeMap(node: Y.Map<unknown>, id: string): Y.Map<unknown> | null {
@@ -268,6 +284,22 @@ function buildYNode(plain: LayoutNode): Y.Map<unknown> {
     setImageFields(map, {
       src: plain.src ?? DEFAULT_IMAGE_BLOCK_PROPS.src,
       alt: plain.alt ?? DEFAULT_IMAGE_BLOCK_PROPS.alt,
+      radius: plain.radius ?? DEFAULT_IMAGE_BLOCK_PROPS.radius,
+      clipShape: plain.clipShape ?? DEFAULT_IMAGE_BLOCK_PROPS.clipShape,
+      cropX: plain.cropX ?? DEFAULT_IMAGE_BLOCK_PROPS.cropX,
+      cropY: plain.cropY ?? DEFAULT_IMAGE_BLOCK_PROPS.cropY,
+      cropWidth: plain.cropWidth ?? DEFAULT_IMAGE_BLOCK_PROPS.cropWidth,
+      cropHeight: plain.cropHeight ?? DEFAULT_IMAGE_BLOCK_PROPS.cropHeight,
+      intrinsicWidth: plain.intrinsicWidth ?? DEFAULT_IMAGE_BLOCK_PROPS.intrinsicWidth,
+      intrinsicHeight: plain.intrinsicHeight ?? DEFAULT_IMAGE_BLOCK_PROPS.intrinsicHeight,
+      retainedSources: plain.retainedSources ?? DEFAULT_IMAGE_BLOCK_PROPS.retainedSources,
+      opacity: plain.opacity ?? DEFAULT_IMAGE_BLOCK_PROPS.opacity,
+      brightness: plain.brightness ?? DEFAULT_IMAGE_BLOCK_PROPS.brightness,
+      contrast: plain.contrast ?? DEFAULT_IMAGE_BLOCK_PROPS.contrast,
+      saturation: plain.saturation ?? DEFAULT_IMAGE_BLOCK_PROPS.saturation,
+      hue: plain.hue ?? DEFAULT_IMAGE_BLOCK_PROPS.hue,
+      grayscale: plain.grayscale ?? DEFAULT_IMAGE_BLOCK_PROPS.grayscale,
+      blur: plain.blur ?? DEFAULT_IMAGE_BLOCK_PROPS.blur,
     })
   }
   return map

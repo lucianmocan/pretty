@@ -22,7 +22,9 @@ import {
   updateNodePosition,
   cycleGutterLine,
   addBlock,
+  updateImageProps,
   seedRootFrame,
+  toPlainTree,
   ROOT_ID,
   type GutterClickMode,
 } from '@/lib/yjs/layout-store'
@@ -51,10 +53,16 @@ import { deletePage } from '@/lib/documents/delete-service'
 import { duplicatePage } from '@/lib/documents/duplicate-page'
 import { resolvePageNumber } from '@/lib/documents/page-numbers'
 import { findNode, findParent } from '@/lib/layout/tree-utils'
-import { deleteUploadedImage } from '@/lib/images/client'
+import { deleteUploadedImage, uploadImageFile, isPdfFile } from '@/lib/images/client'
+import { PdfPagePickerDialog, type PdfPickerRequest } from '@/components/canvas/pdf-page-picker-dialog'
 import { TEMPLATES, type Template } from '@/lib/templates'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { NotificationChip } from '@/components/ui/notification-chip'
+import {
+  clearBackgroundRemovalState,
+  useBackgroundRemovalOperations,
+} from '@/lib/images/background-removal-state'
+import type { ImageEffectPreview } from '@/lib/layout/image-effects'
 
 const ZOOM_MIN = 0.1
 const ZOOM_MAX = 2
@@ -67,6 +75,7 @@ function clampZoom(z: number) {
 export default function DocumentEditorPage() {
   const { docId } = useParams<{ docId: string }>()
   const router = useRouter()
+  const backgroundRemovalOperations = useBackgroundRemovalOperations()
   const [pageIds, setPageIds] = useState<string[]>([])
   const [pageNames, setPageNames] = useState<Record<string, string>>({})
   const [pageNumberSettings, setPageNumberSettings] = useState<PageNumberSettings>(DEFAULT_PAGE_NUMBER_SETTINGS)
@@ -97,6 +106,7 @@ export default function DocumentEditorPage() {
   const [docName, setDocName] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [gutterClickMode, setGutterClickMode] = useState<GutterClickMode>('highlight')
+  const [imageEffectPreview, setImageEffectPreview] = useState<ImageEffectPreview | null>(null)
   const [zoom, setZoom] = useState(1)
   const zoomRef = useRef(1)
   const previousZoomRef = useRef(1)
@@ -108,6 +118,10 @@ export default function DocumentEditorPage() {
   // window-chrome-section "+" (components/canvas/inspector-panel.tsx) both
   // open this same dialog instance, to different tabs.
   const [customizeTab, setCustomizeTab] = useState<'syntax' | 'chrome'>('syntax')
+  // A PDF was picked (via the image block's file input) or dropped onto the
+  // canvas -- opens PdfPagePickerDialog for page selection before anything
+  // is uploaded. Null means the dialog is closed.
+  const [pdfPicker, setPdfPicker] = useState<PdfPickerRequest | null>(null)
   // The natural (unscaled) content size of .scripture-canvas-viewport --
   // used to size .scripture-canvas-scale-box to the SCALED dimensions, so
   // the scrollable canvas area's scroll bounds actually grow/shrink with
@@ -625,10 +639,15 @@ export default function DocumentEditorPage() {
     setEditingId(null)
   }
 
-  function queueImageDelete(src: string) {
+  function queueImageDelete(pageId: string, src: string) {
     if (pendingImageDeleteTimersRef.current.has(src)) return
     const timeout = window.setTimeout(() => {
       pendingImageDeleteTimersRef.current.delete(src)
+      // Duplicated image layers can intentionally share a backing URL on the
+      // same page. Only delete after confirming no surviving current or
+      // undo-retained node still references it.
+      const remainingTree = toPlainTree(getYDoc(pageId).doc)
+      if (remainingTree && imageSources(remainingTree).includes(src)) return
       void deleteUploadedImage(src).catch((cause) => {
         setOperationError(cause instanceof Error ? cause.message : 'The uploaded image could not be removed.')
       })
@@ -639,7 +658,7 @@ export default function DocumentEditorPage() {
   function imageSources(node: ReturnType<typeof findNode>): string[] {
     if (!node) return []
     return [
-      ...(node.kind === 'image' && node.src ? [node.src] : []),
+      ...(node.kind === 'image' ? [node.src, ...(node.retainedSources ?? [])].filter((src): src is string => Boolean(src)) : []),
       ...(node.children ?? []).flatMap((child) => imageSources(child)),
     ]
   }
@@ -665,7 +684,7 @@ export default function DocumentEditorPage() {
     for (const id of removable) {
       removeNode(getYDoc(activePageId).doc, id)
     }
-    for (const src of queuedImageSources) queueImageDelete(src)
+    for (const src of queuedImageSources) queueImageDelete(activePageId, src)
     undoManager.stopCapturing()
     setSelectedIds([fallback.id])
     setEditingId(null)
@@ -766,6 +785,63 @@ export default function DocumentEditorPage() {
     const id = addBlock(getYDoc(activePageId).doc, frameId, kind)
     handleSelectionChange([id])
     setEditingId(kind === 'image' ? null : id)
+  }
+
+  function handleRequestPdfPicker(frameId: string, nodeId: string, file: File) {
+    if (!activePageId) return
+    setPdfPicker({ file, pageId: activePageId, frameId, nodeId })
+  }
+
+  // Files dropped directly onto the canvas (not from the image block's own
+  // file input) -- each image uploads immediately into a fresh image block;
+  // at most one PDF per drop opens the page picker. A PDF does not create a
+  // block until the user confirms at least one page, so cancel/failure leaves
+  // the document and undo history untouched.
+  async function handleDropFiles(frameId: string, files: File[]) {
+    if (!activePageId) return
+    const doc = getYDoc(activePageId).doc
+    const pdfFile = files.find(isPdfFile)
+    const imageFiles = files.filter((file) => !isPdfFile(file) && file.type.startsWith('image/'))
+
+    for (const file of imageFiles) {
+      const id = addBlock(doc, frameId, 'image')
+      try {
+        updateImageProps(doc, id, { src: await uploadImageFile(file) })
+      } catch (err) {
+        console.error('Failed to upload dropped image', err)
+        removeNode(doc, id)
+      }
+    }
+
+    if (pdfFile) {
+      setPdfPicker({ file: pdfFile, pageId: activePageId, frameId, nodeId: null })
+    }
+  }
+
+  function handleInsertPdfPages({
+    pageId,
+    frameId,
+    nodeId,
+    svgUrls,
+  }: {
+    pageId: string
+    frameId: string
+    nodeId: string | null
+    svgUrls: string[]
+  }) {
+    if (svgUrls.length === 0) return
+    const doc = getYDoc(pageId).doc
+    const [first, ...rest] = svgUrls
+    const firstId = nodeId ?? addBlock(doc, frameId, 'image')
+    updateImageProps(doc, firstId, { src: first })
+    const insertedIds = [firstId]
+    for (const url of rest) {
+      const id = addBlock(doc, frameId, 'image')
+      updateImageProps(doc, id, { src: url })
+      insertedIds.push(id)
+    }
+    setPdfPicker(null)
+    if (activePageId === pageId) handleSelectionChange(insertedIds)
   }
 
   function handleZoomIn() {
@@ -943,6 +1019,13 @@ export default function DocumentEditorPage() {
         </Dialog>
 
         <CustomizeDialog open={customizeOpen} onOpenChange={setCustomizeOpen} initialTab={customizeTab} />
+        {pdfPicker && (
+          <PdfPagePickerDialog
+            request={pdfPicker}
+            onCancel={() => setPdfPicker(null)}
+            onInsertPages={handleInsertPdfPages}
+          />
+        )}
         {operationError && (
           <div className="scripture-operation-error" role="alert">
             <span>{operationError}</span>
@@ -1022,9 +1105,12 @@ export default function DocumentEditorPage() {
                             onSetEditing={setEditingId}
                             parentId={null}
                             onAddBlockToFrame={handleAddBlockToFrame}
+                            onRequestPdfPicker={handleRequestPdfPicker}
+                            onDropFiles={handleDropFiles}
                             pageNumber={activePageNumber
                               ? { number: activePageNumber.number, settings: pageNumberSettings }
                               : undefined}
+                            imageEffectPreview={imageEffectPreview}
                           />
                         </CanvasRoot>
                       </div>
@@ -1045,6 +1131,42 @@ export default function DocumentEditorPage() {
                     onSetEditing={setEditingId}
                   />
                   <div id="scripture-notification-host" className="scripture-canvas-notices">
+                    {backgroundRemovalOperations.map((operation) => (
+                      <NotificationChip
+                        key={`${operation.docId}:${operation.nodeId}`}
+                        busy={operation.status === 'running'}
+                        variant={operation.status === 'error'
+                          ? 'error'
+                          : operation.status === 'success'
+                            ? 'success'
+                            : 'default'}
+                        action={operation.status === 'error' ? (
+                          <button
+                            type="button"
+                            onClick={() => clearBackgroundRemovalState(operation.docId, operation.nodeId)}
+                          >
+                            Dismiss
+                          </button>
+                        ) : undefined}
+                      >
+                        <span className="scripture-notification-operation">
+                          <strong>{operation.label}</strong>
+                          {operation.status === 'running' && operation.progress != null && (
+                            <span
+                              className="scripture-notification-progress"
+                              role="progressbar"
+                              aria-label={operation.label}
+                              aria-valuemin={0}
+                              aria-valuemax={100}
+                              aria-valuenow={operation.progress}
+                            >
+                              <span style={{ width: `${operation.progress}%` }} />
+                            </span>
+                          )}
+                          {operation.progress != null && <span className="scripture-notification-operation-percent">{operation.progress}%</span>}
+                        </span>
+                      </NotificationChip>
+                    ))}
                     {deleteNotice && (
                       <NotificationChip
                         action={<button type="button" onClick={handleUndoDelete}>Undo</button>}
@@ -1060,6 +1182,7 @@ export default function DocumentEditorPage() {
                   </div>
                 </div>
                 <InspectorPanel
+                  key={`${activePageId}:${selectedIds.join(',')}`}
                   docId={activePageId as string}
                   tree={tree}
                   selectedIds={selectedIds}
@@ -1076,6 +1199,7 @@ export default function DocumentEditorPage() {
                   onPageNumberSettingsChange={handlePageNumberSettingsChange}
                   pageIds={pageIds}
                   pageNames={pageNames}
+                  onImageEffectPreviewChange={setImageEffectPreview}
                 />
               </>
             ) : (

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
-import { Code2, ExternalLink, HardDrive, MessageSquare } from 'lucide-react'
+import { Code2, ExternalLink, HardDrive, MessageSquare, Scale } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
@@ -255,13 +255,19 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <section aria-label="About" style={{ display: group === 'about' ? 'block' : 'none' }}>
           <SettingsRow label="Feedback" description="Share an idea, report a problem, or follow the project.">
             <Button variant="outline" size="sm" asChild>
-              <a href="https://github.com/lucianmocan/pretty/issues/new" target="_blank" rel="noopener noreferrer"><MessageSquare />Send feedback<ExternalLink /></a>
+              <a href="https://github.com/lucianmocan/scripture/issues/new" target="_blank" rel="noopener noreferrer"><MessageSquare />Send feedback<ExternalLink /></a>
             </Button>
           </SettingsRow>
 
           <SettingsRow label="Source" description="View the project and its latest changes on GitHub.">
             <Button variant="outline" size="sm" asChild>
-              <a href="https://github.com/lucianmocan/pretty" target="_blank" rel="noopener noreferrer"><Code2 />Open GitHub<ExternalLink /></a>
+              <a href="https://github.com/lucianmocan/scripture" target="_blank" rel="noopener noreferrer"><Code2 />Open GitHub<ExternalLink /></a>
+            </Button>
+          </SettingsRow>
+
+          <SettingsRow label="Licenses" description="Review third-party software notices and license terms.">
+            <Button variant="outline" size="sm" asChild>
+              <a href="https://github.com/lucianmocan/scripture/blob/main/THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener noreferrer"><Scale />Third-party licenses<ExternalLink /></a>
             </Button>
           </SettingsRow>
 
