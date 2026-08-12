@@ -5,8 +5,8 @@ import { toPlainTree } from '@/lib/yjs/layout-store'
 import { collectByKind } from '@/lib/layout/tree-utils'
 import { getPageIds } from './manifest'
 
-// Mirrors app/print/[docId]/page.tsx's extractPlainText -- there's no live
-// ProseMirror doc here either, so walk the JSON the same way.
+// There's no live ProseMirror doc here (this runs outside the editor), so
+// walk the plain JSON content tree directly instead.
 function extractPlainText(node: JSONContent): string {
   if (node.text) return node.text
   if (node.content) return node.content.map(extractPlainText).join('')

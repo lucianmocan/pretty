@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ImagePlus, LoaderCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { uploadImageFile, isPdfFile } from '@/lib/images/client'
+import { useLocalImageSrc } from '@/lib/images/use-local-image-src'
 import type { ImageClipShape } from '@/lib/layout/types'
 import { ImageVisual } from '@/components/canvas/image-visual'
 
@@ -37,9 +38,10 @@ interface ImageBlockProps {
 }
 
 /** Upload UI when empty, the actual image once uploaded. The uploaded file
- * is stored server-side (see lib/images/store.ts + app/api/images) and
- * referenced by URL, not embedded as a data URI in the Yjs doc -- keeps the
- * collaborative doc small regardless of image size. */
+ * is stored in this browser's IndexedDB (see lib/images/local-store.ts) and
+ * referenced by a short `local:{id}` string, not embedded as a data URI in
+ * the Yjs doc -- keeps the collaborative doc small regardless of image
+ * size, and keeps every image entirely local (never uploaded anywhere). */
 export function ImageBlock({
   src,
   alt,
@@ -66,12 +68,16 @@ export function ImageBlock({
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // `src` is a `local:{id}` reference into this browser's IndexedDB (see
+  // lib/images/local-store.ts), not a directly-usable URL -- resolve it to
+  // an actual blob: URL before handing it to ImageVisual.
+  const resolvedSrc = useLocalImageSrc(src)
   // The <img> itself takes a moment to fetch/decode after `src` changes
   // (uploading a fresh photo, or a PDF page's freshly-converted SVG) --
   // without this, the block just sits blank with no sign anything is
   // happening until the browser finishes loading it.
   const [loaded, setLoaded] = useState(false)
-  useEffect(() => setLoaded(false), [src])
+  useEffect(() => setLoaded(false), [resolvedSrc])
 
   async function handleFile(file: File) {
     if (isPdfFile(file)) {
@@ -139,9 +145,15 @@ export function ImageBlock({
     </div>
   ) : undefined
 
+  // Still resolving the local:{id} reference to a blob: URL (see
+  // useLocalImageSrc) -- render just the loading overlay rather than an
+  // <img>/<image> with an empty src, which React 19 warns about (and which
+  // would briefly flash a broken-image icon anyway).
+  if (!resolvedSrc) return overlay ?? null
+
   return (
     <ImageVisual
-      src={src}
+      src={resolvedSrc}
       alt={alt}
       radius={radius}
       clipShape={clipShape}

@@ -27,7 +27,7 @@ import { GoogleFontStylesheet } from '@/components/editor/google-font-loader'
 import { textBlockStyle } from '@/lib/layout/text-style'
 import type { PageNumberSettings } from '@/lib/documents/manifest'
 import { CanvasPageNumber } from '@/components/canvas/canvas-page-number'
-import { ImageVisual } from '@/components/canvas/image-visual'
+import { LocalImageVisual } from '@/components/export/local-image-visual'
 
 export type ExportSyntaxSnapshots = Record<string, SyntaxStyleRange[]>
 
@@ -101,7 +101,7 @@ function renderNode(
       >
         <div className="scripture-leaf-content" style={contentOverflowStyle(node)}>
           {node.src && (
-            <ImageVisual
+            <LocalImageVisual
               src={node.src}
               alt={node.alt ?? ''}
               radius={node.radius ?? 0}

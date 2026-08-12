@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { deletePageResources } from '../lib/documents/delete-resources.ts'
 
-test('page cleanup removes unique images and server data before local IndexedDB', async () => {
+test('page cleanup removes unique images before local IndexedDB', async () => {
   const calls: string[] = []
   await deletePageResources('page-1', {
     async loadTree(pageId) {
@@ -11,17 +11,14 @@ test('page cleanup removes unique images and server data before local IndexedDB'
         id: 'root',
         kind: 'frame',
         children: [
-          { id: 'a', kind: 'image', src: '/api/images/one' },
-          { id: 'b', kind: 'frame', children: [{ id: 'c', kind: 'image', src: '/api/images/one' }] },
-          { id: 'd', kind: 'image', src: '/api/images/two', retainedSources: ['/api/images/old'] },
+          { id: 'a', kind: 'image', src: 'local:one' },
+          { id: 'b', kind: 'frame', children: [{ id: 'c', kind: 'image', src: 'local:one' }] },
+          { id: 'd', kind: 'image', src: 'local:two', retainedSources: ['local:old'] },
         ],
       }
     },
     async deleteImage(src) {
       calls.push(`image:${src}`)
-    },
-    async deleteServerPage(pageId) {
-      calls.push(`server:${pageId}`)
     },
     async deleteLocalPage(pageId) {
       calls.push(`local:${pageId}`)
@@ -30,31 +27,29 @@ test('page cleanup removes unique images and server data before local IndexedDB'
 
   assert.deepEqual(calls, [
     'load:page-1',
-    'image:/api/images/one',
-    'image:/api/images/two',
-    'image:/api/images/old',
-    'server:page-1',
+    'image:local:one',
+    'image:local:two',
+    'image:local:old',
     'local:page-1',
   ])
 })
 
-test('page cleanup keeps local data when remote cleanup fails', async () => {
+test('page cleanup keeps local page data when image cleanup fails', async () => {
   const calls: string[] = []
   await assert.rejects(
     deletePageResources('page-1', {
       async loadTree() {
-        return { id: 'root', kind: 'frame', children: [] }
+        return { id: 'root', kind: 'frame', children: [{ id: 'a', kind: 'image', src: 'local:one' }] }
       },
-      async deleteImage() {},
-      async deleteServerPage() {
-        calls.push('server')
-        throw new Error('offline')
+      async deleteImage() {
+        calls.push('image')
+        throw new Error('could not delete image')
       },
       async deleteLocalPage() {
         calls.push('local')
       },
     }),
-    /offline/
+    /could not delete image/
   )
-  assert.deepEqual(calls, ['server'])
+  assert.deepEqual(calls, ['image'])
 })

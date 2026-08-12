@@ -85,8 +85,7 @@ export function getUndoManager(id: string): Y.UndoManager {
 
 /**
  * Wipes a document's local IndexedDB state and drops it from the in-memory
- * cache. Does not touch the server-side .data export bridge -- callers
- * clean that up separately (see app/api/documents/[id]/route.ts DELETE).
+ * cache.
  */
 export async function deleteYDoc(id: string): Promise<void> {
   const entry = docs.get(id)

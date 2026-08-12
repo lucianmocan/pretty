@@ -1,3 +1,5 @@
+import { parseLocalImageSrc, getImageBlob } from './local-store'
+
 type BackgroundRemovalWorkerRequest = {
   id: string
   src: string
@@ -15,11 +17,14 @@ const workerScope = globalThis as unknown as {
 
 async function processRequest({ id, src }: BackgroundRemovalWorkerRequest): Promise<void> {
   try {
-    const sourceResponse = await fetch(src)
-    if (!sourceResponse.ok) {
-      throw new Error(`Could not read the image (${sourceResponse.status})`)
-    }
-    const source = await sourceResponse.blob()
+    // Images live only in this browser's IndexedDB (see local-store.ts) --
+    // never fetched over the network, from here or anywhere else. Note:
+    // this is the IMAGE's id, distinct from the outer `id` (this request's
+    // own tracking id, used below in every postMessage back to the caller).
+    const imageId = parseLocalImageSrc(src)
+    if (!imageId) throw new Error('Expected a local image reference.')
+    const source = await getImageBlob(imageId)
+    if (!source) throw new Error('The image could not be found in local storage.')
     const { removeBackground } = await import('@imgly/background-removal')
     const result = await removeBackground(source, {
       model: 'isnet_quint8',

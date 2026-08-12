@@ -20,10 +20,6 @@ const browserDeletionDependencies: PageDeletionDependencies = {
     return toPlainTree(doc)
   },
   deleteImage: deleteUploadedImage,
-  async deleteServerPage(pageId) {
-    const response = await fetch(`/api/documents/${pageId}`, { method: 'DELETE' })
-    if (!response.ok) throw new Error(`Could not remove saved page (${response.status})`)
-  },
   deleteLocalPage: deleteYDoc,
 }
 
