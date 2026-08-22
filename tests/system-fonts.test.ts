@@ -28,9 +28,9 @@ test('embeds only requested device fonts with their real MIME type and caches th
         return [
           {
             family: 'Alpha Serif',
-            fullName: 'Alpha Serif Bold Italic',
-            postscriptName: 'AlphaSerif-BoldItalic',
-            style: 'Bold Italic',
+            fullName: 'Alpha Serif Bold Condensed Oblique',
+            postscriptName: 'AlphaSerif-BoldCondensedOblique',
+            style: 'Bold Condensed Oblique',
             blob: async () => {
               blobCount += 1
               return new Blob([new Uint8Array([0, 1, 2, 3])], { type: 'font/otf' })
@@ -58,6 +58,7 @@ test('embeds only requested device fonts with their real MIME type and caches th
     assert.match(first ?? '', /font-family: 'Alpha Serif'/)
     assert.match(first ?? '', /font-weight: 700/)
     assert.match(first ?? '', /font-style: italic/)
+    assert.match(first ?? '', /font-stretch: 75%/)
     assert.match(first ?? '', /data:font\/otf;base64,AAECAw==/)
     assert.doesNotMatch(first ?? '', /Unused Sans/)
     assert.equal(queryCount, 1)

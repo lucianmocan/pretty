@@ -10,7 +10,11 @@ import {
 import { useLayoutTree } from '@/lib/use-layout-tree'
 import { blockFragmentName, getYDoc } from '@/lib/yjs/doc-store'
 import { useExportMargin } from '@/lib/app-preferences'
-import { loadGoogleFontCatalog, type GoogleFontFamily } from '@/lib/google-fonts'
+import {
+  googleFontsStylesheetUrl,
+  loadGoogleFontCatalog,
+  type GoogleFontFamily,
+} from '@/lib/google-fonts'
 import type { LayoutNode } from '@/lib/layout/types'
 import { plainTextFromDocument } from '@/lib/tiptap/syntax-document'
 import { tokenizeCodeInWorker } from '@/lib/shiki/client-tokenizer'
@@ -107,12 +111,18 @@ export const BrowserExportPage = memo(function BrowserExportPage({
   const fontCatalog = preparedIsCurrent ? prepared.fontCatalog : null
   const renderableSnapshots = syntaxSnapshots ?? (allowSyntaxFallback && syntaxError ? {} : null)
   const systemFontFamilies = new Set<string>()
+  const googleFontFamilies = new Set<string>()
   if (tree) {
     collectExportFontFamilies(tree, getYDoc(pageId).doc, 'system', systemFontFamilies)
+    collectExportFontFamilies(tree, getYDoc(pageId).doc, 'google', googleFontFamilies)
   }
   if (pageNumber?.settings.typography.fontSource === 'system') {
     systemFontFamilies.add(pageNumber.settings.typography.fontFamily)
   }
+  if (pageNumber?.settings.typography.fontSource === 'google') {
+    googleFontFamilies.add(pageNumber.settings.typography.fontFamily)
+  }
+  const googleFontStylesheet = googleFontsStylesheetUrl(googleFontFamilies, fontCatalog ?? undefined)
 
   return (
     <div
@@ -121,6 +131,7 @@ export const BrowserExportPage = memo(function BrowserExportPage({
       data-export-ready={Boolean(tree && renderableSnapshots)}
       data-export-error={!allowSyntaxFallback ? (syntaxError ?? undefined) : undefined}
       data-export-system-fonts={JSON.stringify([...systemFontFamilies])}
+      data-export-google-font-stylesheet={googleFontStylesheet ?? undefined}
     >
       {tree && renderableSnapshots && (
         <ExportDocument

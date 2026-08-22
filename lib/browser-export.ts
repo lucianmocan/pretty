@@ -25,6 +25,29 @@ function nextPaint(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
 }
 
+async function waitForGoogleFontStylesheet(href: string): Promise<void> {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    const links = Array.from(
+      document.head.querySelectorAll<HTMLLinkElement>('link[data-scripture-google-fonts]')
+    ).filter((link) => link.href === href)
+    for (const link of links) {
+      if (!link.sheet) continue
+      try {
+        // modern-screenshot reads these rules to discover and embed the font
+        // files. Merely having a visually applied cross-origin stylesheet is
+        // insufficient if its CSSOM remains opaque.
+        void link.sheet.cssRules
+        return
+      } catch {
+        // Another matching link may have been inserted without CORS by an
+        // older live surface; keep looking for the export-safe one.
+      }
+    }
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  }
+  throw new Error(`Timed out while loading Google Fonts for export: ${href}`)
+}
+
 export async function waitForExportSurfaces(
   rootRef: React.RefObject<HTMLDivElement | null>,
   pageIds: string[]
@@ -40,6 +63,10 @@ export async function waitForExportSurfaces(
         throw new Error(`Could not prepare syntax highlighting for export: ${failedPage.dataset.exportError}`)
       }
       if (pages.every((page) => page?.dataset.exportReady === 'true')) {
+        const googleFontStylesheets = new Set(
+          pages.flatMap((page) => page?.dataset.exportGoogleFontStylesheet ?? []).filter(Boolean)
+        )
+        await Promise.all([...googleFontStylesheets].map(waitForGoogleFontStylesheet))
         await document.fonts.ready
         await nextPaint()
         return pages as HTMLElement[]

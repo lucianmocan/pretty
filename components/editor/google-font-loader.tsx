@@ -35,6 +35,7 @@ export function GoogleFontLoader({ families }: { families: string[] }) {
     const link = document.createElement('link')
     link.rel = 'stylesheet'
     link.href = href
+    link.crossOrigin = 'anonymous'
     link.dataset.scriptureGoogleFonts = ''
     document.head.append(link)
     loadedStylesheets.add(href)
@@ -59,5 +60,12 @@ export function GoogleFontStylesheet({
 }) {
   const href = googleFontsStylesheetUrl(families, catalog)
   if (!href) return null
-  return <link rel="stylesheet" href={href} data-scripture-google-fonts="" />
+  return (
+    <link
+      rel="stylesheet"
+      href={href}
+      crossOrigin="anonymous"
+      data-scripture-google-fonts=""
+    />
+  )
 }

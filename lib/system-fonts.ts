@@ -79,6 +79,19 @@ function weightFromSystemFontStyle(style: string): number {
   return 400
 }
 
+function stretchFromSystemFontStyle(style: string): string {
+  const normalized = style.toLocaleLowerCase().replace(/[^a-z0-9]/g, '')
+  if (normalized.includes('ultracondensed')) return '50%'
+  if (normalized.includes('extracondensed')) return '62.5%'
+  if (normalized.includes('semicondensed')) return '87.5%'
+  if (normalized.includes('condensed') || normalized.includes('narrow')) return '75%'
+  if (normalized.includes('ultraexpanded')) return '200%'
+  if (normalized.includes('extraexpanded')) return '150%'
+  if (normalized.includes('semiexpanded')) return '112.5%'
+  if (normalized.includes('expanded') || normalized.includes('wide')) return '125%'
+  return '100%'
+}
+
 export function systemFontWeightsForFamily(
   catalog: SystemFontFamily[],
   family: string
@@ -158,10 +171,14 @@ export async function embedSystemFontFaces(families: string[]): Promise<string |
           const buffer = await blob.arrayBuffer()
           const base64 = arrayBufferToBase64(buffer)
           const weight = weightFromSystemFontStyle(font.style)
-          const style = font.style.toLocaleLowerCase().includes('italic') ? 'italic' : 'normal'
+          const normalizedStyle = font.style.toLocaleLowerCase()
+          const style = normalizedStyle.includes('italic') || normalizedStyle.includes('oblique')
+            ? 'italic'
+            : 'normal'
+          const stretch = stretchFromSystemFontStyle(font.style)
           const safeFamily = font.family.replaceAll('\\', '\\\\').replaceAll("'", "\\'")
           const mimeType = blob.type || 'application/octet-stream'
-          return `@font-face { font-family: '${safeFamily}'; font-weight: ${weight}; font-style: ${style}; src: url(data:${mimeType};base64,${base64}); }`
+          return `@font-face { font-family: '${safeFamily}'; font-weight: ${weight}; font-style: ${style}; font-stretch: ${stretch}; src: url(data:${mimeType};base64,${base64}); }`
         } catch {
           return null
         }
