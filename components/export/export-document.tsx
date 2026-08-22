@@ -22,7 +22,7 @@ import { ROOT_ID } from '@/lib/yjs/layout-store'
 import type { SyntaxStyleRange } from '@/lib/shiki/token-types'
 import { plainTextFromDocument, withSyntaxRanges } from '@/lib/tiptap/syntax-document'
 import { codeLineFontSizes } from '@/lib/tiptap/line-font-sizes'
-import { fontFamiliesInDocument, googleFontsInDocument, type GoogleFontFamily } from '@/lib/google-fonts'
+import { fontFamiliesInDocument, type GoogleFontFamily } from '@/lib/google-fonts'
 import { GoogleFontStylesheet } from '@/components/editor/google-font-loader'
 import { textBlockStyle } from '@/lib/layout/text-style'
 import type { PageNumberSettings } from '@/lib/documents/manifest'
@@ -234,7 +234,6 @@ export function ExportDocument({
   syntaxSnapshots = {},
   pageNumber,
   fontCatalog,
-  systemFontFaceCss,
 }: {
   tree: LayoutNode
   ydoc: Y.Doc
@@ -242,7 +241,6 @@ export function ExportDocument({
   syntaxSnapshots?: ExportSyntaxSnapshots
   pageNumber?: { number: number; settings: PageNumberSettings }
   fontCatalog?: GoogleFontFamily[]
-  systemFontFaceCss?: string | null
 }) {
   const googleFonts = new Set<string>()
   collectExportFontFamilies(tree, ydoc, 'google', googleFonts)
@@ -252,7 +250,6 @@ export function ExportDocument({
   return (
     <>
       <GoogleFontStylesheet families={[...googleFonts]} catalog={fontCatalog} />
-      {systemFontFaceCss && <style>{systemFontFaceCss}</style>}
       <CanvasRoot
         printMode
         pageSize={tree.pageSize}

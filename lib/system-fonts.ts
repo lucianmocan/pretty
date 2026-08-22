@@ -26,6 +26,8 @@ interface LocalFontPermissions {
 
 let cachedSystemFontCatalog: SystemFontFamily[] | null = null
 let cachedRawSystemFonts: LocalFontDataEntry[] | null = null
+let rawSystemFontsRequest: Promise<LocalFontDataEntry[]> | null = null
+const embeddedSystemFontFamilyRequests = new Map<string, Promise<string | null>>()
 
 export function getCachedSystemFontCatalog(): SystemFontFamily[] {
   return cachedSystemFontCatalog ?? []
@@ -97,14 +99,20 @@ export async function loadSystemFontCatalog(): Promise<SystemFontFamily[]> {
 
 function queryRawSystemFonts(): Promise<LocalFontDataEntry[]> {
   if (cachedRawSystemFonts) return Promise.resolve(cachedRawSystemFonts)
+  if (rawSystemFontsRequest) return rawSystemFontsRequest
   const queryLocalFonts = (window as LocalFontAccessWindow).queryLocalFonts
   if (typeof queryLocalFonts !== 'function') {
     throw new Error('Device fonts are not supported by this browser.')
   }
-  return queryLocalFonts.call(window).then((fonts) => {
-    cachedRawSystemFonts = fonts
-    return fonts
-  })
+  rawSystemFontsRequest = queryLocalFonts.call(window)
+    .then((fonts) => {
+      cachedRawSystemFonts = fonts
+      return fonts
+    })
+    .finally(() => {
+      rawSystemFontsRequest = null
+    })
+  return rawSystemFontsRequest
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -140,23 +148,28 @@ export async function embedSystemFontFaces(families: string[]): Promise<string |
   } catch {
     return null
   }
-  const matches = fonts.filter((font) => wanted.has(font.family))
-  if (matches.length === 0) return null
-
-  const faces = await Promise.all(
-    matches.map(async (font) => {
-      try {
-        const buffer = await (await font.blob()).arrayBuffer()
-        const base64 = arrayBufferToBase64(buffer)
-        const weight = weightFromSystemFontStyle(font.style)
-        const style = font.style.toLocaleLowerCase().includes('italic') ? 'italic' : 'normal'
-        const safeFamily = font.family.replaceAll('\\', '\\\\').replaceAll("'", "\\'")
-        return `@font-face { font-family: '${safeFamily}'; font-weight: ${weight}; font-style: ${style}; src: url(data:font/ttf;base64,${base64}); }`
-      } catch {
-        return null
-      }
-    })
-  )
+  const faces = await Promise.all([...wanted].map((family) => {
+    const cached = embeddedSystemFontFamilyRequests.get(family)
+    if (cached) return cached
+    const request = Promise.all(
+      fonts.filter((font) => font.family === family).map(async (font) => {
+        try {
+          const blob = await font.blob()
+          const buffer = await blob.arrayBuffer()
+          const base64 = arrayBufferToBase64(buffer)
+          const weight = weightFromSystemFontStyle(font.style)
+          const style = font.style.toLocaleLowerCase().includes('italic') ? 'italic' : 'normal'
+          const safeFamily = font.family.replaceAll('\\', '\\\\').replaceAll("'", "\\'")
+          const mimeType = blob.type || 'application/octet-stream'
+          return `@font-face { font-family: '${safeFamily}'; font-weight: ${weight}; font-style: ${style}; src: url(data:${mimeType};base64,${base64}); }`
+        } catch {
+          return null
+        }
+      })
+    ).then((familyFaces) => familyFaces.filter(Boolean).join('\n') || null)
+    embeddedSystemFontFamilyRequests.set(family, request)
+    return request
+  }))
   const cssText = faces.filter(Boolean).join('\n')
   return cssText.length > 0 ? cssText : null
 }

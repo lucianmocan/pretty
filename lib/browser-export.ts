@@ -3,6 +3,7 @@
 import { PDFDocument } from 'pdf-lib'
 import { domToBlob, waitUntilLoad } from 'modern-screenshot'
 import { exportRasterScale, type ExportQuality } from '@/lib/app-preferences'
+import { embedSystemFontFaces } from '@/lib/system-fonts'
 
 const CSS_PX_TO_PDF_POINTS = 72 / 96
 const MM_TO_PDF_POINTS = 72 / 25.4
@@ -62,6 +63,18 @@ async function capturePage(
   const heightPx = Math.ceil(canvasRoot.getBoundingClientRect().height)
   if (widthPx <= 0 || heightPx <= 0) throw new Error('The export page has no visible content.')
 
+  let systemFontFamilies: string[] = []
+  try {
+    const parsed = JSON.parse(surface.dataset.exportSystemFonts ?? '[]')
+    if (Array.isArray(parsed)) {
+      systemFontFamilies = parsed.filter((family): family is string => typeof family === 'string')
+    }
+  } catch {
+    // Malformed export metadata should not prevent the rest of the page from
+    // being captured with its normal font fallbacks.
+  }
+  const systemFontFaceCss = await embedSystemFontFaces(systemFontFamilies)
+
   const pngBlob = await domToBlob(canvasRoot, {
     type: 'image/png',
     scale: rasterScale,
@@ -72,6 +85,17 @@ async function capturePage(
       : getComputedStyle(canvasRoot.querySelector<HTMLElement>('.scripture-card') ?? canvasRoot).backgroundColor,
     font: { preferredFormat: 'woff2' },
     fetch: { requestInit: { cache: 'force-cache' } },
+    // Installed fonts resolve in the live DOM but not in the SVG image used
+    // by modern-screenshot. Add their faces to that isolated SVG only: putting
+    // the rules in the document would override the same system families on
+    // the editor and on every hidden page-preview surface.
+    onCreateForeignObjectSvg: systemFontFaceCss
+      ? (svg) => {
+          const style = svg.ownerDocument.createElementNS(svg.namespaceURI, 'style')
+          style.textContent = systemFontFaceCss
+          svg.insertBefore(style, svg.firstChild)
+        }
+      : undefined,
   })
   const png = new Uint8Array(await pngBlob.arrayBuffer())
 
