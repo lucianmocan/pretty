@@ -173,6 +173,7 @@ function setImageFields(map: Y.Map<unknown>, props: ImageBlockProps) {
   map.set('cropHeight', props.cropHeight)
   map.set('intrinsicWidth', props.intrinsicWidth)
   map.set('intrinsicHeight', props.intrinsicHeight)
+  map.set('aspectRatioLocked', props.aspectRatioLocked)
   map.set('retainedSources', props.retainedSources)
   map.set('opacity', props.opacity)
   map.set('brightness', props.brightness)
@@ -292,6 +293,7 @@ function buildYNode(plain: LayoutNode): Y.Map<unknown> {
       cropHeight: plain.cropHeight ?? DEFAULT_IMAGE_BLOCK_PROPS.cropHeight,
       intrinsicWidth: plain.intrinsicWidth ?? DEFAULT_IMAGE_BLOCK_PROPS.intrinsicWidth,
       intrinsicHeight: plain.intrinsicHeight ?? DEFAULT_IMAGE_BLOCK_PROPS.intrinsicHeight,
+      aspectRatioLocked: plain.aspectRatioLocked ?? DEFAULT_IMAGE_BLOCK_PROPS.aspectRatioLocked,
       retainedSources: plain.retainedSources ?? DEFAULT_IMAGE_BLOCK_PROPS.retainedSources,
       opacity: plain.opacity ?? DEFAULT_IMAGE_BLOCK_PROPS.opacity,
       brightness: plain.brightness ?? DEFAULT_IMAGE_BLOCK_PROPS.brightness,
@@ -573,7 +575,11 @@ export function cycleGutterLine(doc: Y.Doc, blockId: string, lineNumber: number,
   }, LAYOUT_MUTATION_ORIGIN)
 }
 
-export function updateImageProps(doc: Y.Doc, id: string, patch: Partial<ImageBlockProps>) {
+export function updateImageProps(
+  doc: Y.Doc,
+  id: string,
+  patch: Partial<ImageBlockProps> & { label?: string }
+) {
   const root = ensureRootFrame(doc)
   const node = findNodeMap(root, id)
   if (!node || node.get('kind') !== 'image') return

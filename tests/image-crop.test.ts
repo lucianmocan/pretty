@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  croppedImageAspectRatio,
   croppedImageFrameSize,
   imageSourceDimensions,
   normalizeImageCrop,
@@ -10,6 +11,17 @@ test('normalizes invalid persisted crop coordinates before rendering', () => {
   assert.deepEqual(
     normalizeImageCrop({ cropX: -3, cropY: Number.NaN, cropWidth: 0, cropHeight: 4 }),
     { cropX: 0, cropY: 0, cropWidth: 0.0001, cropHeight: 1 }
+  )
+})
+
+test('calculates the visible crop ratio instead of the full image ratio', () => {
+  assert.equal(
+    croppedImageAspectRatio({
+      naturalWidth: 1200,
+      naturalHeight: 800,
+      crop: { cropX: 0.25, cropY: 0, cropWidth: 0.5, cropHeight: 1 },
+    }),
+    0.75
   )
 })
 

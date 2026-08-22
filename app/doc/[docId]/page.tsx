@@ -55,7 +55,7 @@ import { deletePage } from '@/lib/documents/delete-service'
 import { duplicatePage } from '@/lib/documents/duplicate-page'
 import { resolvePageNumber } from '@/lib/documents/page-numbers'
 import { findNode, findParent } from '@/lib/layout/tree-utils'
-import { deleteUploadedImage, uploadImageFile, isPdfFile } from '@/lib/images/client'
+import { deleteUploadedImage, uploadImageFile, isPdfFile, baseFileName } from '@/lib/images/client'
 import { PdfPagePickerDialog, type PdfPickerRequest } from '@/components/canvas/pdf-page-picker-dialog'
 import { TEMPLATES, type Template } from '@/lib/templates'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -886,32 +886,34 @@ export default function DocumentEditorPage() {
 
   function handleRequestPdfPicker(frameId: string, nodeId: string, file: File) {
     if (!activePageId) return
-    setPdfPicker({ file, pageId: activePageId, frameId, nodeId })
+    setPdfPicker({ files: [file], pageId: activePageId, frameId, nodeId })
   }
 
   // Files dropped directly onto the canvas (not from the image block's own
   // file input) -- each image uploads immediately into a fresh image block;
-  // at most one PDF per drop opens the page picker. A PDF does not create a
-  // block until the user confirms at least one page, so cancel/failure leaves
-  // the document and undo history untouched.
+  // every PDF in the drop opens the page picker together (its tab strip lets
+  // the user switch between them), not just the first one. A PDF does not
+  // create a block until the user confirms at least one page, so cancel/
+  // failure leaves the document and undo history untouched.
   async function handleDropFiles(frameId: string, files: File[]) {
     if (!activePageId) return
     const doc = getYDoc(activePageId).doc
-    const pdfFile = files.find(isPdfFile)
+    const pdfFiles = files.filter(isPdfFile)
     const imageFiles = files.filter((file) => !isPdfFile(file) && file.type.startsWith('image/'))
 
     for (const file of imageFiles) {
       const id = addBlock(doc, frameId, 'image')
       try {
-        updateImageProps(doc, id, { src: await uploadImageFile(file) })
+        const name = baseFileName(file.name)
+        updateImageProps(doc, id, { src: await uploadImageFile(file), alt: name, label: name })
       } catch (err) {
         console.error('Failed to upload dropped image', err)
         removeNode(doc, id)
       }
     }
 
-    if (pdfFile) {
-      setPdfPicker({ file: pdfFile, pageId: activePageId, frameId, nodeId: null })
+    if (pdfFiles.length > 0) {
+      setPdfPicker({ files: pdfFiles, pageId: activePageId, frameId, nodeId: null })
     }
   }
 
@@ -919,22 +921,28 @@ export default function DocumentEditorPage() {
     pageId,
     frameId,
     nodeId,
-    svgUrls,
+    pages,
   }: {
     pageId: string
     frameId: string
     nodeId: string | null
-    svgUrls: string[]
+    pages: Array<{ url: string; alt: string }>
   }) {
-    if (svgUrls.length === 0) return
+    if (pages.length === 0) return
     const doc = getYDoc(pageId).doc
-    const [first, ...rest] = svgUrls
+    const [first, ...rest] = pages
     const firstId = nodeId ?? addBlock(doc, frameId, 'image')
-    updateImageProps(doc, firstId, { src: first })
+    const currentTree = toPlainTree(doc)
+    const currentFirst = currentTree ? findNode(currentTree, firstId) : null
+    updateImageProps(doc, firstId, {
+      src: first.url,
+      alt: first.alt,
+      ...(!currentFirst?.label?.trim() && { label: first.alt }),
+    })
     const insertedIds = [firstId]
-    for (const url of rest) {
+    for (const { url, alt } of rest) {
       const id = addBlock(doc, frameId, 'image')
-      updateImageProps(doc, id, { src: url })
+      updateImageProps(doc, id, { src: url, alt, label: alt })
       insertedIds.push(id)
     }
     setPdfPicker(null)
@@ -1352,7 +1360,6 @@ export default function DocumentEditorPage() {
                   onExportPng={() => handleExport('png')}
                   exporting={exporting}
                   exportError={exportError}
-                  onSetEditing={setEditingId}
                   pageNumberSettings={pageNumberSettings}
                   onPageNumberSettingsChange={handlePageNumberSettingsChange}
                   pageIds={pageIds}

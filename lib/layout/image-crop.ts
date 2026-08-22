@@ -31,6 +31,25 @@ export function hasImageCrop(crop: ImageCropRect): boolean {
   return crop.cropX !== 0 || crop.cropY !== 0 || crop.cropWidth !== 1 || crop.cropHeight !== 1
 }
 
+/** Aspect ratio of the visible crop, not the full source image. */
+export function croppedImageAspectRatio({
+  naturalWidth,
+  naturalHeight,
+  crop,
+}: {
+  naturalWidth: number
+  naturalHeight: number
+  crop: ImageCropRect
+}): number | null {
+  if (
+    !Number.isFinite(naturalWidth) || !Number.isFinite(naturalHeight) ||
+    naturalWidth <= 0 || naturalHeight <= 0
+  ) return null
+
+  const ratio = (naturalWidth * crop.cropWidth) / (naturalHeight * crop.cropHeight)
+  return Number.isFinite(ratio) && ratio > 0 ? ratio : null
+}
+
 /**
  * Gives a newly-cropped auto-sized image a frame based on its rendered size,
  * not the source file's raw pixels. That prevents a high-resolution upload

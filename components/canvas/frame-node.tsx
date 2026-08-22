@@ -26,6 +26,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ResizeHandles } from './resize-handles'
 import { Callout } from './callout'
 import { ImageBlock } from './image-block'
+import { baseFileName } from '@/lib/images/client'
 import type { PositionPatch, SizePatch } from '@/lib/layout/resize-geometry'
 import type { PageNumberSettings } from '@/lib/documents/manifest'
 import { CanvasPageNumber } from '@/components/canvas/canvas-page-number'
@@ -639,6 +640,9 @@ export function FrameNode({
       }}
       zoom={zoom}
       position={isCanvasChild ? { x: node.x ?? 0, y: node.y ?? 0 } : undefined}
+      preserveAspectRatio={
+        node.kind === 'image' && Boolean(node.src) && (node.aspectRatioLocked ?? true)
+      }
     />
   )
 
@@ -1206,6 +1210,7 @@ export function FrameNode({
             intrinsicHeight={node.intrinsicHeight ?? 0}
             frameWidth={renderedNode.width}
             frameHeight={renderedNode.height}
+            aspectRatioLocked={node.aspectRatioLocked ?? true}
             opacity={previewedImageEffects?.opacity ?? node.opacity ?? 100}
             brightness={previewedImageEffects?.brightness ?? node.brightness ?? 100}
             contrast={previewedImageEffects?.contrast ?? node.contrast ?? 100}
@@ -1213,15 +1218,20 @@ export function FrameNode({
             hue={previewedImageEffects?.hue ?? node.hue ?? 0}
             grayscale={previewedImageEffects?.grayscale ?? node.grayscale ?? 0}
             blur={previewedImageEffects?.blur ?? node.blur ?? 0}
-            onUploaded={(url) => updateImageProps(getYDoc(docId).doc, node.id, {
-              src: url,
-              cropX: 0,
-              cropY: 0,
-              cropWidth: 1,
-              cropHeight: 1,
-              intrinsicWidth: 0,
-              intrinsicHeight: 0,
-            })}
+            onUploaded={(url, fileName) => {
+              const name = baseFileName(fileName)
+              updateImageProps(getYDoc(docId).doc, node.id, {
+                src: url,
+                alt: name,
+                ...(!node.label?.trim() && { label: name }),
+                cropX: 0,
+                cropY: 0,
+                cropWidth: 1,
+                cropHeight: 1,
+                intrinsicWidth: 0,
+                intrinsicHeight: 0,
+              })
+            }}
             onPdfSelected={(file) => onRequestPdfPicker(parentId ?? ROOT_ID, node.id, file)}
           />
         ) : (
@@ -1230,7 +1240,8 @@ export function FrameNode({
             blockId={node.id}
             kind={node.kind}
             editable={isEditing}
-            focusOnMount={needsEditGate}
+            activeForFormatting={node.kind === 'text' && isSelected}
+            focusOnMount={needsEditGate && isEditing}
             language={node.language}
             theme={node.theme}
             fontFamily={node.fontFamily}

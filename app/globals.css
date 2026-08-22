@@ -1938,15 +1938,7 @@ html[data-scripture-panning] .scripture-node-controls {
 
 .scripture-font-picker-trigger {
   width: 100%;
-  justify-content: space-between;
-  border: 1px solid var(--border);
   font-family: var(--font-geist-sans), sans-serif;
-  font-size: 0.6875rem;
-  font-weight: 400;
-}
-
-.scripture-inspector .scripture-font-picker-trigger.scripture-font-picker-trigger {
-  font-size: 0.6875rem;
 }
 
 .scripture-font-picker-trigger span {
@@ -1980,21 +1972,27 @@ html[data-scripture-panning] .scripture-node-controls {
   font-size: 0.6875rem;
 }
 
+.scripture-font-picker-search [data-slot='input']:focus-visible {
+  border-color: var(--input);
+  box-shadow: none;
+}
+
 .scripture-font-picker-preview {
   display: flex;
   align-items: center;
-  height: 64px;
-  overflow: hidden;
+  min-height: 64px;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--muted) 50%, transparent);
+  background: transparent;
   font-size: 13px;
   line-height: 1.3;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .scripture-font-picker-list {
-  max-height: 285px;
+  max-height: 240px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -3518,12 +3516,34 @@ button.scripture-page-name {
   white-space: pre;
 }
 
+.scripture-pdf-picker-tab-count {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.125rem;
+  height: 1.125rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 0.625rem;
+  font-weight: 600;
+}
+
+/* No flex/overflow/min-height here -- the grid's own JSX ancestor
+   (`overflow-y-auto` on a `min-h-0 flex-1` column) owns the scrolling and
+   the height constraint instead. Giving the grid ITSELF a flexed,
+   scrolling box while its rows are auto-sized via aspect-ratio triggers a
+   real browser bug: auto-row tracks get sized against the constrained
+   viewport instead of the items' actual (aspect-ratio-derived) height,
+   so rows end up spaced closer together than they are tall and visibly
+   overlap once there's enough content to need scrolling. Keeping the grid
+   itself intrinsically sized (auto height) and letting a plain block
+   ancestor scroll avoids that miscomputation entirely. */
 .scripture-pdf-picker-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
   gap: 0.625rem;
-  max-height: 26rem;
-  overflow-y: auto;
   padding: 0.125rem;
 }
 
@@ -4453,12 +4473,11 @@ button.scripture-page-name {
 .scripture-doc-card {
   gap: 0;
   padding: 0;
-  transition: box-shadow 140ms ease, transform 140ms ease;
+  transition: box-shadow 140ms ease;
 }
 
 .scripture-doc-card:hover {
-  transform: translateY(-0.0625rem);
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 35%, transparent);
 }
 
 .scripture-doc-card-preview {

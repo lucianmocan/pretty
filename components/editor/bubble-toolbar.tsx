@@ -26,6 +26,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import type { BlockKind } from './block-editor'
 import { FontWeightPicker } from './font-weight-picker'
 import type { TextFontSource } from '@/lib/layout/types'
+import { runSelectionFormattingCommand } from '@/lib/tiptap/selection-formatting'
 
 export const COLOR_PRESETS = [
   '#111827', '#6b7280', '#d1d5db', '#ffffff',
@@ -352,6 +353,9 @@ export function InlineFormattingControls({
   state: InlineFormattingState
   surface?: 'inspector' | 'bubble'
 }) {
+  const runFormattingCommand = (command: Parameters<typeof runSelectionFormattingCommand>[1]) =>
+    runSelectionFormattingCommand(editor, command, surface === 'inspector')
+
   return (
     <>
       <FontWeightPicker
@@ -360,7 +364,9 @@ export function InlineFormattingControls({
         fontSource={state.fontSource}
         surface={surface}
         showTrigger={surface === 'bubble'}
-        onChange={(weight) => editor.chain().focus().unsetBold().setFontWeight(weight).run()}
+        onChange={(weight) => runFormattingCommand((chain) =>
+          chain.unsetBold().setFontWeight(weight)
+        )}
       >
         <Toggle
           variant="outline"
@@ -369,7 +375,9 @@ export function InlineFormattingControls({
           pressed={state.bold}
           onMouseDown={(event) => event.preventDefault()}
           onPressedChange={(pressed) => {
-            editor.chain().focus().unsetBold().setFontWeight(pressed ? 700 : 400).run()
+            runFormattingCommand((chain) =>
+              chain.unsetBold().setFontWeight(pressed ? 700 : 400)
+            )
           }}
           aria-label="Bold"
         >
@@ -382,7 +390,7 @@ export function InlineFormattingControls({
         size="sm"
         pressed={state.italic}
         onMouseDown={(event) => event.preventDefault()}
-        onPressedChange={() => editor.chain().focus().toggleItalic().run()}
+        onPressedChange={() => runFormattingCommand((chain) => chain.toggleItalic())}
         aria-label="Italic"
       >
         <Italic />
@@ -395,7 +403,7 @@ export function InlineFormattingControls({
             size="sm"
             pressed={state.underline}
             onMouseDown={(event) => event.preventDefault()}
-            onPressedChange={() => editor.chain().focus().toggleUnderline().run()}
+            onPressedChange={() => runFormattingCommand((chain) => chain.toggleUnderline())}
             aria-label="Underline"
           >
             <Underline />
@@ -406,7 +414,7 @@ export function InlineFormattingControls({
             size="sm"
             pressed={state.strike}
             onMouseDown={(event) => event.preventDefault()}
-            onPressedChange={() => editor.chain().focus().toggleStrike().run()}
+            onPressedChange={() => runFormattingCommand((chain) => chain.toggleStrike())}
             aria-label="Strikethrough"
           >
             <Strikethrough />
@@ -417,7 +425,7 @@ export function InlineFormattingControls({
             size="sm"
             pressed={state.code}
             onMouseDown={(event) => event.preventDefault()}
-            onPressedChange={() => editor.chain().focus().toggleCode().run()}
+            onPressedChange={() => runFormattingCommand((chain) => chain.toggleCode())}
             aria-label="Inline code"
           >
             <Code2 />
@@ -427,8 +435,8 @@ export function InlineFormattingControls({
             value={state.textColor}
             presets={TEXT_COLOR_PRESETS}
             allowAlpha={false}
-            onChange={(color) => editor.chain().setTextColor(color).run()}
-            onClear={() => editor.chain().unsetTextColor().run()}
+            onChange={(color) => runFormattingCommand((chain) => chain.setTextColor(color))}
+            onClear={() => runFormattingCommand((chain) => chain.unsetTextColor())}
           />
         </>
       )}
@@ -437,8 +445,8 @@ export function InlineFormattingControls({
         value={state.highlight}
         presets={HIGHLIGHT_PRESETS}
         allowAlpha
-        onChange={(color) => editor.chain().setHighlight(color).run()}
-        onClear={() => editor.chain().unsetHighlight().run()}
+        onChange={(color) => runFormattingCommand((chain) => chain.setHighlight(color))}
+        onClear={() => runFormattingCommand((chain) => chain.unsetHighlight())}
       />
       {kind === 'text' && <LinkPicker editor={editor} href={state.href} />}
     </>

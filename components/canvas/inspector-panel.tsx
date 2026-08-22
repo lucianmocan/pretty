@@ -52,6 +52,8 @@ import {
   Hexagon as HexagonIcon,
   Star as StarIcon,
   RectangleHorizontal,
+  Lock,
+  LockOpen,
 } from 'lucide-react'
 import type {
   LayoutNode,
@@ -90,7 +92,11 @@ import {
   useBackgroundRemovalState,
 } from '@/lib/images/background-removal-state'
 import { IMAGE_CLIP_SHAPES } from '@/lib/layout/image-shapes'
-import { croppedImageFrameSize, normalizeImageCrop } from '@/lib/layout/image-crop'
+import {
+  croppedImageAspectRatio,
+  croppedImageFrameSize,
+  normalizeImageCrop,
+} from '@/lib/layout/image-crop'
 import { normalizeImageEffects, type ImageEffectPreview } from '@/lib/layout/image-effects'
 import { ImageCropDialog, type CropRequest, type CropResult } from '@/components/canvas/image-crop-dialog'
 import {
@@ -159,6 +165,7 @@ import { useEditorRegistry } from '@/components/editor/editor-registry'
 import { IconField } from '@/components/ui/icon-field'
 import { RadiusIcon } from '@/components/ui/radius-icon'
 import { MIN_NODE_SIZE } from '@/lib/layout/resize-geometry'
+import { runSelectionFormattingCommand } from '@/lib/tiptap/selection-formatting'
 import { useGeometryActions, useGeometryRegistry } from '@/components/canvas/geometry-registry'
 import { geometryRecord, type NodeGeometry } from '@/lib/layout/geometry'
 import {
@@ -201,7 +208,6 @@ interface InspectorPanelProps {
   onExportPng: () => void
   exporting: 'pdf' | 'png' | null
   exportError: string | null
-  onSetEditing: (id: string | null) => void
   pageNumberSettings: PageNumberSettings
   onPageNumberSettingsChange: (settings: PageNumberSettings) => void
   pageIds: string[]
@@ -528,6 +534,7 @@ function SizeSection({
   node,
   docId,
   bare,
+  imageSrc,
 }: {
   node: LayoutNode
   docId: string
@@ -535,9 +542,17 @@ function SizeSection({
   // embedded inline in another section (the root Canvas section folds
   // Size into itself instead of giving it a separate header).
   bare?: boolean
+  // Resolved local/blob URL used only as a fallback if this image predates
+  // persisted intrinsic dimensions and has not rendered on the canvas yet.
+  imageSrc?: string
 }) {
   const { doc } = getYDoc(docId)
+  const { geometry } = useGeometryRegistry()
+  const [resettingRatio, setResettingRatio] = useState(false)
   const hasCustomSize = node.width != null || node.height != null
+  const isImage = node.kind === 'image'
+  const aspectRatioLocked = isImage && (node.aspectRatioLocked ?? true)
+  const measuredSize = geometry.get(node.id)
   const autoWidth =
     node.kind === 'code'
       ? DEFAULT_CODE_BLOCK_WIDTH
@@ -554,6 +569,89 @@ function SizeSection({
     updateNodeSize(doc, node.id, size)
     if (node.id === ROOT_ID) updateFrameProps(doc, node.id, { canvasSizeMode: 'custom' })
   }
+
+  const imageAspectRatio = () => {
+    if (!isImage) return null
+    const crop = normalizeImageCrop({
+      cropX: node.cropX,
+      cropY: node.cropY,
+      cropWidth: node.cropWidth,
+      cropHeight: node.cropHeight,
+    })
+    const storedRatio = croppedImageAspectRatio({
+      naturalWidth: node.intrinsicWidth ?? 0,
+      naturalHeight: node.intrinsicHeight ?? 0,
+      crop,
+    })
+    if (storedRatio) return storedRatio
+
+    const element = Array.from(document.querySelectorAll<HTMLElement>('[data-node-id]'))
+      .find((candidate) => candidate.dataset.nodeId === node.id)
+    const image = element?.querySelector<HTMLImageElement>('img.scripture-image')
+    if (image?.naturalWidth && image.naturalHeight) {
+      return croppedImageAspectRatio({
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        crop,
+      })
+    }
+    const viewBox = element?.querySelector<SVGSVGElement>('svg.scripture-image')?.viewBox.baseVal
+    return viewBox?.width && viewBox.height ? viewBox.width / viewBox.height : null
+  }
+
+  const changeWidth = (width: number) => {
+    const ratio = aspectRatioLocked ? imageAspectRatio() : null
+    updateSize(ratio ? { width, height: width / ratio } : { width })
+  }
+
+  const changeHeight = (height: number) => {
+    const ratio = aspectRatioLocked ? imageAspectRatio() : null
+    updateSize(ratio ? { width: height * ratio, height } : { height })
+  }
+
+  const resetImageRatio = async () => {
+    if (!isImage || resettingRatio) return
+    setResettingRatio(true)
+    try {
+      let ratio = imageAspectRatio()
+      if (!ratio && imageSrc) {
+        const natural = await new Promise<{ width: number; height: number } | null>((resolve) => {
+          const image = new Image()
+          image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight })
+          image.onerror = () => resolve(null)
+          image.src = imageSrc
+        })
+        if (natural) {
+          ratio = croppedImageAspectRatio({
+            naturalWidth: natural.width,
+            naturalHeight: natural.height,
+            crop: normalizeImageCrop({
+              cropX: node.cropX,
+              cropY: node.cropY,
+              cropWidth: node.cropWidth,
+              cropHeight: node.cropHeight,
+            }),
+          })
+          updateImageProps(doc, node.id, {
+            intrinsicWidth: natural.width,
+            intrinsicHeight: natural.height,
+          })
+        }
+      }
+      if (!ratio) return
+
+      const element = Array.from(document.querySelectorAll<HTMLElement>('[data-node-id]'))
+        .find((candidate) => candidate.dataset.nodeId === node.id)
+      if (node.width == null && node.height != null) {
+        updateSize({ width: node.height * ratio, height: node.height })
+      } else {
+        const width = node.width ?? element?.offsetWidth
+        if (width && width > 0) updateSize({ width, height: width / ratio })
+      }
+    } finally {
+      setResettingRatio(false)
+    }
+  }
   const content = (
     <>
       {!bare && <h3>Size</h3>}
@@ -561,18 +659,43 @@ function SizeSection({
         <IconField
           icon={<MoveHorizontal size={14} />}
           title="Width"
-          value={node.width ?? autoWidth}
+          value={node.width ?? Math.round(measuredSize?.width ?? autoWidth)}
           min={MIN_NODE_SIZE}
-          onChange={(width) => updateSize({ width })}
+          onChange={changeWidth}
         />
         <IconField
           icon={<MoveVertical size={14} />}
           title="Height"
-          value={node.height ?? autoHeight}
+          value={node.height ?? Math.round(measuredSize?.height ?? autoHeight)}
           min={MIN_NODE_SIZE}
-          onChange={(height) => updateSize({ height })}
+          onChange={changeHeight}
         />
       </div>
+      {isImage && (
+        <div className="grid grid-cols-2 gap-2">
+          <Toggle
+            variant="outline"
+            size="sm"
+            className="w-full justify-start data-[state=on]:border-primary/30 data-[state=on]:bg-primary/10 data-[state=on]:text-primary"
+            pressed={aspectRatioLocked}
+            aria-label={aspectRatioLocked ? 'Unlock image aspect ratio' : 'Lock image aspect ratio'}
+            title={aspectRatioLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
+            onPressedChange={(pressed) => updateImageProps(doc, node.id, { aspectRatioLocked: pressed })}
+          >
+            {aspectRatioLocked ? <Lock /> : <LockOpen />}
+            {aspectRatioLocked ? 'Locked ratio' : 'Lock ratio'}
+          </Toggle>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full justify-start"
+            disabled={!node.src || resettingRatio}
+            onClick={() => void resetImageRatio()}
+          >
+            <RotateCcw /> {resettingRatio ? 'Resetting…' : 'Reset ratio'}
+          </Button>
+        </div>
+      )}
       {hasCustomSize && (
         <Button variant="ghost" size="sm" onClick={() => {
           updateNodeSize(doc, node.id, { width: null, height: null })
@@ -1082,13 +1205,15 @@ function TextTypographyControls({
 
   return (
     <>
-      <div className="scripture-inspector-stack">
+      <div className="scripture-inspector-row">
         <Label>Font</Label>
-        <FontPicker
-          value={{ family: summary.family, source: summary.source }}
-          mixed={summary.familyMixed}
-          onChange={(font) => applyFont(font.family, font.source)}
-        />
+        <div className="w-36 min-w-0">
+          <FontPicker
+            value={{ family: summary.family, source: summary.source }}
+            mixed={summary.familyMixed}
+            onChange={(font) => applyFont(font.family, font.source)}
+          />
+        </div>
       </div>
       <div className="scripture-text-metrics" aria-label="Text size, line height, and letter spacing">
         <div className="scripture-text-metric">
@@ -1356,14 +1481,14 @@ function PageNumberStyleView({
 
 function TextContentControls({
   blockId,
-  onSetEditing,
   fontFamily,
   fontSource,
+  typographyControls,
 }: {
   blockId: string
-  onSetEditing: (id: string) => void
   fontFamily: string
   fontSource: TextFontSource
+  typographyControls: ReactNode
 }) {
   const registry = useEditorRegistry()
   const editor = useSyncExternalStore(
@@ -1431,15 +1556,7 @@ function TextContentControls({
 
   if (!editor || !state) {
     return (
-      <div className="scripture-inspector-stack">
-        <Label>Content formatting</Label>
-        <Button variant="outline" size="sm" onClick={() => onSetEditing(blockId)}>
-          Edit text to format
-        </Button>
-        <p className="scripture-inspector-hint">
-          Enter text editing, then place the caret or select paragraphs to format them here.
-        </p>
-      </div>
+      <p className="scripture-inspector-hint">Preparing formatting controls…</p>
     )
   }
 
@@ -1460,9 +1577,7 @@ function TextContentControls({
   const listItemType = state.list === 'task' ? 'taskItem' : 'listItem'
 
   return (
-    <div className="scripture-inspector-section">
-      <h3>Content formatting</h3>
-
+    <>
       <div className="scripture-inspector-row">
         <Label>Paragraph</Label>
         <Select value={state.block} onValueChange={setBlock}>
@@ -1476,6 +1591,8 @@ function TextContentControls({
           </SelectContent>
         </Select>
       </div>
+
+      {typographyControls}
 
       <div className="scripture-inspector-stack">
         <Label>Style</Label>
@@ -1558,21 +1675,25 @@ function TextContentControls({
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button variant="destructive" size="sm" className="w-full justify-start">
-              <RemoveFormatting /> Clear selection formatting
+              <RemoveFormatting /> Clear formatting
             </Button>
           </AlertDialogTrigger>
           <AlertDialogContent size="sm">
             <AlertDialogHeader>
-              <AlertDialogTitle>Clear selection formatting?</AlertDialogTitle>
+              <AlertDialogTitle>Clear formatting?</AlertDialogTitle>
               <AlertDialogDescription>
-                This removes inline styles and resets paragraph formatting for the current selection. You can undo it afterward.
+                This removes inline styles and resets paragraph formatting for selected text, or the full block when no text is selected. You can undo it afterward.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction
                 variant="destructive"
-                onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}
+                onClick={() => runSelectionFormattingCommand(
+                  editor,
+                  (chain) => chain.unsetAllMarks().clearNodes(),
+                  true
+                )}
               >
                 Clear formatting
               </AlertDialogAction>
@@ -1580,7 +1701,7 @@ function TextContentControls({
           </AlertDialogContent>
         </AlertDialog>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -1596,7 +1717,6 @@ export function InspectorPanel({
   onExportPng,
   exporting,
   exportError,
-  onSetEditing,
   pageNumberSettings,
   onPageNumberSettingsChange,
   pageIds,
@@ -2352,7 +2472,14 @@ export function InspectorPanel({
               <Input
                 value={node.alt ?? ''}
                 placeholder="Describe the image"
-                onChange={(e) => updateImageProps(doc, node.id, { alt: e.target.value })}
+                onChange={(e) => updateImageProps(doc, node.id, {
+                  alt: e.target.value,
+                  // Legacy images used alt text as a live Layers-panel
+                  // fallback. Snapshot that old default into a real label
+                  // on the first alt edit so the two fields become
+                  // independent without visibly renaming the layer.
+                  ...(!node.label?.trim() && { label: node.alt?.trim() || 'Image' }),
+                })}
               />
             </div>
             {node.src && (
@@ -2480,7 +2607,7 @@ export function InspectorPanel({
           </div>
 
           <Separator />
-          <SizeSection node={node} docId={docId} />
+          <SizeSection node={node} docId={docId} imageSrc={cropDialogSrc} />
         </CardContent>
         <ImageCropDialog
           request={cropRequest?.nodeId === node.id ? cropRequest : null}
@@ -2501,28 +2628,30 @@ export function InspectorPanel({
         <CardContent className="flex flex-col gap-5">
           <div className="scripture-inspector-section">
             <h3>Text block</h3>
-            <TextTypographyControls
-              docId={docId}
+            <TextContentControls
               blockId={node.id}
-              defaults={{
-                family: node.textFontFamily ?? DEFAULT_TEXT_BLOCK_PROPS.textFontFamily,
-                source: node.textFontSource ?? DEFAULT_TEXT_BLOCK_PROPS.textFontSource,
-                size: textFontSize,
-                lineHeight: textLineHeight,
-                letterSpacing: textLetterSpacing,
-              }}
+              fontFamily={node.textFontFamily ?? DEFAULT_TEXT_BLOCK_PROPS.textFontFamily}
+              fontSource={node.textFontSource ?? DEFAULT_TEXT_BLOCK_PROPS.textFontSource}
+              typographyControls={(
+                <>
+                  <TextTypographyControls
+                    docId={docId}
+                    blockId={node.id}
+                    defaults={{
+                      family: node.textFontFamily ?? DEFAULT_TEXT_BLOCK_PROPS.textFontFamily,
+                      source: node.textFontSource ?? DEFAULT_TEXT_BLOCK_PROPS.textFontSource,
+                      size: textFontSize,
+                      lineHeight: textLineHeight,
+                      letterSpacing: textLetterSpacing,
+                    }}
+                  />
+                  <p className="scripture-inspector-hint">
+                    Typography applies to selected text when there is a selection, or to the full block otherwise. Text and code fonts stay independent.
+                  </p>
+                </>
+              )}
             />
-            <p className="scripture-inspector-hint">
-              Typography applies to selected text when there is a selection, or to the full block otherwise. Text and code fonts stay independent.
-            </p>
           </div>
-          <Separator />
-          <TextContentControls
-            blockId={node.id}
-            onSetEditing={onSetEditing}
-            fontFamily={node.textFontFamily ?? DEFAULT_TEXT_BLOCK_PROPS.textFontFamily}
-            fontSource={node.textFontSource ?? DEFAULT_TEXT_BLOCK_PROPS.textFontSource}
-          />
           <Separator />
           <SizeSection node={node} docId={docId} />
         </CardContent>

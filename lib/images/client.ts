@@ -7,6 +7,13 @@ export function isPdfFile(file: File): boolean {
   return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
 }
 
+/** Strips the extension from a filename for use as a freshly-uploaded
+ * block's default `alt` text (the Layers panel labels image blocks by
+ * `alt`, see layers-panel.tsx) -- "Diagram.png" -> "Diagram". */
+export function baseFileName(name: string): string {
+  return name.replace(/\.[^./]+$/, '')
+}
+
 /** Client-side counterpart to lib/images/local-store.ts -- deletes an
  * uploaded image via its stored `local:{id}` reference. Images live only in
  * this browser's IndexedDB; nothing here ever touches a server. */

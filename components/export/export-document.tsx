@@ -114,6 +114,7 @@ function renderNode(
               intrinsicHeight={node.intrinsicHeight}
               frameWidth={node.width}
               frameHeight={node.height}
+              aspectRatioLocked={node.aspectRatioLocked ?? true}
               opacity={node.opacity}
               brightness={node.brightness}
               contrast={node.contrast}

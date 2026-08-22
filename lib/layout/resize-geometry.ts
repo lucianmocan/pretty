@@ -55,6 +55,7 @@ export function resizeGeometry({
   delta,
   trackPosition,
   minimum = MIN_NODE_SIZE,
+  aspectRatio,
 }: {
   axis: ResizeAxis
   startSize: NodeSize
@@ -62,12 +63,57 @@ export function resizeGeometry({
   delta: { x: number; y: number }
   trackPosition: boolean
   minimum?: number
+  aspectRatio?: number
 }): ResizeResult {
   const growsEast = axis === 'e' || axis === 'ne' || axis === 'se'
   const growsWest = axis === 'w' || axis === 'nw' || axis === 'sw'
   const growsSouth = axis === 's' || axis === 'se' || axis === 'sw'
   const growsNorth = axis === 'n' || axis === 'ne' || axis === 'nw'
   const position = startPosition ?? { x: 0, y: 0 }
+
+  if (aspectRatio != null && Number.isFinite(aspectRatio) && aspectRatio > 0) {
+    const horizontalTarget = startSize.width + (growsEast ? delta.x : growsWest ? -delta.x : 0)
+    const verticalTarget = startSize.height + (growsSouth ? delta.y : growsNorth ? -delta.y : 0)
+    let desiredWidth: number
+
+    if ((growsEast || growsWest) && (growsSouth || growsNorth)) {
+      // Project a corner drag onto the source-ratio diagonal so either
+      // pointer axis can lead without a jump when the drag is imperfect.
+      const ratioSquared = aspectRatio ** 2
+      desiredWidth = (
+        horizontalTarget * ratioSquared + verticalTarget * aspectRatio
+      ) / (ratioSquared + 1)
+    } else if (growsEast || growsWest) {
+      desiredWidth = horizontalTarget
+    } else {
+      desiredWidth = verticalTarget * aspectRatio
+    }
+
+    const minimumWidth = Math.max(minimum, minimum * aspectRatio)
+    let maximumWidth = Number.POSITIVE_INFINITY
+    if (trackPosition && growsWest) maximumWidth = Math.min(maximumWidth, position.x + startSize.width)
+    if (trackPosition && growsNorth) {
+      maximumWidth = Math.min(maximumWidth, (position.y + startSize.height) * aspectRatio)
+    }
+
+    // If a near edge begins closer to the parent origin than the normal
+    // minimum permits, the origin wins (matching the unconstrained path).
+    const effectiveMinimum = Math.min(minimumWidth, maximumWidth)
+    const width = Math.min(maximumWidth, Math.max(effectiveMinimum, Math.round(desiredWidth)))
+    const height = Math.max(0, Math.round(width / aspectRatio))
+    const nextPosition: PositionPatch = {}
+    if (trackPosition && growsWest) {
+      nextPosition.x = Math.max(0, Math.round(position.x + startSize.width - width))
+    }
+    if (trackPosition && growsNorth) {
+      nextPosition.y = Math.max(0, Math.round(position.y + startSize.height - height))
+    }
+
+    return {
+      size: { width, height },
+      position: Object.keys(nextPosition).length > 0 ? nextPosition : undefined,
+    }
+  }
 
   const size: SizePatch = {}
   const nextPosition: PositionPatch = {}

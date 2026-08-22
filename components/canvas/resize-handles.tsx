@@ -23,6 +23,7 @@ interface ResizeHandlesProps {
   // Stored geometry uses unscaled content units; pointer coordinates and
   // getBoundingClientRect() are in screen units.
   zoom: number
+  preserveAspectRatio?: boolean
 }
 
 interface DragState {
@@ -31,12 +32,23 @@ interface DragState {
   startClientX: number
   startClientY: number
   startSize: NodeSize
+  aspectRatio?: number
   moved: boolean
 }
 
 const EDGE_HIT_SIZE = 12
 const CORNER_HIT_SIZE = 18
 const DRAG_THRESHOLD = 2
+
+function mediaAspectRatio(target: HTMLElement): number | undefined {
+  const image = target.querySelector<HTMLImageElement>('img.scripture-image')
+  if (image?.naturalWidth && image.naturalHeight) return image.naturalWidth / image.naturalHeight
+
+  const svg = target.querySelector<SVGSVGElement>('svg.scripture-image')
+  const viewBox = svg?.viewBox.baseVal
+  if (viewBox?.width && viewBox.height) return viewBox.width / viewBox.height
+  return undefined
+}
 
 /**
  * Figma-style border resizing. Live geometry stays local to the node while
@@ -50,6 +62,7 @@ export function ResizeHandles({
   onCancel,
   position,
   zoom,
+  preserveAspectRatio = false,
 }: ResizeHandlesProps) {
   const dragState = useRef<DragState | null>(null)
   const activeCleanupRef = useRef<(() => void) | null>(null)
@@ -63,7 +76,7 @@ export function ResizeHandles({
       if (!e.isPrimary || e.button !== 0 || dragState.current) return
       const el = targetRef.current
       const rect = el?.getBoundingClientRect()
-      if (!rect) return
+      if (!el || !rect) return
 
       e.preventDefault()
       e.stopPropagation()
@@ -78,6 +91,9 @@ export function ResizeHandles({
           width: rect.width / safeZoom,
           height: rect.height / safeZoom,
         },
+        aspectRatio: preserveAspectRatio
+          ? mediaAspectRatio(el) ?? (rect.width > 0 && rect.height > 0 ? rect.width / rect.height : undefined)
+          : undefined,
         moved: false,
       }
 
@@ -96,6 +112,7 @@ export function ResizeHandles({
           startPosition: position,
           delta: { x: screenDx / safeZoom, y: screenDy / safeZoom },
           trackPosition: position !== undefined,
+          aspectRatio: state.aspectRatio,
         })
       }
 

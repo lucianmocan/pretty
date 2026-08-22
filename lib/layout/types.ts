@@ -178,6 +178,10 @@ export interface LayoutNode {
   // when a cropped frame is resized to a different shape.
   intrinsicWidth?: number
   intrinsicHeight?: number
+  // Keeps resize gestures and Inspector dimension edits on the source/crop
+  // aspect ratio. Older documents omit this and intentionally default to
+  // locked so image and rendered-PDF frames continue to match their media.
+  aspectRatioLocked?: boolean
   // Prior uploads still reachable through Yjs undo. They remain owned by
   // this page until the page/document resource cleanup can delete them.
   retainedSources?: string[]
@@ -276,6 +280,7 @@ export interface ImageBlockProps {
   cropHeight: number
   intrinsicWidth: number
   intrinsicHeight: number
+  aspectRatioLocked: boolean
   retainedSources: string[]
   opacity: number
   brightness: number
@@ -297,6 +302,7 @@ export const DEFAULT_IMAGE_BLOCK_PROPS: ImageBlockProps = {
   cropHeight: 1,
   intrinsicWidth: 0,
   intrinsicHeight: 0,
+  aspectRatioLocked: true,
   retainedSources: [],
   opacity: 100,
   brightness: 100,

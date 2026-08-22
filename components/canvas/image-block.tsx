@@ -23,6 +23,7 @@ interface ImageBlockProps {
   intrinsicHeight: number
   frameWidth?: number | null
   frameHeight?: number | null
+  aspectRatioLocked: boolean
   opacity: number
   brightness: number
   contrast: number
@@ -30,7 +31,7 @@ interface ImageBlockProps {
   hue: number
   grayscale: number
   blur: number
-  onUploaded: (url: string) => void
+  onUploaded: (url: string, fileName: string) => void
   // A PDF needs page selection first (see PdfPagePickerDialog), so it never
   // goes through handleFile/onUploaded directly -- this hands it up instead
   // of uploading it as-is.
@@ -55,6 +56,7 @@ export function ImageBlock({
   intrinsicHeight,
   frameWidth,
   frameHeight,
+  aspectRatioLocked,
   opacity,
   brightness,
   contrast,
@@ -87,7 +89,7 @@ export function ImageBlock({
     setUploading(true)
     setError(null)
     try {
-      onUploaded(await uploadImageFile(file))
+      onUploaded(await uploadImageFile(file), file.name)
     } catch (err) {
       console.error('Image upload failed', err)
       setError('Upload failed')
@@ -165,6 +167,7 @@ export function ImageBlock({
       intrinsicHeight={intrinsicHeight}
       frameWidth={frameWidth}
       frameHeight={frameHeight}
+      aspectRatioLocked={aspectRatioLocked}
       opacity={opacity}
       brightness={brightness}
       contrast={contrast}

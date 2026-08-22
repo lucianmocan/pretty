@@ -113,65 +113,53 @@ export const FormatMark = Mark.create<FormatOptions>({
   },
 
   addCommands() {
-    // format has two independent attrs on one mark, so every command merges
-    // with whatever the selection already has instead of clobbering the other.
+    // Tiptap's setMark merges these partial attributes into every existing
+    // format mark in the range. Passing only the changed attribute is
+    // important for mixed selections: attributes on neighboring runs must
+    // not be replaced by whatever happens to be under the selection head.
     return {
       setHighlight:
         (color: string) =>
-        ({ editor, commands }) =>
-          commands.setMark(this.name, { ...editor.getAttributes(this.name), highlight: color }),
+        ({ commands }) => commands.setMark(this.name, { highlight: color }),
       unsetHighlight:
         () =>
-        ({ editor, commands }) =>
-          commands.setMark(this.name, { ...editor.getAttributes(this.name), highlight: null }),
+        ({ commands }) => commands.setMark(this.name, { highlight: null }),
       setFontSize:
         (size: string) =>
-        ({ editor, commands }) =>
-          commands.setMark(this.name, { ...editor.getAttributes(this.name), fontSize: size }),
+        ({ commands }) => commands.setMark(this.name, { fontSize: size }),
       unsetFontSize:
         () =>
-        ({ editor, commands }) =>
-          commands.setMark(this.name, { ...editor.getAttributes(this.name), fontSize: null }),
+        ({ commands }) => commands.setMark(this.name, { fontSize: null }),
       setFontWeight:
         (weight: number) =>
-        ({ editor, commands }) =>
-          commands.setMark(this.name, { ...editor.getAttributes(this.name), fontWeight: weight }),
+        ({ commands }) => commands.setMark(this.name, { fontWeight: weight }),
       unsetFontWeight:
         () =>
-        ({ editor, commands }) =>
-          commands.setMark(this.name, { ...editor.getAttributes(this.name), fontWeight: null }),
+        ({ commands }) => commands.setMark(this.name, { fontWeight: null }),
       setFontFamily:
         (family: string, source: TextFontSource) =>
-        ({ editor, commands }) =>
-          commands.setMark(this.name, { ...editor.getAttributes(this.name), fontFamily: family, fontSource: source }),
+        ({ commands }) => commands.setMark(this.name, { fontFamily: family, fontSource: source }),
       unsetFontFamily:
         () =>
-        ({ editor, commands }) =>
-          commands.setMark(this.name, { ...editor.getAttributes(this.name), fontFamily: null, fontSource: null }),
+        ({ commands }) => commands.setMark(this.name, { fontFamily: null, fontSource: null }),
       setLineHeight:
         (height: string) =>
-        ({ editor, commands }) =>
-          commands.setMark(this.name, { ...editor.getAttributes(this.name), lineHeight: height }),
+        ({ commands }) => commands.setMark(this.name, { lineHeight: height }),
       unsetLineHeight:
         () =>
-        ({ editor, commands }) =>
-          commands.setMark(this.name, { ...editor.getAttributes(this.name), lineHeight: null }),
+        ({ commands }) => commands.setMark(this.name, { lineHeight: null }),
       setLetterSpacing:
         (spacing: string) =>
-        ({ editor, commands }) =>
-          commands.setMark(this.name, { ...editor.getAttributes(this.name), letterSpacing: spacing }),
+        ({ commands }) => commands.setMark(this.name, { letterSpacing: spacing }),
       unsetLetterSpacing:
         () =>
-        ({ editor, commands }) =>
-          commands.setMark(this.name, { ...editor.getAttributes(this.name), letterSpacing: null }),
+        ({ commands }) => commands.setMark(this.name, { letterSpacing: null }),
       setTextColor:
         (color: string) =>
-        ({ editor, commands }) =>
-          commands.setMark(this.name, { ...editor.getAttributes(this.name), textColor: color }),
+        ({ commands }) => commands.setMark(this.name, { textColor: color }),
       unsetTextColor:
         () =>
-        ({ editor, commands }) =>
-          commands.setMark(this.name, { ...editor.getAttributes(this.name), textColor: null }),
+        ({ commands }) => commands.setMark(this.name, { textColor: null }),
     }
   },
 })

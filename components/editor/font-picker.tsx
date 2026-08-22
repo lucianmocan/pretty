@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronsUpDown, LoaderCircle, Monitor, Search } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Check, ChevronDownIcon, LoaderCircle, Monitor, Search } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { selectTriggerStyles } from '@/components/ui/select'
 import { GoogleFontLoader } from './google-font-loader'
 import { NotificationChip } from '@/components/ui/notification-chip'
+import { cn } from '@/lib/utils'
 import {
   LOCAL_TEXT_FONT,
   loadGoogleFontCatalog,
@@ -235,17 +236,17 @@ export function FontPicker({
       )}
       <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
-        <Button
+        <button
           type="button"
-          variant="outline"
-          size="sm"
-          className="scripture-font-picker-trigger"
+          data-slot="select-trigger"
+          data-size="sm"
+          className={cn(selectTriggerStyles, 'scripture-font-picker-trigger')}
           onMouseDown={(event) => event.preventDefault()}
           aria-label={mixed ? 'Font: Mixed' : `Font: ${value.family}`}
         >
           <span>{mixed ? 'Mixed' : value.family}</span>
-          <ChevronsUpDown />
-        </Button>
+          <ChevronDownIcon className="pointer-events-none size-4 text-muted-foreground" />
+        </button>
       </PopoverTrigger>
       <PopoverContent className="scripture-font-picker" align="start" sideOffset={8}>
         <GoogleFontLoader families={previewFont.source === 'google' ? [previewFont.family] : []} />
@@ -293,7 +294,6 @@ export function FontPicker({
                   : <Monitor className="scripture-font-picker-row-icon" aria-hidden="true" />}
             </button>
           )}
-          {!normalizedQuery && !mixed && row(value.family, value.source, undefined, 'selected')}
           {!normalizedQuery && visibleRecents.length > 0 && (
             <div className="scripture-font-picker-label">Recent</div>
           )}

@@ -229,7 +229,7 @@ test('trackpad zoom stays anchored at the right scroll boundary', async ({ page 
 
 test('a free-form code block can be re-entered after switching syntax theme', async ({ page }) => {
   await openFreshDocument(page)
-  await page.getByRole('button', { name: 'Free-form' }).click()
+  await page.getByRole('radio', { name: 'Free-form' }).check()
   await page.getByRole('button', { name: 'Add code block' }).click()
 
   const codeBlock = page.locator('.scripture-code-leaf')
@@ -339,4 +339,56 @@ test('device fonts can be granted, searched, and applied to text', async ({ page
     element.style.getPropertyValue('--scripture-text-font')
   )
   expect(resolvedFont).toBe("'Studio Sans', var(--font-geist-sans), sans-serif")
+})
+
+test('inspector formatting targets the whole text block unless text is selected', async ({ page }) => {
+  await openFreshDocument(page)
+  await page.locator('.scripture-canvas-toolbar').getByRole('button', { name: 'Add text block' }).click()
+
+  const editor = page.locator('.scripture-text-editor')
+  await expect(editor).toBeFocused()
+  await page.keyboard.type('Alpha Beta')
+
+  const inspectorBold = page.locator('.scripture-inspector').getByRole('button', { name: 'Bold' })
+  await inspectorBold.click()
+  await expect(editor.locator('span[data-format]')).toHaveText('Alpha Beta')
+  await expect(editor.locator('span[data-format]')).toHaveCSS('font-weight', '700')
+
+  await expect(editor).toBeFocused()
+  for (let index = 0; index < 4; index += 1) await page.keyboard.press('Shift+ArrowLeft')
+  await inspectorBold.click()
+
+  const formattedRuns = editor.locator('span[data-format]')
+  await expect(formattedRuns).toHaveCount(2)
+  await expect(formattedRuns.nth(0)).toHaveText('Alpha ')
+  await expect(formattedRuns.nth(0)).toHaveCSS('font-weight', '700')
+  await expect(formattedRuns.nth(1)).toHaveText('Beta')
+  await expect(formattedRuns.nth(1)).toHaveCSS('font-weight', '400')
+})
+
+test('a selected free-form text block exposes formatting before text-editing', async ({ page }) => {
+  await openFreshDocument(page)
+  await page.getByRole('radio', { name: 'Free-form' }).check()
+  await page.locator('.scripture-canvas-toolbar').getByRole('button', { name: 'Add text block' }).click()
+
+  const editor = page.locator('.scripture-text-editor')
+  await expect(editor).toBeFocused()
+  await page.keyboard.type('Format without editing')
+  await page.keyboard.press('Escape')
+
+  await expect(editor).toHaveAttribute('contenteditable', 'false')
+  await expect(page.getByRole('button', { name: 'Edit text to format' })).toHaveCount(0)
+  await expect(page.getByText('Content formatting', { exact: true })).toHaveCount(0)
+
+  const textSection = page.locator('.scripture-inspector-section').filter({
+    has: page.getByRole('button', { name: 'Text block' }),
+  })
+  await expect(textSection.locator('label').first()).toHaveText('Paragraph')
+
+  const inspectorBold = page.locator('.scripture-inspector').getByRole('button', { name: 'Bold' })
+  await expect(inspectorBold).toBeVisible()
+  await inspectorBold.click()
+  await expect(editor.locator('span[data-format]')).toHaveText('Format without editing')
+  await expect(editor.locator('span[data-format]')).toHaveCSS('font-weight', '700')
+  await expect(editor).toHaveAttribute('contenteditable', 'false')
 })

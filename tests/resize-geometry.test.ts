@@ -73,3 +73,46 @@ test('minimum size keeps the far edge anchored', () => {
     }
   )
 })
+
+test('locked east resize changes both dimensions at the media ratio', () => {
+  assert.deepEqual(
+    resizeGeometry({
+      axis: 'e',
+      startSize: { width: 200, height: 100 },
+      delta: { x: 50, y: 80 },
+      trackPosition: false,
+      aspectRatio: 2,
+    }),
+    { size: { width: 250, height: 125 }, position: undefined }
+  )
+})
+
+test('locked north-west resize preserves the ratio and opposite corner', () => {
+  assert.deepEqual(
+    resizeGeometry({
+      axis: 'nw',
+      startSize: { width: 200, height: 100 },
+      startPosition: { x: 50, y: 30 },
+      delta: { x: -20, y: -10 },
+      trackPosition: true,
+      aspectRatio: 2,
+    }),
+    {
+      size: { width: 220, height: 110 },
+      position: { x: 30, y: 20 },
+    }
+  )
+})
+
+test('locked resize enforces the minimum on both dimensions', () => {
+  assert.deepEqual(
+    resizeGeometry({
+      axis: 'e',
+      startSize: { width: 200, height: 100 },
+      delta: { x: -500, y: 0 },
+      trackPosition: false,
+      aspectRatio: 2,
+    }),
+    { size: { width: 64, height: 32 }, position: undefined }
+  )
+})

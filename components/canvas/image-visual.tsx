@@ -21,6 +21,7 @@ interface ImageVisualProps {
   intrinsicHeight?: number | null
   frameWidth?: number | null
   frameHeight?: number | null
+  aspectRatioLocked?: boolean
   opacity?: number
   brightness?: number
   contrast?: number
@@ -48,6 +49,7 @@ export function ImageVisual({
   intrinsicHeight,
   frameWidth,
   frameHeight,
+  aspectRatioLocked = true,
   opacity,
   brightness,
   contrast,
@@ -80,7 +82,12 @@ export function ImageVisual({
         {/* eslint-disable-next-line @next/next/no-img-element -- exact same-origin source is required for export parity */}
         <img
           className="scripture-image"
-          style={effectStyles.image}
+          style={{
+            ...effectStyles.image,
+            // An unlocked image intentionally follows its independently
+            // resized frame instead of letterboxing at the source ratio.
+            objectFit: aspectRatioLocked ? undefined : 'fill',
+          }}
           src={src}
           alt={alt}
           onLoad={onLoad}
@@ -111,7 +118,7 @@ export function ImageVisual({
         className="scripture-image scripture-image-cropped-svg"
         style={effectStyles.image}
         viewBox={viewBox}
-        preserveAspectRatio="xMidYMid slice"
+        preserveAspectRatio={aspectRatioLocked ? 'xMidYMid slice' : 'none'}
         role={alt ? 'img' : undefined}
         aria-label={alt || undefined}
         aria-hidden={alt ? undefined : true}

@@ -57,6 +57,9 @@ export interface BlockEditorProps {
   // false means "selected but not text-editing" and uses the lightweight
   // static renderer, so dragging moves the block instead of placing a cursor.
   editable?: boolean
+  // Canvas text blocks keep a read-only editor mounted while selected so the
+  // Inspector can format the whole block without first entering text-editing.
+  activeForFormatting?: boolean
   focusOnMount?: boolean
   language?: string
   theme?: string
@@ -574,6 +577,6 @@ function InteractiveBlockEditor({
  * text-edit mode; flex-flow blocks remain continuously editable. */
 export const BlockEditor = memo(function BlockEditor(props: BlockEditorProps) {
   const editable = props.editable ?? true
-  if (!editable) return <StaticBlockEditor {...props} />
+  if (!editable && !props.activeForFormatting) return <StaticBlockEditor {...props} />
   return <InteractiveBlockEditor {...props} />
 })
