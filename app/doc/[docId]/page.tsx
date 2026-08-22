@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { LoaderCircle, Plus } from 'lucide-react'
+import { select } from 'd3-selection'
+import { zoom as createZoom, zoomIdentity } from 'd3-zoom'
 import { FrameNode } from '@/components/canvas/frame-node'
 import { CanvasRoot } from '@/components/canvas/canvas-root'
 import { InspectorPanel } from '@/components/canvas/inspector-panel'
@@ -63,13 +65,49 @@ import {
   useBackgroundRemovalOperations,
 } from '@/lib/images/background-removal-state'
 import type { ImageEffectPreview } from '@/lib/layout/image-effects'
+import { calculateCanvasCentering } from '@/lib/layout/canvas-centering'
+import { clampCanvasZoom, MAX_CANVAS_ZOOM, MIN_CANVAS_ZOOM } from '@/lib/layout/canvas-zoom'
 
-const ZOOM_MIN = 0.1
-const ZOOM_MAX = 2
 const ZOOM_STEP = 1.05
 
-function clampZoom(z: number) {
-  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z))
+// Whether the scaled card is actually bigger than the area's padded content
+// box. Deliberately geometry-based (rects/padding) rather than
+// area.scrollWidth/Height: with `safe center` on a flex item that fits,
+// browsers report scrollWidth as clientWidth + 2*scrollLeft, mirroring
+// whatever scroll offset happens to be applied instead of measuring real
+// overflow.
+function canvasCentering(area: HTMLElement, scaleBox: HTMLElement) {
+  const style = getComputedStyle(area)
+  const horizontalPadding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+  const verticalPadding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+  const availableWidth = area.clientWidth - horizontalPadding
+  const availableHeight = area.clientHeight - verticalPadding
+  const boxRect = scaleBox.getBoundingClientRect()
+  return calculateCanvasCentering({
+    renderedWidth: boxRect.width,
+    renderedHeight: boxRect.height,
+    availableWidth,
+    availableHeight,
+  })
+}
+
+function elementOverflows(area: HTMLElement, scaleBox: HTMLElement) {
+  return canvasCentering(area, scaleBox).overflows
+}
+
+function centerElementInArea(area: HTMLElement, scaleBox: HTMLElement) {
+  const centering = canvasCentering(area, scaleBox)
+  // A fitting flex item is centered by `safe center` at scroll offset zero.
+  // When minimum zoom leaves an item overflowing, `safe center` deliberately
+  // falls back to start alignment, so center the residual overflow ourselves.
+  area.scrollLeft = centering.scrollLeft
+  area.scrollTop = centering.scrollTop
+}
+
+function applyCanvasOffset(scaleBox: HTMLElement, offset: { x: number; y: number }) {
+  if (Math.abs(offset.x) < 0.001) offset.x = 0
+  if (Math.abs(offset.y) < 0.001) offset.y = 0
+  scaleBox.style.translate = offset.x === 0 && offset.y === 0 ? '' : `${offset.x}px ${offset.y}px`
 }
 
 export default function DocumentEditorPage() {
@@ -110,6 +148,7 @@ export default function DocumentEditorPage() {
   const [zoom, setZoom] = useState(1)
   const zoomRef = useRef(1)
   const previousZoomRef = useRef(1)
+  const pendingZoomAnchorRef = useRef<{ x: number; y: number; canvasX: number; canvasY: number } | null>(null)
   const [customizeOpen, setCustomizeOpen] = useState(false)
   const [showStarterPicker, setShowStarterPicker] = useState(false)
   const [applyingTemplate, setApplyingTemplate] = useState(false)
@@ -130,6 +169,7 @@ export default function DocumentEditorPage() {
   const naturalSizeRef = useRef<{ width: number; height: number } | null>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const canvasAreaRef = useRef<HTMLDivElement>(null)
+  const canvasOffsetRef = useRef({ x: 0, y: 0 })
   const exportSurfaceRootRef = useRef<HTMLDivElement>(null)
   // Whether this page has already been auto-fit once -- without this guard,
   // the auto-fit effect below (keyed on naturalSize) would refight the
@@ -292,84 +332,133 @@ export default function DocumentEditorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePageId, Boolean(tree)])
 
-  // React's JSX onWheel prop attaches wheel listeners as passive (the DOM's
-  // own recommended default, for scroll-perf reasons) -- calling
-  // preventDefault() from inside one is silently ignored, which would let
-  // Ctrl/Cmd+scroll ALSO trigger the browser's native page-zoom alongside
-  // our own canvas zoom. A manually-attached, explicitly non-passive
-  // listener is the only way to actually suppress that.
+  // d3-zoom owns trackpad gesture recognition and wheel normalization. The
+  // canvas still owns rendering and scroll-based panning, so each d3 scale
+  // update is bridged into React using one immutable cursor/canvas point for
+  // the full gesture. This prevents rounded DOM geometry from feeding back
+  // into the next wheel event while keeping button zoom independent.
   useEffect(() => {
     const el = canvasAreaRef.current
     if (!el) return
-    let accumulatedZoomDelta = 0
+    const selection = select(el)
+    let gestureActive = false
+    let gestureAnchor: { x: number; y: number; canvasX: number; canvasY: number } | null = null
+    let queuedZoom = zoomRef.current
     let zoomFrame: number | null = null
-    let scrollFrame: number | null = null
-    let pointerX = 0
-    let pointerY = 0
-    const onWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey && !e.metaKey) {
-        if (e.deltaX !== 0 || e.deltaY !== 0) setPanHintVisible(false)
+
+    // This capture listener runs before d3's wheel listener. Synchronize its
+    // internal scale with zooms made by the controls, then capture the point
+    // under the cursor before any layout has changed.
+    const prepareWheelGesture = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) {
+        if (event.deltaX !== 0 || event.deltaY !== 0) setPanHintVisible(false)
         return
       }
-      e.preventDefault()
+      event.preventDefault()
       fitModeRef.current = false
-      pointerX = e.clientX
-      pointerY = e.clientY
-      // d3-zoom's battle-tested wheel normalization: account for the unit
-      // the browser reports, boost synthetic ctrl-wheel trackpad pinches,
-      // then apply the result as an exponent of two below.
-      accumulatedZoomDelta +=
-        -e.deltaY *
-        (e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 0.05 : e.deltaMode ? 1 : 0.002) *
-        (e.ctrlKey || e.metaKey ? 10 : 1)
-      if (zoomFrame != null) return
-      zoomFrame = requestAnimationFrame(() => {
-        const delta = accumulatedZoomDelta
-        accumulatedZoomDelta = 0
-        zoomFrame = null
-        // Exponential scaling makes equal trackpad movement feel equal at
-        // every zoom level. Small pinch deltas stay small instead of every
-        // wheel event causing the old fixed 20% jump.
+      if (gestureActive) return
+      gestureActive = true
+      selection.property('__zoom', zoomIdentity.scale(zoomRef.current))
+      const scaleBox = viewportRef.current?.parentElement
+      const boxRect = scaleBox?.getBoundingClientRect()
+      if (scaleBox && boxRect) {
         const current = zoomRef.current
-        const next = clampZoom(current * 2 ** delta)
-        const scaleBox = viewportRef.current?.parentElement
-        const boxRect = scaleBox?.getBoundingClientRect()
-        const anchorX = boxRect ? (pointerX - boxRect.left) / current : 0
-        const anchorY = boxRect ? (pointerY - boxRect.top) / current : 0
-        zoomRef.current = next
-        setZoom(next)
-
-        // Preserve the canvas-space point under the gesture. This is the
-        // part that makes pinch zoom feel like Figma instead of making the
-        // document jump toward its transform origin on every update.
-        if (scaleBox && boxRect && next !== current) {
-          if (scrollFrame != null) cancelAnimationFrame(scrollFrame)
-          scrollFrame = requestAnimationFrame(() => {
-            scrollFrame = null
-            const nextRect = scaleBox.getBoundingClientRect()
-            el.scrollLeft += nextRect.left + anchorX * next - pointerX
-            el.scrollTop += nextRect.top + anchorY * next - pointerY
-          })
+        gestureAnchor = {
+          x: event.clientX,
+          y: event.clientY,
+          canvasX: (event.clientX - boxRect.left) / current,
+          canvasY: (event.clientY - boxRect.top) / current,
         }
-      })
+      }
     }
-    el.addEventListener('wheel', onWheel, { passive: false })
+
+    const zoomBehavior = createZoom<HTMLDivElement, unknown>()
+      .filter((event) => {
+        const wheelEvent = event as WheelEvent
+        return wheelEvent.type === 'wheel' && (wheelEvent.ctrlKey || wheelEvent.metaKey)
+      })
+      .touchable(() => false)
+      .scaleExtent([MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM])
+      .wheelDelta((event) =>
+        -event.deltaY *
+        (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 0.05 : event.deltaMode ? 1 : 0.002) *
+        (event.ctrlKey || event.metaKey ? 10 : 1)
+      )
+      .on('zoom.scripture', (event) => {
+        queuedZoom = clampCanvasZoom(event.transform.k)
+        if (zoomFrame != null) return
+        zoomFrame = requestAnimationFrame(() => {
+          zoomFrame = null
+          const next = queuedZoom
+          if (gestureAnchor && next !== zoomRef.current) pendingZoomAnchorRef.current = gestureAnchor
+          zoomRef.current = next
+          setZoom(next)
+        })
+      })
+      .on('end.scripture', () => {
+        gestureActive = false
+        gestureAnchor = null
+      })
+
+    el.addEventListener('wheel', prepareWheelGesture, { capture: true, passive: false })
+    selection.call(zoomBehavior)
     return () => {
-      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('wheel', prepareWheelGesture, { capture: true })
+      selection.on('.zoom', null)
       if (zoomFrame != null) cancelAnimationFrame(zoomFrame)
-      if (scrollFrame != null) cancelAnimationFrame(scrollFrame)
     }
   }, [activePageId, treeMounted])
 
+  // Apply anchoring after React has committed the new transform and scale-box
+  // dimensions. Scroll absorbs the correction on overflowing axes. A fitting
+  // axis cannot scroll, so preserve its remainder as a subpixel visual offset
+  // instead of silently falling back to center-anchored zoom. As scroll range
+  // becomes available, fold that offset back into scroll without moving the
+  // canvas on screen.
+  useLayoutEffect(() => {
+    const anchor = pendingZoomAnchorRef.current
+    if (!anchor) return
+    pendingZoomAnchorRef.current = null
+    const area = canvasAreaRef.current
+    const scaleBox = area?.querySelector<HTMLElement>('.scripture-canvas-scale-box')
+    if (!area || !scaleBox) return
+
+    const offset = canvasOffsetRef.current
+    const scrollLeftBeforeRebase = area.scrollLeft
+    const scrollTopBeforeRebase = area.scrollTop
+    area.scrollLeft = scrollLeftBeforeRebase - offset.x
+    area.scrollTop = scrollTopBeforeRebase - offset.y
+    offset.x += area.scrollLeft - scrollLeftBeforeRebase
+    offset.y += area.scrollTop - scrollTopBeforeRebase
+    applyCanvasOffset(scaleBox, offset)
+
+    const nextRect = scaleBox.getBoundingClientRect()
+    const errorX = nextRect.left + anchor.canvasX * zoom - anchor.x
+    const errorY = nextRect.top + anchor.canvasY * zoom - anchor.y
+    const scrollLeftBeforeCorrection = area.scrollLeft
+    const scrollTopBeforeCorrection = area.scrollTop
+    area.scrollLeft += errorX
+    area.scrollTop += errorY
+    offset.x -= errorX - (area.scrollLeft - scrollLeftBeforeCorrection)
+    offset.y -= errorY - (area.scrollTop - scrollTopBeforeCorrection)
+    applyCanvasOffset(scaleBox, offset)
+  }, [zoom])
+
   // The hint is useful only once the scaled canvas is larger than its
   // viewport. Observe both boxes because either zoom/layout changes or a
-  // sidebar/window resize can cross that boundary.
+  // sidebar/window resize can cross that boundary. Compared against the
+  // scaled card's own rect rather than area.scrollWidth/Height: with
+  // `safe center` on a non-overflowing flex item, browsers report
+  // scrollWidth as clientWidth + 2*scrollLeft, mirroring whatever scroll
+  // offset happens to be applied rather than measuring real overflow --
+  // which falsely flagged "overflowing" (and popped this hint) on every
+  // open even when the card fit perfectly.
   useEffect(() => {
     const area = canvasAreaRef.current
     const scaleBox = area?.querySelector<HTMLElement>('.scripture-canvas-scale-box')
     if (!area || !scaleBox) return
     const updateOverflow = () => {
-      const next = area.scrollWidth > area.clientWidth + 1 || area.scrollHeight > area.clientHeight + 1
+      const next = elementOverflows(area, scaleBox)
       if (next === canvasOverflowsRef.current) return
       canvasOverflowsRef.current = next
       setCanvasOverflows(next)
@@ -397,9 +486,9 @@ export default function DocumentEditorPage() {
     if (zoom <= previousZoom) return
     const frame = requestAnimationFrame(() => {
       const area = canvasAreaRef.current
-      if (!area) return
-      const overflows = area.scrollWidth > area.clientWidth + 1 || area.scrollHeight > area.clientHeight + 1
-      if (overflows) setPanHintVisible(true)
+      const scaleBox = area?.querySelector<HTMLElement>('.scripture-canvas-scale-box')
+      if (!area || !scaleBox) return
+      if (elementOverflows(area, scaleBox)) setPanHintVisible(true)
     })
     return () => cancelAnimationFrame(frame)
   }, [zoom])
@@ -734,6 +823,8 @@ export default function DocumentEditorPage() {
     const startY = e.clientY
     const startLeft = area.scrollLeft
     const startTop = area.scrollTop
+    const startOffset = { ...canvasOffsetRef.current }
+    const scaleBox = viewportRef.current?.parentElement
     let moved = false
     area.dataset.panning = 'true'
     document.documentElement.dataset.scripturePanning = 'true'
@@ -748,6 +839,12 @@ export default function DocumentEditorPage() {
       }
       area.scrollLeft = startLeft - dx
       area.scrollTop = startTop - dy
+      if (scaleBox) {
+        const offset = canvasOffsetRef.current
+        offset.x = startOffset.x + dx - (startLeft - area.scrollLeft)
+        offset.y = startOffset.y + dy - (startTop - area.scrollTop)
+        applyCanvasOffset(scaleBox, offset)
+      }
     }
     const finishPointer = (event: PointerEvent) => {
       if (event.pointerId !== pointerId) return
@@ -846,15 +943,51 @@ export default function DocumentEditorPage() {
 
   function handleZoomIn() {
     fitModeRef.current = false
-    setZoom((z) => clampZoom(z * ZOOM_STEP))
+    prepareCenterZoomAnchor()
+    setZoom((z) => clampCanvasZoom(z * ZOOM_STEP))
   }
   function handleZoomOut() {
     fitModeRef.current = false
-    setZoom((z) => clampZoom(z / ZOOM_STEP))
+    prepareCenterZoomAnchor()
+    setZoom((z) => clampCanvasZoom(z / ZOOM_STEP))
+  }
+  function handleZoomChange(nextZoom: number) {
+    fitModeRef.current = false
+    prepareCenterZoomAnchor()
+    setZoom(clampCanvasZoom(nextZoom))
   }
   function handleZoomReset() {
     fitModeRef.current = false
+    prepareCenterZoomAnchor()
     setZoom(1)
+  }
+
+  function prepareCenterZoomAnchor() {
+    const area = canvasAreaRef.current
+    const scaleBox = viewportRef.current?.parentElement
+    if (!area || !scaleBox) {
+      pendingZoomAnchorRef.current = null
+      return
+    }
+    const areaRect = area.getBoundingClientRect()
+    const boxRect = scaleBox.getBoundingClientRect()
+    const x = areaRect.left + area.clientLeft + area.clientWidth / 2
+    const y = areaRect.top + area.clientTop + area.clientHeight / 2
+    const current = zoomRef.current
+    pendingZoomAnchorRef.current = {
+      x,
+      y,
+      canvasX: (x - boxRect.left) / current,
+      canvasY: (y - boxRect.top) / current,
+    }
+  }
+
+  function resetCanvasOffset() {
+    const offset = canvasOffsetRef.current
+    offset.x = 0
+    offset.y = 0
+    const scaleBox = viewportRef.current?.parentElement
+    if (scaleBox) applyCanvasOffset(scaleBox, offset)
   }
 
   function handleOpenCustomize(tab: 'syntax' | 'chrome') {
@@ -901,27 +1034,28 @@ export default function DocumentEditorPage() {
   function fitCanvasToViewport() {
     const area = canvasAreaRef.current
     const size = naturalSizeRef.current
-    if (!area || !size || size.width === 0 || size.height === 0) return
+    if (!area || !size || size.width === 0 || size.height === 0) return false
+    pendingZoomAnchorRef.current = null
+    resetCanvasOffset()
     const style = getComputedStyle(area)
     const horizontalPadding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
     const verticalPadding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
     const availableWidth = area.clientWidth - horizontalPadding
     const availableHeight = area.clientHeight - verticalPadding
-    if (availableWidth <= 0 || availableHeight <= 0) return
+    if (availableWidth <= 0 || availableHeight <= 0) return false
     // "Fit" may shrink an oversized canvas, but it must never silently turn
     // into magnification. Authored dimensions should be shown at 100% on a
     // roomy viewport; zooming above that is always an explicit user action.
-    setZoom(clampZoom(Math.min(1, availableWidth / size.width, availableHeight / size.height)))
-    // Scroll centering needs the NEW zoom's layout to have actually
-    // committed first (scrollWidth/Height below depend on it) -- a
-    // requestAnimationFrame callback runs after React's render/commit but
-    // before the next paint, so by then the DOM reflects the new zoom.
+    setZoom(clampCanvasZoom(Math.min(1, availableWidth / size.width, availableHeight / size.height)))
+    // Wait for the new scale-box dimensions before centering. A fitting item
+    // uses zero-offset `safe center`; any residual rounding overflow is
+    // centered from the measured box geometry instead of using
+    // scrollWidth, whose value can mirror a stale offset for fitting items.
     requestAnimationFrame(() => {
-      const el = canvasAreaRef.current
-      if (!el) return
-      el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2
-      el.scrollTop = (el.scrollHeight - el.clientHeight) / 2
+      const scaleBox = area.querySelector<HTMLElement>('.scripture-canvas-scale-box')
+      if (scaleBox) centerElementInArea(area, scaleBox)
     })
+    return true
   }
 
   function handleRecenter() {
@@ -936,13 +1070,37 @@ export default function DocumentEditorPage() {
     autoFitDoneRef.current = false
     fitModeRef.current = true
     naturalSizeRef.current = null
+    pendingZoomAnchorRef.current = null
+    resetCanvasOffset()
   }, [activePageId])
 
   useEffect(() => {
     if (autoFitDoneRef.current || !naturalSizeRef.current) return
-    autoFitDoneRef.current = true
     fitModeRef.current = true
-    fitCanvasToViewport()
+    // The canvas area's own layout (sidebar widths, web fonts, etc.) may not
+    // have settled into its final size yet on the very first attempt, in
+    // which case fitCanvasToViewport bails out with no effect. Retry across
+    // a few frames instead of giving up after one, so the page doesn't load
+    // permanently off-center.
+    let attempts = 0
+    let frame: number | null = null
+    const tryFit = () => {
+      if (autoFitDoneRef.current) return
+      if (fitCanvasToViewport()) {
+        autoFitDoneRef.current = true
+        return
+      }
+      attempts += 1
+      if (attempts < 10) frame = requestAnimationFrame(tryFit)
+    }
+    tryFit()
+    return () => {
+      if (frame != null) cancelAnimationFrame(frame)
+    }
+    // The fit function reads current DOM/ref values; naturalSize is the
+    // deliberate trigger. Depending on the render-created function would
+    // restart this retry loop on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [naturalSize])
 
   async function handleExport(format: 'pdf' | 'png') {
@@ -1079,7 +1237,7 @@ export default function DocumentEditorPage() {
                             // Selection/hover strokes live inside this transformed
                             // tree. Counter-scale their local thickness so they
                             // remain one physical screen pixel at every zoom.
-                            '--scripture-canvas-stroke': `${1 / Math.max(zoom, 0.01)}px`,
+                            '--scripture-canvas-stroke': `${1 / Math.max(zoom, MIN_CANVAS_ZOOM)}px`,
                           } as CSSProperties
                         }
                       >
@@ -1120,7 +1278,7 @@ export default function DocumentEditorPage() {
                     zoom={zoom}
                     onZoomIn={handleZoomIn}
                     onZoomOut={handleZoomOut}
-                    onReset={handleZoomReset}
+                    onZoomChange={handleZoomChange}
                     onRecenter={handleRecenter}
                   />
                   <CanvasToolbar

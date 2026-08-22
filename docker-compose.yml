@@ -5,6 +5,8 @@ services:
       - "3000:3000"
     volumes:
       - .:/app
+      # The image entrypoint refreshes this persistent volume whenever the
+      # bind-mounted package-lock.json changes.
       - node_modules:/app/node_modules
       - next_cache:/app/.next
     environment:

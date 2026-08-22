@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import type { CalloutAnnotation } from '@/lib/layout/types'
 import { Button } from '@/components/ui/button'
+import { MIN_CANVAS_ZOOM } from '@/lib/layout/canvas-zoom'
 
 interface CalloutProps {
   docId: string
@@ -68,7 +69,7 @@ export function Callout({ callout, onChange, onRemove, zoom }: CalloutProps) {
     const compute = (ev: PointerEvent) => {
       const s = dragState.current
       if (!s || ev.pointerId !== s.pointerId) return null
-      const scale = Math.max(zoom, 0.01)
+      const scale = Math.max(zoom, MIN_CANVAS_ZOOM)
       const scrollDx = ((s.scrollElement?.scrollLeft ?? 0) - s.scrollLeft) / scale
       const scrollDy = ((s.scrollElement?.scrollTop ?? 0) - s.scrollTop) / scale
       const element = calloutRef.current

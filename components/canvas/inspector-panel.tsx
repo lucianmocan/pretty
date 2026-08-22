@@ -80,6 +80,7 @@ import {
   staticBlockJSON,
 } from '@/lib/tiptap/static-block-document'
 import { deleteUploadedImage, uploadImageFile } from '@/lib/images/client'
+import { useLocalImageSrc } from '@/lib/images/use-local-image-src'
 import { removeImageBackground } from '@/lib/images/background-removal'
 import { friendlyBackgroundProgress } from '@/lib/images/background-removal-progress'
 import {
@@ -461,20 +462,35 @@ function InspectorCard({
   useEffect(() => {
     const card = ref.current
     if (!card) return
-    for (const heading of card.querySelectorAll<HTMLHeadingElement>('.scripture-inspector-section > h3')) {
-      const section = heading.parentElement
-      if (!section) continue
-      const key = `scripture:inspector-section:${context}:${heading.textContent?.trim() || 'section'}`
-      const storedPreference = localStorage.getItem(key)
-      const collapsed = storedPreference == null
-        ? section.hasAttribute('data-default-collapsed')
-        : storedPreference === 'true'
-      section.classList.toggle('is-collapsed', collapsed)
-      heading.tabIndex = 0
-      heading.setAttribute('role', 'button')
-      heading.setAttribute('aria-expanded', String(!collapsed))
-      heading.dataset.preferenceKey = key
+
+    // Sections can appear after mount (e.g. "Page numbers" only renders once
+    // enabled), so headings are (re)initialized on every DOM change inside
+    // the card, not just once -- otherwise a section that shows up later
+    // never gets its collapse handlers wired up. Re-running is safe: it
+    // just reapplies whatever localStorage already says, which toggle()
+    // below keeps in sync as soon as the user interacts.
+    function initHeadings() {
+      if (!card) return
+      for (const heading of card.querySelectorAll<HTMLHeadingElement>('.scripture-inspector-section > h3')) {
+        const section = heading.parentElement
+        if (!section) continue
+        const key = `scripture:inspector-section:${context}:${heading.textContent?.trim() || 'section'}`
+        const storedPreference = localStorage.getItem(key)
+        const collapsed = storedPreference == null
+          ? section.hasAttribute('data-default-collapsed')
+          : storedPreference === 'true'
+        section.classList.toggle('is-collapsed', collapsed)
+        heading.tabIndex = 0
+        heading.setAttribute('role', 'button')
+        heading.setAttribute('aria-expanded', String(!collapsed))
+        heading.dataset.preferenceKey = key
+      }
     }
+
+    initHeadings()
+    const observer = new MutationObserver(initHeadings)
+    observer.observe(card, { childList: true, subtree: true })
+    return () => observer.disconnect()
   }, [context])
 
   function toggle(target: EventTarget | null) {
@@ -508,7 +524,18 @@ function InspectorCard({
   )
 }
 
-function SizeSection({ node, docId }: { node: LayoutNode; docId: string }) {
+function SizeSection({
+  node,
+  docId,
+  bare,
+}: {
+  node: LayoutNode
+  docId: string
+  // Skips the own heading/section wrapper so the Size controls can be
+  // embedded inline in another section (the root Canvas section folds
+  // Size into itself instead of giving it a separate header).
+  bare?: boolean
+}) {
   const { doc } = getYDoc(docId)
   const hasCustomSize = node.width != null || node.height != null
   const autoWidth =
@@ -527,9 +554,9 @@ function SizeSection({ node, docId }: { node: LayoutNode; docId: string }) {
     updateNodeSize(doc, node.id, size)
     if (node.id === ROOT_ID) updateFrameProps(doc, node.id, { canvasSizeMode: 'custom' })
   }
-  return (
-    <div className="scripture-inspector-section">
-      <h3>Size</h3>
+  const content = (
+    <>
+      {!bare && <h3>Size</h3>}
       <div className="scripture-inspector-row">
         <IconField
           icon={<MoveHorizontal size={14} />}
@@ -555,8 +582,10 @@ function SizeSection({ node, docId }: { node: LayoutNode; docId: string }) {
         </Button>
       )}
       <p className="scripture-inspector-hint">Drag the handles on a selected block&apos;s edges/corner to resize.</p>
-    </div>
+    </>
   )
+  if (bare) return content
+  return <div className="scripture-inspector-section">{content}</div>
 }
 
 const ALIGN_EDGE_OPTIONS: Array<{ edge: AlignEdge; label: string }> = [
@@ -1273,7 +1302,6 @@ function PageNumberStyleView({
         </div>
         <GoogleFontLoader families={typography.fontSource === 'google' ? [typography.fontFamily] : []} />
         <div className="scripture-page-number-style-preview" aria-label="Page number style preview">
-          <small>Preview</small>
           <div className="scripture-page-number-style-samples">
             {(['light', 'dark'] as const).map((surface) => (
               <div key={surface} className={`scripture-page-number-style-sample is-${surface}`}>
@@ -1301,7 +1329,7 @@ function PageNumberStyleView({
               <SelectTrigger className="w-36" size="sm" aria-label="Page number numeral style">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent size="sm">
                 <SelectItem value="arabic">Arabic · 1, 2, 3</SelectItem>
                 <SelectItem value="roman">Roman · I, II, III</SelectItem>
               </SelectContent>
@@ -1439,7 +1467,7 @@ function TextContentControls({
         <Label>Paragraph</Label>
         <Select value={state.block} onValueChange={setBlock}>
           <SelectTrigger className="w-36" size="sm"><SelectValue /></SelectTrigger>
-          <SelectContent>
+          <SelectContent size="sm">
             <SelectItem value="paragraph">Paragraph</SelectItem>
             <SelectItem value="heading-1">Heading 1</SelectItem>
             <SelectItem value="heading-2">Heading 2</SelectItem>
@@ -1590,6 +1618,14 @@ export function InspectorPanel({
   const [replaceImageError, setReplaceImageError] = useState<string | null>(null)
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
   const backgroundRemoval = useBackgroundRemovalState(docId, selectedId)
+  // Same hook-ordering constraint as the state above: `node` has to be
+  // resolved up here, before any early return, so this can sit alongside
+  // the other unconditional hooks. `node.src` is a `local:{id}` reference
+  // into IndexedDB (see image-block.tsx), not a directly loadable URL --
+  // the crop dialog needs the same resolved blob: URL the canvas itself
+  // renders, or it just fails to load the image.
+  const node = selectedId ? findNode(tree, selectedId) : tree
+  const cropDialogSrc = useLocalImageSrc(node?.kind === 'image' ? node.src : undefined)
 
   useEffect(() => () => onImageEffectPreviewChange(null), [onImageEffectPreviewChange, selectedId])
 
@@ -1599,7 +1635,6 @@ export function InspectorPanel({
     )
   }
 
-  const node = selectedId ? findNode(tree, selectedId) : tree
   if (!node) return null
 
   const { doc } = getYDoc(docId)
@@ -1638,10 +1673,46 @@ export function InspectorPanel({
           <div className="scripture-inspector-section">
             <h3>{node.id === ROOT_ID ? 'Canvas' : 'Frame'}</h3>
 
-            {/* Layout mode comes FIRST -- it's the one decision that
-                determines whether anything below even applies (canvas-mode
-                children are freely positioned, not flowed, so none of the
-                flex controls matter there). Everything else follows this,
+            <div className="scripture-inspector-row">
+              <Label>Background</Label>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={node.background == null}
+                  onClick={() => updateFrameProps(doc, node.id, { background: null })}
+                >
+                  Reset
+                </Button>
+                <input
+                  type="color"
+                  className="h-7 w-7 cursor-pointer rounded-md border border-input bg-transparent p-0.5"
+                  value={toHexColor(node.background)}
+                  onChange={(e) => updateFrameProps(doc, node.id, { background: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="scripture-inspector-row">
+              <Label>Radius</Label>
+              <div className="w-20">
+                <IconField
+                  icon={<RadiusIcon />}
+                  title="Radius"
+                  value={node.radius ?? 0}
+                  onChange={(radius) => updateFrameProps(doc, node.id, { radius })}
+                />
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Layout mode comes first among the behavioral controls -- it's
+                the one decision that determines whether anything below even
+                applies (canvas-mode children are freely positioned, not
+                flowed, so none of the flex controls matter there). Everything
+                else follows this,
                 not the other way around. */}
             <div className="scripture-inspector-stack">
               <Label>Layout</Label>
@@ -1779,52 +1850,10 @@ export function InspectorPanel({
                 </div>
               </>
             )}
-          </div>
 
-          <Separator />
-
-          <div className="scripture-inspector-section">
-            <h3>Appearance</h3>
-
-            <div className="scripture-inspector-row">
-              <Label>Background</Label>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={node.background == null}
-                  onClick={() => updateFrameProps(doc, node.id, { background: null })}
-                >
-                  Reset
-                </Button>
-                <input
-                  type="color"
-                  className="h-7 w-7 cursor-pointer rounded-md border border-input bg-transparent p-0.5"
-                  value={toHexColor(node.background)}
-                  onChange={(e) => updateFrameProps(doc, node.id, { background: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <div className="scripture-inspector-row">
-              <Label>Radius</Label>
-              <div className="w-20">
-                <IconField
-                  icon={<RadiusIcon />}
-                  title="Radius"
-                  value={node.radius ?? 0}
-                  onChange={(radius) => updateFrameProps(doc, node.id, { radius })}
-                />
-              </div>
-            </div>
-          </div>
-
-          {node.id === ROOT_ID && (
-            <>
-              <Separator />
-              <div className="scripture-inspector-section">
-                <h3>Canvas size</h3>
+            {node.id === ROOT_ID && (
+              <>
+                <Separator />
                 <div className="scripture-inspector-row">
                   <Label>Format</Label>
                   <Select
@@ -1852,32 +1881,27 @@ export function InspectorPanel({
                     <SelectTrigger className="w-40" size="sm" aria-label="Canvas format">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent size="sm">
                       {CANVAS_SIZE_PRESETS.map((preset) => (
-                        <SelectItem key={preset.value} value={preset.value} className="text-xs">
+                        <SelectItem key={preset.value} value={preset.value}>
                           {preset.label}
                         </SelectItem>
                       ))}
-                      <SelectItem value="custom" className="text-xs">Custom</SelectItem>
-                      <SelectItem value="export-sized" className="text-xs" disabled>Controlled by export</SelectItem>
+                      <SelectItem value="custom">Custom</SelectItem>
+                      <SelectItem value="export-sized" disabled>Controlled by export</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <p className="scripture-inspector-hint">
                   Presets resize the artboard and use that same shape for content-sized exports. Fine-tune the exact
-                  dimensions below; Custom stays explicit even when its dimensions match a preset.
+                  dimensions below.
                 </p>
-              </div>
-            </>
-          )}
-
-          {node.id === ROOT_ID && (
-            <>
-              <Separator />
-              <div className="scripture-inspector-section">
-                <h3>Page numbers</h3>
+                {(node.pageSize ?? 'content') === 'content' && (
+                  <SizeSection node={node} docId={docId} bare />
+                )}
+                <Separator />
                 <div className="scripture-inspector-row">
-                  <Label>Enable numbering</Label>
+                  <Label>Page numbers</Label>
                   <Switch
                     checked={pageNumberSettings.enabled}
                     onCheckedChange={(enabled) =>
@@ -1886,103 +1910,111 @@ export function InspectorPanel({
                     aria-label="Show page numbers"
                   />
                 </div>
-                {pageNumberSettings.enabled && (
-                  <>
-                    <div className="scripture-inspector-row">
-                      <Label>Show on this page</Label>
-                      <Switch
-                        checked={!currentPageBeforeStart && !currentPageHidden}
-                        disabled={currentPageBeforeStart}
-                        onCheckedChange={(visible) => {
-                          const hiddenPageIds = visible
-                            ? pageNumberSettings.hiddenPageIds.filter((pageId) => pageId !== docId)
-                            : [...new Set([...pageNumberSettings.hiddenPageIds, docId])]
-                          onPageNumberSettingsChange({ ...pageNumberSettings, hiddenPageIds })
-                        }}
-                        aria-label="Show page number on this page"
-                      />
-                    </div>
-                    {currentPageBeforeStart && (
-                      <p className="scripture-inspector-hint">This page is before the numbering start page.</p>
-                    )}
-                    <div className="scripture-inspector-stack">
-                      <Label>Start numbering on</Label>
-                      <Select
-                        value={startPageId ?? ''}
-                        onValueChange={(nextStartPageId) => onPageNumberSettingsChange({
-                          ...pageNumberSettings,
-                          startPageId: nextStartPageId,
-                        })}
-                      >
-                        <SelectTrigger className="w-full" size="sm" aria-label="Page numbering start page">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {pageIds.map((pageId, index) => (
-                            <SelectItem key={pageId} value={pageId}>
-                              {index + 1}. {pageNames[pageId] || 'Untitled'}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="scripture-inspector-stack">
-                      <Label>Position</Label>
-                      <ToggleGroup
-                        type="single"
-                        variant="outline"
-                        size="sm"
-                        spacing={0}
-                        className="w-full"
-                        value={pageNumberSettings.vertical}
-                        onValueChange={(vertical) =>
-                          vertical && onPageNumberSettingsChange({
-                            ...pageNumberSettings,
-                            vertical: vertical as PageNumberVerticalPosition,
-                          })
-                        }
-                        aria-label="Page number vertical position"
-                      >
-                        <ToggleGroupItem value="top" className="flex-1">Top</ToggleGroupItem>
-                        <ToggleGroupItem value="bottom" className="flex-1">Bottom</ToggleGroupItem>
-                      </ToggleGroup>
-                      <ToggleGroup
-                        type="single"
-                        variant="outline"
-                        size="sm"
-                        spacing={0}
-                        className="w-full"
-                        value={pageNumberSettings.horizontal}
-                        onValueChange={(horizontal) =>
-                          horizontal && onPageNumberSettingsChange({
-                            ...pageNumberSettings,
-                            horizontal: horizontal as PageNumberHorizontalPosition,
-                          })
-                        }
-                        aria-label="Page number horizontal position"
-                      >
-                        <ToggleGroupItem value="left" className="flex-1" aria-label="Left">
-                          <AlignLeft />
-                        </ToggleGroupItem>
-                        <ToggleGroupItem value="center" className="flex-1" aria-label="Center">
-                          <AlignCenter />
-                        </ToggleGroupItem>
-                        <ToggleGroupItem value="right" className="flex-1" aria-label="Right">
-                          <AlignRight />
-                        </ToggleGroupItem>
-                      </ToggleGroup>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="scripture-page-number-appearance-button"
-                      onClick={() => setPageNumberStyleOpen(true)}
-                    >
-                      <Type />
-                      Edit appearance…
-                    </Button>
-                  </>
+              </>
+            )}
+          </div>
+
+          {node.id === ROOT_ID && pageNumberSettings.enabled && (
+            <>
+              <Separator />
+              <div className="scripture-inspector-section">
+                <h3>Page numbers</h3>
+                <div className="scripture-inspector-row">
+                  <Label>Show on this page</Label>
+                  <Switch
+                    checked={!currentPageBeforeStart && !currentPageHidden}
+                    disabled={currentPageBeforeStart}
+                    onCheckedChange={(visible) => {
+                      const hiddenPageIds = visible
+                        ? pageNumberSettings.hiddenPageIds.filter((pageId) => pageId !== docId)
+                        : [...new Set([...pageNumberSettings.hiddenPageIds, docId])]
+                      onPageNumberSettingsChange({ ...pageNumberSettings, hiddenPageIds })
+                    }}
+                    aria-label="Show page number on this page"
+                  />
+                </div>
+                {currentPageBeforeStart && (
+                  <p className="scripture-inspector-hint">This page is before the numbering start page.</p>
                 )}
+                <div className="scripture-inspector-stack">
+                  <Label>Start numbering on</Label>
+                  <Select
+                    value={startPageId ?? ''}
+                    onValueChange={(nextStartPageId) => onPageNumberSettingsChange({
+                      ...pageNumberSettings,
+                      startPageId: nextStartPageId,
+                    })}
+                  >
+                    <SelectTrigger className="w-full" size="sm" aria-label="Page numbering start page">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent size="sm">
+                      {pageIds.map((pageId, index) => (
+                        <SelectItem key={pageId} value={pageId}>
+                          {index + 1}. {pageNames[pageId] || 'Untitled'}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="scripture-inspector-stack">
+                  <Label>Vertical position</Label>
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    size="sm"
+                    spacing={0}
+                    className="w-full"
+                    value={pageNumberSettings.vertical}
+                    onValueChange={(vertical) =>
+                      vertical && onPageNumberSettingsChange({
+                        ...pageNumberSettings,
+                        vertical: vertical as PageNumberVerticalPosition,
+                      })
+                    }
+                    aria-label="Page number vertical position"
+                  >
+                    <ToggleGroupItem value="top" className="flex-1">Top</ToggleGroupItem>
+                    <ToggleGroupItem value="bottom" className="flex-1">Bottom</ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+                <div className="scripture-inspector-stack">
+                  <Label>Horizontal position</Label>
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    size="sm"
+                    spacing={0}
+                    className="w-full"
+                    value={pageNumberSettings.horizontal}
+                    onValueChange={(horizontal) =>
+                      horizontal && onPageNumberSettingsChange({
+                        ...pageNumberSettings,
+                        horizontal: horizontal as PageNumberHorizontalPosition,
+                      })
+                    }
+                    aria-label="Page number horizontal position"
+                  >
+                    <IconTab value="left" label="Left">
+                      <AlignLeft />
+                    </IconTab>
+                    <IconTab value="center" label="Center">
+                      <AlignCenter />
+                    </IconTab>
+                    <IconTab value="right" label="Right">
+                      <AlignRight />
+                    </IconTab>
+                  </ToggleGroup>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="scripture-page-number-appearance-button"
+                  onClick={() => setPageNumberStyleOpen(true)}
+                >
+                  <Type />
+                  Edit appearance…
+                </Button>
                 <p className="scripture-inspector-hint">
                   The start page is 1 or I. Hidden pages keep their place in the count, and numbering is included in previews and exports.
                 </p>
@@ -1990,10 +2022,9 @@ export function InspectorPanel({
             </>
           )}
 
-          {/* For the root frame, manual width/height only affects a
-              Content-sized export. Fixed paper formats own their dimensions,
-              so the Size controls are hidden for those formats. */}
-          {(node.id !== ROOT_ID || (node.pageSize ?? 'content') === 'content') && (
+          {/* Root's Size controls live inside the Canvas section above
+              (folded in with Format); this is only for non-root frames. */}
+          {node.id !== ROOT_ID && (
             <>
               <Separator />
               <SizeSection node={node} docId={docId} />
@@ -2028,9 +2059,9 @@ export function InspectorPanel({
                     <SelectTrigger className="w-36" size="sm">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent size="sm">
                       {PAGE_SIZE_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                        <SelectItem key={opt.value} value={opt.value}>
                           {opt.label}
                         </SelectItem>
                       ))}
@@ -2341,10 +2372,11 @@ export function InspectorPanel({
                   <Button
                     variant="outline"
                     size="sm"
+                    disabled={!cropDialogSrc}
                     onClick={() =>
                       setCropRequest({
                         nodeId: node.id,
-                        src: node.src!,
+                        src: cropDialogSrc!,
                         cropX: node.cropX ?? 0,
                         cropY: node.cropY ?? 0,
                         cropWidth: node.cropWidth ?? 1,
@@ -2422,7 +2454,7 @@ export function InspectorPanel({
                 <SelectTrigger size="sm" className="w-36">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="scripture-shape-select-content">
+                <SelectContent size="sm" className="scripture-shape-select-content">
                   {IMAGE_CLIP_SHAPES.map((shape) => (
                     <SelectItem className="scripture-shape-select-item" key={shape.value} value={shape.value}>
                       <ShapePreview shape={shape.value} />
@@ -2543,9 +2575,9 @@ export function InspectorPanel({
               <SelectTrigger className="w-36" size="sm">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent size="sm">
                 {FONT_OPTIONS.map((f) => (
-                  <SelectItem key={f.key} value={f.key} className="text-xs">
+                  <SelectItem key={f.key} value={f.key}>
                     {f.label}
                   </SelectItem>
                 ))}

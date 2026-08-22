@@ -417,9 +417,9 @@ function ChromeStyleEditor() {
                 <SelectTrigger className="w-36" size="sm">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent size="sm">
                   {ICON_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                    <SelectItem key={opt.value} value={opt.value}>
                       {opt.label}
                     </SelectItem>
                   ))}

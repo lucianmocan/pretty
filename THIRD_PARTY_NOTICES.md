@@ -43,3 +43,24 @@ on first use and caches them in the browser.
 
 The package is provided without warranty under the terms of the GNU Affero
 General Public License. See the included license text for the complete terms.
+
+## D3 zoom and selection
+
+Pretty's canvas interaction layer uses the published `d3-zoom` 3.0.0 and
+`d3-selection` 3.0.0 npm packages, without modifications to those packages.
+They provide cross-input zoom gesture handling and DOM behavior attachment for
+cursor-anchored trackpad zooming.
+
+- Project: [D3](https://d3js.org/)
+- Copyright: 2010-2021 Mike Bostock; `d3-ease` also includes work copyright
+  2001 Robert Penner
+- Runtime modules under the ISC License: `d3-color` 3.1.0, `d3-dispatch`
+  3.0.1, `d3-drag` 3.0.0, `d3-interpolate` 3.0.1, `d3-selection` 3.0.0,
+  `d3-timer` 3.0.1, `d3-transition` 3.0.1, and `d3-zoom` 3.0.0
+- ISC license text: [LICENSES/ISC-D3.txt](./LICENSES/ISC-D3.txt)
+- Runtime module under the BSD 3-Clause License: `d3-ease` 3.0.1
+- BSD license text: [LICENSES/BSD-3-Clause-D3-Ease.txt](./LICENSES/BSD-3-Clause-D3-Ease.txt)
+- Upstream source: [D3 module repositories](https://github.com/d3)
+
+The packages are provided without warranty under their respective licenses.
+See the included license texts for the complete terms.

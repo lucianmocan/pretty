@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { GeometryMap, NodeGeometry } from '@/lib/layout/geometry'
+import { MIN_CANVAS_ZOOM } from '@/lib/layout/canvas-zoom'
 
 interface GeometryRegistryActions {
   observe: (
@@ -29,14 +30,17 @@ interface GeometryRegistryValue extends GeometryRegistryActions {
 
 const GeometryRegistryActionsContext = createContext<GeometryRegistryActions | null>(null)
 const GeometryRegistrySnapshotContext = createContext<GeometryMap | null>(null)
+const GEOMETRY_EPSILON = 0.01
 
 function sameGeometry(a: NodeGeometry | undefined, b: NodeGeometry) {
+  const close = (left: number | undefined, right: number) =>
+    left != null && Math.abs(left - right) <= GEOMETRY_EPSILON
   return (
     a?.parentId === b.parentId &&
-    a.x === b.x &&
-    a.y === b.y &&
-    a.width === b.width &&
-    a.height === b.height
+    close(a?.x, b.x) &&
+    close(a?.y, b.y) &&
+    close(a?.width, b.width) &&
+    close(a?.height, b.height)
   )
 }
 
@@ -57,14 +61,26 @@ export function GeometryRegistryProvider({ children }: { children: ReactNode }) 
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const observedElementsRef = useRef(new Map<Element, number>())
   const measurementFrameRef = useRef<number | null>(null)
+  const versionFrameRef = useRef<number | null>(null)
   const [version, setVersion] = useState(0)
+
+  // Publish measured geometry on the next frame rather than synchronously
+  // inside ResizeObserver/scroll measurement callbacks. This keeps a render
+  // from synchronously re-entering the measurement pipeline.
+  const scheduleVersion = useCallback(() => {
+    if (versionFrameRef.current != null) return
+    versionFrameRef.current = requestAnimationFrame(() => {
+      versionFrameRef.current = null
+      setVersion((value) => value + 1)
+    })
+  }, [])
 
   const measure = useCallback((id: string): boolean => {
     const entry = entriesRef.current.get(id)
     if (!entry || !entry.element.isConnected) return false
     const rect = entry.element.getBoundingClientRect()
     const parentRect = entry.parentElement?.getBoundingClientRect()
-    const scale = Math.max(entry.zoom, 0.01)
+    const scale = Math.max(entry.zoom, MIN_CANVAS_ZOOM)
     const next: NodeGeometry = {
       id,
       parentId: entry.parentId,
@@ -87,9 +103,9 @@ export function GeometryRegistryProvider({ children }: { children: ReactNode }) 
     for (const id of entriesRef.current.keys()) {
       if (measure(id)) changed = true
     }
-    if (changed) setVersion((value) => value + 1)
+    if (changed) scheduleVersion()
     return new Map(geometryRef.current)
-  }, [measure])
+  }, [measure, scheduleVersion])
 
   const scheduleMeasurement = useCallback(() => {
     if (measurementFrameRef.current != null) return
@@ -100,6 +116,7 @@ export function GeometryRegistryProvider({ children }: { children: ReactNode }) 
   }, [measureAll])
 
   useEffect(() => {
+    const observedElements = observedElementsRef.current
     window.addEventListener('resize', scheduleMeasurement)
     window.addEventListener('scroll', scheduleMeasurement, true)
     return () => {
@@ -109,9 +126,13 @@ export function GeometryRegistryProvider({ children }: { children: ReactNode }) 
         cancelAnimationFrame(measurementFrameRef.current)
         measurementFrameRef.current = null
       }
+      if (versionFrameRef.current != null) {
+        cancelAnimationFrame(versionFrameRef.current)
+        versionFrameRef.current = null
+      }
       resizeObserverRef.current?.disconnect()
       resizeObserverRef.current = null
-      observedElementsRef.current.clear()
+      observedElements.clear()
     }
   }, [scheduleMeasurement])
 
@@ -157,10 +178,10 @@ export function GeometryRegistryProvider({ children }: { children: ReactNode }) 
         if (current !== registeredEntry) return
         cleanup()
         entriesRef.current.delete(id)
-        if (geometryRef.current.delete(id)) setVersion((value) => value + 1)
+        if (geometryRef.current.delete(id)) scheduleVersion()
       }
     },
-    [scheduleMeasurement]
+    [scheduleMeasurement, scheduleVersion]
   )
 
   const actions = useMemo(() => ({ observe, measureAll }), [observe, measureAll])

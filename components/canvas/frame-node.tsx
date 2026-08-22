@@ -31,6 +31,7 @@ import type { PageNumberSettings } from '@/lib/documents/manifest'
 import { CanvasPageNumber } from '@/components/canvas/canvas-page-number'
 import { useGeometryActions } from './geometry-registry'
 import type { ImageEffectPreview } from '@/lib/layout/image-effects'
+import { MIN_CANVAS_ZOOM } from '@/lib/layout/canvas-zoom'
 
 interface FrameNodeProps {
   node: LayoutNode
@@ -597,6 +598,13 @@ export function FrameNode({
     !isRoot && parentChildLayout === 'canvas'
       ? {
           position: 'absolute',
+          // Absolutely positioned auto-width boxes otherwise use CSS's
+          // shrink-to-fit algorithm, whose available width decreases as
+          // `left` approaches the parent's right edge. Images then honor
+          // their own max-width: 100% and visibly shrink during a move drag.
+          // Keep intrinsic width independent of position; an explicit or
+          // live resize still wins through outerBoxStyle(renderedNode).
+          ...(isAutoWidth && { width: 'max-content', maxWidth: 'none' }),
           // Per-axis fallback to the node's own stored value -- NOT to a
           // freshly re-measured DOM rect -- so a resize that only touches
           // one axis (e.g. dragging the w handle) never nudges the other.
@@ -703,7 +711,7 @@ export function FrameNode({
         { x: startX + dx, y: startY + dy, width: startWidth, height: startHeight },
         siblings,
         containerSize,
-        SNAP_THRESHOLD_PX / Math.max(zoom, 0.01)
+        SNAP_THRESHOLD_PX / Math.max(zoom, MIN_CANVAS_ZOOM)
       )
     }
 

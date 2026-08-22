@@ -9,6 +9,7 @@ import {
   type ResizeAxis,
   type SizePatch,
 } from '@/lib/layout/resize-geometry'
+import { MIN_CANVAS_ZOOM } from '@/lib/layout/canvas-zoom'
 
 interface ResizeHandlesProps {
   targetRef: React.RefObject<HTMLElement | null>
@@ -67,7 +68,7 @@ export function ResizeHandles({
       e.preventDefault()
       e.stopPropagation()
 
-      const safeZoom = Math.max(zoom, 0.01)
+      const safeZoom = Math.max(zoom, MIN_CANVAS_ZOOM)
       dragState.current = {
         axis,
         pointerId: e.pointerId,
@@ -150,7 +151,7 @@ export function ResizeHandles({
     }
   }
 
-  const safeZoom = Math.max(zoom, 0.01)
+  const safeZoom = Math.max(zoom, MIN_CANVAS_ZOOM)
   const hitTargetStyle = {
     '--resize-edge-hit': `${EDGE_HIT_SIZE / safeZoom}px`,
     '--resize-edge-offset': `${-EDGE_HIT_SIZE / (safeZoom * 2)}px`,

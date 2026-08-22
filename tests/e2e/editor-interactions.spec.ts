@@ -61,7 +61,9 @@ test('Layers selection, rename, duplicate, and delete stay synchronized', async 
 test('zoom controls and keyboard zoom shortcuts update the canvas scale', async ({ page }) => {
   await openFreshDocument(page)
   const percent = page.locator('.scripture-zoom-percent')
+  await expect(percent).toContainText(/\d+(?:\.\d+)?%/)
   await percent.click()
+  await page.getByRole('option', { name: '100%' }).click()
   await expect(percent).toHaveText('100%')
   await page.getByRole('button', { name: 'Zoom in' }).click()
   await expect(percent).toHaveText('105%')
@@ -71,6 +73,158 @@ test('zoom controls and keyboard zoom shortcuts update the canvas scale', async 
   await expect(percent).toHaveText('95%')
   await page.keyboard.press('Control+0')
   await expect(percent).toHaveText('100%')
+})
+
+test('trackpad and button zoom preserve their respective anchor points', async ({ page }) => {
+  await openFreshDocument(page)
+  const percent = page.locator('.scripture-zoom-percent')
+  await percent.click()
+  await page.getByRole('option', { name: '200%' }).click()
+  await expect(percent).toHaveText('200%')
+
+  const readCanvasPointAtViewportCenter = () =>
+    page.evaluate(() => {
+      const area = document.querySelector('.scripture-canvas-area')
+      const scaleBox = document.querySelector('.scripture-canvas-scale-box')
+      const viewport = document.querySelector('.scripture-canvas-viewport')
+      if (!(area instanceof HTMLElement) || !(scaleBox instanceof HTMLElement) || !(viewport instanceof HTMLElement)) {
+        throw new Error('Canvas did not mount')
+      }
+      const areaRect = area.getBoundingClientRect()
+      const boxRect = scaleBox.getBoundingClientRect()
+      const zoom = new DOMMatrix(getComputedStyle(viewport).transform).a
+      return {
+        x: (areaRect.left + area.clientLeft + area.clientWidth / 2 - boxRect.left) / zoom,
+        y: (areaRect.top + area.clientTop + area.clientHeight / 2 - boxRect.top) / zoom,
+      }
+    })
+
+  const centerPointBeforeButtonZoom = await readCanvasPointAtViewportCenter()
+  await page.getByRole('button', { name: 'Zoom out' }).click()
+  await expect(percent).toHaveText('190%')
+  const centerPointAfterButtonZoom = await readCanvasPointAtViewportCenter()
+  expect(Math.abs(centerPointAfterButtonZoom.x - centerPointBeforeButtonZoom.x)).toBeLessThan(0.01)
+  expect(Math.abs(centerPointAfterButtonZoom.y - centerPointBeforeButtonZoom.y)).toBeLessThan(0.01)
+
+  await percent.click()
+  await page.getByRole('option', { name: '200%' }).click()
+  await expect(percent).toHaveText('200%')
+
+  const maxAnchorError = await page.evaluate(async () => {
+    const area = document.querySelector('.scripture-canvas-area')
+    const scaleBox = document.querySelector('.scripture-canvas-scale-box')
+    const viewport = document.querySelector('.scripture-canvas-viewport')
+    if (!(area instanceof HTMLElement) || !(scaleBox instanceof HTMLElement) || !(viewport instanceof HTMLElement)) {
+      throw new Error('Canvas did not mount')
+    }
+
+    const readZoom = () => new DOMMatrix(getComputedStyle(viewport).transform).a
+    const areaRect = area.getBoundingClientRect()
+    const boxRect = scaleBox.getBoundingClientRect()
+    const cursor = {
+      x: areaRect.left + areaRect.width * 0.58,
+      y: areaRect.top + areaRect.height * 0.46,
+    }
+    const initialZoom = readZoom()
+    const canvasPoint = {
+      x: (cursor.x - boxRect.left) / initialZoom,
+      y: (cursor.y - boxRect.top) / initialZoom,
+    }
+    let maxError = 0
+
+    for (let index = 0; index < 20; index += 1) {
+      area.dispatchEvent(
+        new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          clientX: cursor.x,
+          clientY: cursor.y,
+          deltaY: 0.5,
+          deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+        })
+      )
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+
+      const nextRect = scaleBox.getBoundingClientRect()
+      const nextZoom = readZoom()
+      maxError = Math.max(
+        maxError,
+        Math.abs(nextRect.left + canvasPoint.x * nextZoom - cursor.x),
+        Math.abs(nextRect.top + canvasPoint.y * nextZoom - cursor.y)
+      )
+    }
+
+    return maxError
+  })
+
+  expect(maxAnchorError).toBeLessThan(1)
+})
+
+test('trackpad zoom stays anchored at the right scroll boundary', async ({ page }) => {
+  await openFreshDocument(page)
+  const percent = page.locator('.scripture-zoom-percent')
+  await percent.click()
+  await page.getByRole('option', { name: '200%' }).click()
+  await expect(percent).toHaveText('200%')
+
+  const result = await page.evaluate(async () => {
+    const area = document.querySelector('.scripture-canvas-area')
+    const scaleBox = document.querySelector('.scripture-canvas-scale-box')
+    const viewport = document.querySelector('.scripture-canvas-viewport')
+    if (!(area instanceof HTMLElement) || !(scaleBox instanceof HTMLElement) || !(viewport instanceof HTMLElement)) {
+      throw new Error('Canvas did not mount')
+    }
+
+    const nextLayout = () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    const readZoom = () => new DOMMatrix(getComputedStyle(viewport).transform).a
+    area.scrollLeft = area.scrollWidth
+    await nextLayout()
+
+    const areaRect = area.getBoundingClientRect()
+    const boxRect = scaleBox.getBoundingClientRect()
+    const cursor = {
+      x: areaRect.left + areaRect.width * 0.87,
+      y: areaRect.top + areaRect.height * 0.48,
+    }
+    const initialZoom = readZoom()
+    const canvasPoint = {
+      x: (cursor.x - boxRect.left) / initialZoom,
+      y: (cursor.y - boxRect.top) / initialZoom,
+    }
+    let maxAnchorError = 0
+    let maxLayoutWidthError = 0
+
+    for (let index = 0; index < 24; index += 1) {
+      area.dispatchEvent(
+        new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          clientX: cursor.x,
+          clientY: cursor.y,
+          deltaY: 0.8,
+          deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+        })
+      )
+      await nextLayout()
+
+      const nextRect = scaleBox.getBoundingClientRect()
+      const nextZoom = readZoom()
+      maxAnchorError = Math.max(
+        maxAnchorError,
+        Math.abs(nextRect.left + canvasPoint.x * nextZoom - cursor.x),
+        Math.abs(nextRect.top + canvasPoint.y * nextZoom - cursor.y)
+      )
+      maxLayoutWidthError = Math.max(maxLayoutWidthError, Math.abs(nextRect.width - parseFloat(scaleBox.style.width)))
+    }
+
+    return { maxAnchorError, maxLayoutWidthError }
+  })
+
+  expect(result.maxAnchorError).toBeLessThan(1)
+  expect(result.maxLayoutWidthError).toBeLessThan(1)
 })
 
 test('a free-form code block can be re-entered after switching syntax theme', async ({ page }) => {
