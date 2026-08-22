@@ -3,6 +3,7 @@
 import { memo, useEffect, useState, type RefObject } from 'react'
 import { yXmlFragmentToProsemirrorJSON } from '@tiptap/y-tiptap'
 import {
+  collectExportFontFamilies,
   ExportDocument,
   type ExportSyntaxSnapshots,
 } from '@/components/export/export-document'
@@ -10,6 +11,7 @@ import { useLayoutTree } from '@/lib/use-layout-tree'
 import { blockFragmentName, getYDoc } from '@/lib/yjs/doc-store'
 import { useExportMargin } from '@/lib/app-preferences'
 import { loadGoogleFontCatalog, type GoogleFontFamily } from '@/lib/google-fonts'
+import { embedSystemFontFaces } from '@/lib/system-fonts'
 import type { LayoutNode } from '@/lib/layout/types'
 import { plainTextFromDocument } from '@/lib/tiptap/syntax-document'
 import { tokenizeCodeInWorker } from '@/lib/shiki/client-tokenizer'
@@ -44,6 +46,7 @@ export const BrowserExportPage = memo(function BrowserExportPage({
     revision: number
     syntaxSnapshots: ExportSyntaxSnapshots | null
     fontCatalog: GoogleFontFamily[] | null
+    systemFontFaceCss: string | null
     error: string | null
   } | null>(null)
 
@@ -52,12 +55,18 @@ export const BrowserExportPage = memo(function BrowserExportPage({
 
     const controller = new AbortController()
     const ydoc = getYDoc(pageId).doc
+    const systemFontFamilies = new Set<string>()
+    collectExportFontFamilies(tree, ydoc, 'system', systemFontFamilies)
 
     // Load the weight-axis catalog alongside syntax highlighting, before
     // marking this page export-ready -- GoogleFontStylesheet needs it to
     // request the same bold/italic weights the live canvas already has, or
     // font-synthesis: none leaves those runs on a system fallback font with
     // different metrics, wrapping text differently than the live canvas.
+    // Device fonts have the same problem for a different reason: the export
+    // capture draws through an SVG-in-<img> pipeline that doesn't resolve
+    // OS-installed fonts by name at all, so their real font files are
+    // embedded as data-URL @font-face rules instead (see embedSystemFontFaces).
     void Promise.all([
       Promise.all(
         collectCodeNodes(tree).map(async (node) => {
@@ -74,14 +83,16 @@ export const BrowserExportPage = memo(function BrowserExportPage({
         })
       ),
       loadGoogleFontCatalog().catch(() => null),
+      embedSystemFontFaces([...systemFontFamilies]).catch(() => null),
     ])
-      .then(([entries, fontCatalog]) => {
+      .then(([entries, fontCatalog, systemFontFaceCss]) => {
         if (!controller.signal.aborted) {
           setPrepared({
             tree,
             revision,
             syntaxSnapshots: Object.fromEntries(entries),
             fontCatalog,
+            systemFontFaceCss,
             error: null,
           })
         }
@@ -93,6 +104,7 @@ export const BrowserExportPage = memo(function BrowserExportPage({
           revision,
           syntaxSnapshots: null,
           fontCatalog: null,
+          systemFontFaceCss: null,
           error: error instanceof Error ? error.message : 'Syntax highlighting failed',
         })
       })
@@ -104,6 +116,7 @@ export const BrowserExportPage = memo(function BrowserExportPage({
   const syntaxSnapshots = preparedIsCurrent ? prepared.syntaxSnapshots : null
   const syntaxError = preparedIsCurrent ? prepared.error : null
   const fontCatalog = preparedIsCurrent ? prepared.fontCatalog : null
+  const systemFontFaceCss = preparedIsCurrent ? prepared.systemFontFaceCss : null
   const renderableSnapshots = syntaxSnapshots ?? (allowSyntaxFallback && syntaxError ? {} : null)
 
   return (
@@ -121,6 +134,7 @@ export const BrowserExportPage = memo(function BrowserExportPage({
           syntaxSnapshots={renderableSnapshots}
           pageNumber={pageNumber}
           fontCatalog={fontCatalog ?? undefined}
+          systemFontFaceCss={systemFontFaceCss}
         />
       )}
     </div>

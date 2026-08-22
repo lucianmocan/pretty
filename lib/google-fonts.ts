@@ -101,19 +101,21 @@ export function textFontFamilyCss(family: string | undefined, source: TextFontSo
   return `'${safeFamily}', var(--font-geist-sans), sans-serif`
 }
 
-/** Finds every selection-level Google font used by the collaborative Tiptap
- * document, plus the text block's base family. */
-export function googleFontsInDocument(
+/** Finds every selection-level font of the given source used by the
+ * collaborative Tiptap document, plus the text block's base family. Shared by
+ * googleFontsInDocument and system-fonts.ts's export-embedding scan. */
+export function fontFamiliesInDocument(
   document: JSONContent | null | undefined,
+  source: TextFontSource,
   baseFamily?: string,
   baseSource?: TextFontSource
 ): string[] {
   const families = new Set<string>()
-  if (baseSource === 'google' && baseFamily) families.add(baseFamily)
+  if (baseSource === source && baseFamily) families.add(baseFamily)
 
   const visit = (node: JSONContent) => {
     for (const mark of node.marks ?? []) {
-      if (mark.type !== 'format' || mark.attrs?.fontSource !== 'google') continue
+      if (mark.type !== 'format' || mark.attrs?.fontSource !== source) continue
       const family = mark.attrs.fontFamily
       if (typeof family === 'string' && family) families.add(family)
     }
@@ -121,4 +123,14 @@ export function googleFontsInDocument(
   }
   if (document) visit(document)
   return uniqueSortedFamilies(families)
+}
+
+/** Finds every selection-level Google font used by the collaborative Tiptap
+ * document, plus the text block's base family. */
+export function googleFontsInDocument(
+  document: JSONContent | null | undefined,
+  baseFamily?: string,
+  baseSource?: TextFontSource
+): string[] {
+  return fontFamiliesInDocument(document, 'google', baseFamily, baseSource)
 }

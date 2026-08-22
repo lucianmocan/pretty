@@ -22,7 +22,7 @@ import { ROOT_ID } from '@/lib/yjs/layout-store'
 import type { SyntaxStyleRange } from '@/lib/shiki/token-types'
 import { plainTextFromDocument, withSyntaxRanges } from '@/lib/tiptap/syntax-document'
 import { codeLineFontSizes } from '@/lib/tiptap/line-font-sizes'
-import { googleFontsInDocument, type GoogleFontFamily } from '@/lib/google-fonts'
+import { fontFamiliesInDocument, googleFontsInDocument, type GoogleFontFamily } from '@/lib/google-fonts'
 import { GoogleFontStylesheet } from '@/components/editor/google-font-loader'
 import { textBlockStyle } from '@/lib/layout/text-style'
 import type { PageNumberSettings } from '@/lib/documents/manifest'
@@ -207,14 +207,22 @@ function renderNode(
   )
 }
 
-function collectExportGoogleFonts(node: LayoutNode, ydoc: Y.Doc, families: Set<string>) {
+/** Walks every text block for the font families selected from the given
+ * source, shared by ExportDocument's Google Fonts collection and
+ * BrowserExportPage's device-font-embedding collection. */
+export function collectExportFontFamilies(
+  node: LayoutNode,
+  ydoc: Y.Doc,
+  source: 'google' | 'system',
+  families: Set<string>
+) {
   if (node.kind === 'frame') {
-    for (const child of node.children ?? []) collectExportGoogleFonts(child, ydoc, families)
+    for (const child of node.children ?? []) collectExportFontFamilies(child, ydoc, source, families)
     return
   }
   if (node.kind !== 'text') return
   const document = yXmlFragmentToProsemirrorJSON(ydoc.getXmlFragment(blockFragmentName(node.id)))
-  for (const family of googleFontsInDocument(document, node.textFontFamily, node.textFontSource)) {
+  for (const family of fontFamiliesInDocument(document, source, node.textFontFamily, node.textFontSource)) {
     families.add(family)
   }
 }
@@ -226,6 +234,7 @@ export function ExportDocument({
   syntaxSnapshots = {},
   pageNumber,
   fontCatalog,
+  systemFontFaceCss,
 }: {
   tree: LayoutNode
   ydoc: Y.Doc
@@ -233,15 +242,17 @@ export function ExportDocument({
   syntaxSnapshots?: ExportSyntaxSnapshots
   pageNumber?: { number: number; settings: PageNumberSettings }
   fontCatalog?: GoogleFontFamily[]
+  systemFontFaceCss?: string | null
 }) {
   const googleFonts = new Set<string>()
-  collectExportGoogleFonts(tree, ydoc, googleFonts)
+  collectExportFontFamilies(tree, ydoc, 'google', googleFonts)
   if (pageNumber?.settings.typography.fontSource === 'google') {
     googleFonts.add(pageNumber.settings.typography.fontFamily)
   }
   return (
     <>
       <GoogleFontStylesheet families={[...googleFonts]} catalog={fontCatalog} />
+      {systemFontFaceCss && <style>{systemFontFaceCss}</style>}
       <CanvasRoot
         printMode
         pageSize={tree.pageSize}
