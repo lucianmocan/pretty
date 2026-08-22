@@ -44,9 +44,20 @@ export function GoogleFontLoader({ families }: { families: string[] }) {
 }
 
 /** React hoists stylesheet links into <head>, including in the server-rendered
- * print surface. Browser export separately waits for document.fonts.ready. */
-export function GoogleFontStylesheet({ families }: { families: string[] }) {
-  const href = googleFontsStylesheetUrl(families)
+ * print surface. Browser export separately waits for document.fonts.ready.
+ * `catalog` must be the same weight-axis catalog GoogleFontLoader waits for --
+ * requesting a family with no weight axis (the fallback below) only fetches
+ * its default (400) weight, so a bold/italic run falls back to a system font
+ * once font-synthesis: none rules out browser-synthesized bold and produces
+ * text noticeably wider than the live canvas, wrapping differently. */
+export function GoogleFontStylesheet({
+  families,
+  catalog,
+}: {
+  families: string[]
+  catalog?: GoogleFontFamily[]
+}) {
+  const href = googleFontsStylesheetUrl(families, catalog)
   if (!href) return null
   return <link rel="stylesheet" href={href} data-scripture-google-fonts="" />
 }

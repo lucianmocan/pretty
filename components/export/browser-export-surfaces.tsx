@@ -9,6 +9,7 @@ import {
 import { useLayoutTree } from '@/lib/use-layout-tree'
 import { blockFragmentName, getYDoc } from '@/lib/yjs/doc-store'
 import { useExportMargin } from '@/lib/app-preferences'
+import { loadGoogleFontCatalog, type GoogleFontFamily } from '@/lib/google-fonts'
 import type { LayoutNode } from '@/lib/layout/types'
 import { plainTextFromDocument } from '@/lib/tiptap/syntax-document'
 import { tokenizeCodeInWorker } from '@/lib/shiki/client-tokenizer'
@@ -42,6 +43,7 @@ export const BrowserExportPage = memo(function BrowserExportPage({
     tree: LayoutNode
     revision: number
     syntaxSnapshots: ExportSyntaxSnapshots | null
+    fontCatalog: GoogleFontFamily[] | null
     error: string | null
   } | null>(null)
 
@@ -51,26 +53,35 @@ export const BrowserExportPage = memo(function BrowserExportPage({
     const controller = new AbortController()
     const ydoc = getYDoc(pageId).doc
 
-    void Promise.all(
-      collectCodeNodes(tree).map(async (node) => {
-        const document = yXmlFragmentToProsemirrorJSON(
-          ydoc.getXmlFragment(blockFragmentName(node.id))
-        )
-        const result = await tokenizeCodeInWorker(
-          plainTextFromDocument(document),
-          node.language ?? 'plaintext',
-          resolveThemeArg(node.theme),
-          { signal: controller.signal, priority }
-        )
-        return [node.id, result.ranges] as const
-      })
-    )
-      .then((entries) => {
+    // Load the weight-axis catalog alongside syntax highlighting, before
+    // marking this page export-ready -- GoogleFontStylesheet needs it to
+    // request the same bold/italic weights the live canvas already has, or
+    // font-synthesis: none leaves those runs on a system fallback font with
+    // different metrics, wrapping text differently than the live canvas.
+    void Promise.all([
+      Promise.all(
+        collectCodeNodes(tree).map(async (node) => {
+          const document = yXmlFragmentToProsemirrorJSON(
+            ydoc.getXmlFragment(blockFragmentName(node.id))
+          )
+          const result = await tokenizeCodeInWorker(
+            plainTextFromDocument(document),
+            node.language ?? 'plaintext',
+            resolveThemeArg(node.theme),
+            { signal: controller.signal, priority }
+          )
+          return [node.id, result.ranges] as const
+        })
+      ),
+      loadGoogleFontCatalog().catch(() => null),
+    ])
+      .then(([entries, fontCatalog]) => {
         if (!controller.signal.aborted) {
           setPrepared({
             tree,
             revision,
             syntaxSnapshots: Object.fromEntries(entries),
+            fontCatalog,
             error: null,
           })
         }
@@ -81,6 +92,7 @@ export const BrowserExportPage = memo(function BrowserExportPage({
           tree,
           revision,
           syntaxSnapshots: null,
+          fontCatalog: null,
           error: error instanceof Error ? error.message : 'Syntax highlighting failed',
         })
       })
@@ -91,6 +103,7 @@ export const BrowserExportPage = memo(function BrowserExportPage({
   const preparedIsCurrent = prepared?.tree === tree && prepared.revision === revision
   const syntaxSnapshots = preparedIsCurrent ? prepared.syntaxSnapshots : null
   const syntaxError = preparedIsCurrent ? prepared.error : null
+  const fontCatalog = preparedIsCurrent ? prepared.fontCatalog : null
   const renderableSnapshots = syntaxSnapshots ?? (allowSyntaxFallback && syntaxError ? {} : null)
 
   return (
@@ -107,6 +120,7 @@ export const BrowserExportPage = memo(function BrowserExportPage({
           margin={margin}
           syntaxSnapshots={renderableSnapshots}
           pageNumber={pageNumber}
+          fontCatalog={fontCatalog ?? undefined}
         />
       )}
     </div>
