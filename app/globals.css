@@ -834,6 +834,16 @@ html[data-scripture-reduced-motion='true'] *::after {
   margin: 0 0 0.65em;
 }
 
+/* ProseMirror gives an empty block a trailing <br> so it still occupies a
+   line while editing. Static rendering omits that editor-only helper;
+   restore the line box so authored blank lines survive blur and export. */
+.scripture-text-editor:not(.ProseMirror) p:empty::before,
+.scripture-text-editor:not(.ProseMirror) h1:empty::before,
+.scripture-text-editor:not(.ProseMirror) h2:empty::before,
+.scripture-text-editor:not(.ProseMirror) h3:empty::before {
+  content: '\200b';
+}
+
 .scripture-text-editor h1,
 .scripture-text-editor h2,
 .scripture-text-editor h3 {

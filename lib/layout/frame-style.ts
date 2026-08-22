@@ -85,15 +85,22 @@ export function outerBoxStyle(node: LayoutNode): CSSProperties {
   return style
 }
 
+export type OverflowBehavior = 'scroll' | 'clip'
+
 /** Keeps resized content inside the outer geometry box. Width-only resizing
  * needs overflow just as much as height-only resizing does: a long `pre`
- * line otherwise paints through the right edge with no scrollbar or fade. */
-export function contentOverflowStyle(node: LayoutNode): CSSProperties {
+ * line otherwise paints through the right edge with no scrollbar or fade.
+ * Interactive nodes remain scrollable; static export copies clip at the
+ * authored bounds so browser scrollbar chrome is not captured in PNG/PDF. */
+export function contentOverflowStyle(
+  node: LayoutNode,
+  overflowBehavior: OverflowBehavior = 'scroll'
+): CSSProperties {
   if (node.width == null && node.height == null) return {}
   return {
     ...(node.width != null && { width: '100%', minWidth: 0 }),
     ...(node.height != null && { height: '100%', minHeight: 0 }),
-    overflow: 'auto',
+    overflow: overflowBehavior === 'scroll' ? 'auto' : 'hidden',
   }
 }
 
@@ -106,7 +113,10 @@ export function frameOuterStyle(node: LayoutNode): CSSProperties {
   }
 }
 
-export function frameInnerStyle(node: LayoutNode): CSSProperties {
+export function frameInnerStyle(
+  node: LayoutNode,
+  overflowBehavior: OverflowBehavior = 'scroll'
+): CSSProperties {
   const isCanvas = node.childLayout === 'canvas'
   const base: CSSProperties = {
     display: 'flex',
@@ -130,6 +140,6 @@ export function frameInnerStyle(node: LayoutNode): CSSProperties {
     ...base,
     ...(node.width != null && { width: '100%', minWidth: 0 }),
     ...(node.height != null && { height: '100%', minHeight: 0 }),
-    overflow: isCanvas ? 'hidden' : 'auto',
+    overflow: isCanvas || overflowBehavior === 'clip' ? 'hidden' : 'auto',
   }
 }

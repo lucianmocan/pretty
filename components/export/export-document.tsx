@@ -79,7 +79,7 @@ function renderNode(
           className={isRoot
             ? 'scripture-frame-content scripture-page-number-host'
             : 'scripture-frame-content'}
-          style={frameInnerStyle(node)}
+          style={frameInnerStyle(node, 'clip')}
         >
           {(node.children ?? []).map((child) => renderNode(child, ydoc, syntaxSnapshots, childLayout))}
           {isRoot && pageNumber && (
@@ -99,7 +99,7 @@ function renderNode(
         className={['scripture-leaf', ...autoSizeClasses(node)].join(' ')}
         style={{ ...outerBoxStyle(node), ...positionStyle }}
       >
-        <div className="scripture-leaf-content" style={contentOverflowStyle(node)}>
+        <div className="scripture-leaf-content" style={contentOverflowStyle(node, 'clip')}>
           {node.src && (
             <LocalImageVisual
               src={node.src}
@@ -142,7 +142,7 @@ function renderNode(
         className={['scripture-leaf', ...autoSizeClasses(node)].join(' ')}
         style={{ ...outerBoxStyle(node), ...positionStyle }}
       >
-        <div className="scripture-leaf-content" style={contentOverflowStyle(node)}>
+        <div className="scripture-leaf-content" style={contentOverflowStyle(node, 'clip')}>
           <div
             className="scripture-text-editor"
             style={textBlockStyle({
@@ -174,7 +174,7 @@ function renderNode(
         ...positionStyle,
       }}
     >
-      <div className="scripture-leaf-content" style={contentOverflowStyle(node)}>
+      <div className="scripture-leaf-content" style={contentOverflowStyle(node, 'clip')}>
         <CodeChrome
           fontFamily={node.fontFamily ?? 'geist-mono'}
           filename={node.filename ?? ''}
