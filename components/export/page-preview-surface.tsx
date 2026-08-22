@@ -44,20 +44,32 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
   const documentRef = useRef<HTMLDivElement>(null)
   const cachedDocumentRef = useRef<HTMLDivElement>(null)
   const releaseRef = useRef<(() => void) | null>(null)
-  const priorityRef = useRef(priority)
-  const acquiredPriorityRef = useRef<'foreground' | 'background'>('background')
   const requestRef = useRef(0)
   const cacheRequestRef = useRef(0)
   const lastSavedHtmlRef = useRef<string | null>(null)
-  const [shouldMount, setShouldMount] = useState(false)
-  const [mounted, setMounted] = useState(false)
-  const [ready, setReady] = useState(false)
-  const [failed, setFailed] = useState(false)
+  const [shouldMount, setShouldMount] = useState(
+    () => typeof IntersectionObserver === 'undefined'
+  )
+  const [mountedState, setMountedState] = useState<{
+    key: string
+    priority: 'foreground' | 'background'
+  } | null>(null)
+  const [readyKey, setReadyKey] = useState<string | null>(null)
+  const [failedKey, setFailedKey] = useState<string | null>(null)
   const [scale, setScale] = useState(1)
   const [cachedScale, setCachedScale] = useState(1)
-  const [cachedSnapshot, setCachedSnapshot] = useState<PagePreviewSnapshot | null>(null)
-  priorityRef.current = priority
   const variant = pagePreviewVariant(pageNumber, pageNumberSettings)
+  const previewKey = `${pageId}\u0000${variant}`
+  const slotKey = `${pageId}\u0000${priority}`
+  const [cachedState, setCachedState] = useState<{
+    key: string
+    snapshot: PagePreviewSnapshot
+  } | null>(null)
+  const cachedSnapshot = cachedState?.key === previewKey ? cachedState.snapshot : null
+  const mounted = shouldMount && mountedState?.key === slotKey
+  const acquiredPriority = mountedState?.key === slotKey ? mountedState.priority : 'background'
+  const ready = readyKey === previewKey
+  const failed = failedKey === previewKey
   const resolvedPageNumber = useMemo(
     () => pageNumber != null && pageNumberSettings
       ? { number: pageNumber, settings: pageNumberSettings }
@@ -67,10 +79,7 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
 
   useEffect(() => {
     const viewport = viewportRef.current
-    if (!viewport || typeof IntersectionObserver === 'undefined') {
-      setShouldMount(true)
-      return
-    }
+    if (!viewport || typeof IntersectionObserver === 'undefined') return
     const scrollingRoot = viewport.closest('.scripture-pages-scroll')
     const observer = new IntersectionObserver(
       (entries) => {
@@ -91,7 +100,6 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
     if (!shouldMount) return
     const request = cacheRequestRef.current + 1
     cacheRequestRef.current = request
-    setCachedSnapshot(null)
     lastSavedHtmlRef.current = null
     void readPagePreview(pageId, variant).then((snapshot) => {
       if (cacheRequestRef.current !== request || !snapshot) return
@@ -103,12 +111,12 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
         ))
       }
       lastSavedHtmlRef.current = snapshot.html
-      setCachedSnapshot(snapshot)
+      setCachedState({ key: previewKey, snapshot })
     })
     return () => {
       if (cacheRequestRef.current === request) cacheRequestRef.current += 1
     }
-  }, [pageId, shouldMount, variant])
+  }, [pageId, previewKey, shouldMount, variant])
 
   useEffect(() => {
     if (!cachedSnapshot) return
@@ -134,10 +142,7 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
     const request = requestRef.current + 1
     requestRef.current = request
     const controller = new AbortController()
-    const requestPriority = priorityRef.current
-    setFailed(false)
-    setReady(false)
-
+    const requestPriority = priority
     void acquirePreviewSlot(pageId, controller.signal, requestPriority)
       .then((release) => {
         if (controller.signal.aborted || requestRef.current !== request) {
@@ -145,12 +150,12 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
           return
         }
         releaseRef.current = release
-        acquiredPriorityRef.current = requestPriority
-        setMounted(true)
+        setFailedKey((current) => current === previewKey ? null : current)
+        setMountedState({ key: slotKey, priority: requestPriority })
       })
       .catch((error) => {
         if (!controller.signal.aborted && !(error instanceof Error && error.name === 'AbortError')) {
-          setFailed(true)
+          setFailedKey(previewKey)
         }
       })
 
@@ -158,10 +163,9 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
       controller.abort()
       releaseRef.current?.()
       releaseRef.current = null
-      setMounted(false)
-      setReady(false)
+      setMountedState((current) => current?.key === slotKey ? null : current)
     }
-  }, [pageId, shouldMount])
+  }, [pageId, previewKey, priority, shouldMount, slotKey])
 
   useEffect(() => {
     if (!mounted) return
@@ -188,7 +192,7 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
           if (surface.dataset.exportReady !== 'true') {
             geometryObserver?.disconnect()
             geometryObserver = null
-            setReady(false)
+            setReadyKey((current) => current === previewKey ? null : current)
             return
           }
 
@@ -226,11 +230,11 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
                     viewport.clientWidth / pageWidth,
                     viewport.clientHeight / pageHeight
                   ))
-                  setCachedSnapshot(snapshot)
+                  setCachedState({ key: previewKey, snapshot })
                   void savePagePreview(snapshot)
                 }
               }
-              setReady(true)
+              setReadyKey(previewKey)
             })
           })
         }
@@ -244,7 +248,7 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
       })
       .catch((error) => {
         if (!controller.signal.aborted && !(error instanceof Error && error.name === 'AbortError')) {
-          setFailed(true)
+          setFailedKey(previewKey)
         }
       })
       .finally(() => {
@@ -260,7 +264,7 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
       readinessObserver?.disconnect()
       geometryObserver?.disconnect()
     }
-  }, [mounted, pageId, variant])
+  }, [mounted, pageId, previewKey, variant])
 
   const hasVisiblePreview = ready || cachedSnapshot != null
 
@@ -295,7 +299,7 @@ export const PagePreviewSurface = memo(function PagePreviewSurface({
           <BrowserExportPage
             pageId={pageId}
             margin={0}
-            priority={acquiredPriorityRef.current === 'foreground' ? 'focused' : 'background'}
+            priority={acquiredPriority === 'foreground' ? 'focused' : 'background'}
             allowSyntaxFallback
             revision={revision}
             pageNumber={resolvedPageNumber}

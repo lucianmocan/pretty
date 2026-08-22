@@ -265,6 +265,57 @@ html[data-scripture-reduced-motion='true'] *::after {
   user-select: none;
 }
 
+/* An already-generated thumbnail snapshot fills the brief first-paint gap
+   while a cold interactive canvas mounts. The live canvas replaces it as
+   soon as its natural dimensions are measured. */
+.scripture-canvas-switch-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: safe center;
+  justify-content: safe center;
+  overflow: hidden;
+  padding: 3.5rem;
+  contain: layout paint;
+  background-color: var(--card);
+  background-image: radial-gradient(var(--border) 1px, transparent 1px);
+  background-size: 22px 22px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.scripture-canvas-switch-preview-document {
+  width: max-content;
+  flex: 0 0 auto;
+  transform: scale(var(--scripture-canvas-switch-scale, 1));
+  transform-origin: center;
+}
+
+.scripture-canvas-switch-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--popover);
+  box-shadow: var(--shadow-md);
+  font-size: 0.8125rem;
+  font-weight: 550;
+}
+
+.scripture-canvas-switch-loading svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--muted-foreground);
+  animation: scripture-save-spin 800ms linear infinite;
+}
+
+.scripture-cached-canvas-page {
+  width: max-content;
+}
+
 .scripture-canvas-notices {
   position: absolute;
   top: 1rem;

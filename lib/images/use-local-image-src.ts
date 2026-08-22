@@ -8,6 +8,7 @@ import { parseLocalImageSrc, getImageBlob } from './local-store'
 // revoked -- see image-crop-dialog.tsx -- because there can be many of them
 // and they're only ever shown once).
 const urlCache = new Map<string, string>()
+const pendingUrlCache = new Map<string, Promise<string | undefined>>()
 
 /** Resolves a stored `src` -- a `local:{id}` reference into this browser's
  * IndexedDB (see local-store.ts) -- into an actual `blob:` URL usable in an
@@ -19,25 +20,53 @@ export function useLocalImageSrc(src: string | undefined | null): string | undef
   // src, or a local one already sitting in urlCache -- is derived directly
   // during render, no state/effect needed for that path at all.
   const syncValue = resolveSync(src)
-  const [asyncValue, setAsyncValue] = useState<string | undefined>(undefined)
+  const [asyncResolution, setAsyncResolution] = useState<{
+    src: string
+    url: string
+  } | null>(null)
 
   useEffect(() => {
     if (syncValue !== undefined || !src) return
     const id = parseLocalImageSrc(src)
     if (!id) return
     let cancelled = false
-    getImageBlob(id).then((blob) => {
-      if (cancelled || !blob) return
-      const url = URL.createObjectURL(blob)
-      urlCache.set(src, url)
-      setAsyncValue(url)
+    resolveLocalImageUrl(src, id).then((url) => {
+      if (!cancelled && url) setAsyncResolution({ src, url })
     })
     return () => {
       cancelled = true
     }
   }, [src, syncValue])
 
-  return syncValue ?? asyncValue
+  return syncValue ?? (
+    asyncResolution && asyncResolution.src === src ? asyncResolution.url : undefined
+  )
+}
+
+/** Keep IndexedDB resolution shared across component lifecycles. A remount or
+ * rapid page swap can then resolve from the synchronous URL cache instead of
+ * starting—and potentially cancelling—the same media read again. */
+function resolveLocalImageUrl(src: string, id: string): Promise<string | undefined> {
+  const cached = urlCache.get(src)
+  if (cached) return Promise.resolve(cached)
+  const existing = pendingUrlCache.get(src)
+  if (existing) return existing
+
+  const pending = getImageBlob(id)
+    .then((blob) => {
+      if (!blob) return undefined
+      const cachedAfterRead = urlCache.get(src)
+      if (cachedAfterRead) return cachedAfterRead
+      const url = URL.createObjectURL(blob)
+      urlCache.set(src, url)
+      return url
+    })
+    .catch(() => undefined)
+  pendingUrlCache.set(src, pending)
+  void pending.then(() => {
+    if (pendingUrlCache.get(src) === pending) pendingUrlCache.delete(src)
+  })
+  return pending
 }
 
 function resolveSync(src: string | undefined | null): string | undefined {

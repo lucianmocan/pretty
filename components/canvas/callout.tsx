@@ -13,6 +13,7 @@ interface CalloutProps {
   onChange: (patch: Partial<CalloutAnnotation>) => void
   onRemove: () => void
   zoom: number
+  active?: boolean
 }
 
 /**
@@ -24,7 +25,7 @@ interface CalloutProps {
  * something nearby" without that complexity. `targetId` is kept in the data
  * model for a future version that draws a real anchored line.
  */
-export function Callout({ callout, onChange, onRemove, zoom }: CalloutProps) {
+export function Callout({ callout, onChange, onRemove, zoom, active = true }: CalloutProps) {
   const calloutRef = useRef<HTMLDivElement>(null)
   const dragState = useRef<{
     pointerId: number
@@ -50,8 +51,12 @@ export function Callout({ callout, onChange, onRemove, zoom }: CalloutProps) {
     return () => activeCleanupRef.current?.()
   }, [])
 
+  useEffect(() => {
+    if (!active) activeCleanupRef.current?.()
+  }, [active])
+
   function beginDrag(e: React.PointerEvent) {
-    if (!e.isPrimary || e.button !== 0 || activeCleanupRef.current) return
+    if (!active || !e.isPrimary || e.button !== 0 || activeCleanupRef.current) return
     e.stopPropagation()
     e.preventDefault()
     const scrollElement = calloutRef.current?.closest<HTMLElement>('.scripture-canvas-area') ?? null
@@ -113,7 +118,7 @@ export function Callout({ callout, onChange, onRemove, zoom }: CalloutProps) {
       window.removeEventListener('keydown', onKeyDown)
       activeCleanupRef.current = null
     }
-    activeCleanupRef.current = cleanup
+    activeCleanupRef.current = onBlur
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onCancel)

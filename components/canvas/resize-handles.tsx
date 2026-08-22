@@ -24,6 +24,7 @@ interface ResizeHandlesProps {
   // getBoundingClientRect() are in screen units.
   zoom: number
   preserveAspectRatio?: boolean
+  active?: boolean
 }
 
 interface DragState {
@@ -63,6 +64,7 @@ export function ResizeHandles({
   position,
   zoom,
   preserveAspectRatio = false,
+  active = true,
 }: ResizeHandlesProps) {
   const dragState = useRef<DragState | null>(null)
   const activeCleanupRef = useRef<(() => void) | null>(null)
@@ -71,9 +73,13 @@ export function ResizeHandles({
     return () => activeCleanupRef.current?.()
   }, [])
 
+  useEffect(() => {
+    if (!active) activeCleanupRef.current?.()
+  }, [active])
+
   function beginDrag(axis: ResizeAxis) {
     return (e: React.PointerEvent) => {
-      if (!e.isPrimary || e.button !== 0 || dragState.current) return
+      if (!active || !e.isPrimary || e.button !== 0 || dragState.current) return
       const el = targetRef.current
       const rect = el?.getBoundingClientRect()
       if (!el || !rect) return
@@ -159,7 +165,7 @@ export function ResizeHandles({
         cancel()
       }
 
-      activeCleanupRef.current = cleanup
+      activeCleanupRef.current = cancel
       window.addEventListener('pointermove', onMove, { passive: false })
       window.addEventListener('pointerup', onUp)
       window.addEventListener('pointercancel', onPointerCancel)

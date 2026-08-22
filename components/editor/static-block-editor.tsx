@@ -60,6 +60,7 @@ export const StaticBlockEditor = memo(function StaticBlockEditor({
   textLineHeight = 1.5,
   textLetterSpacing = 0,
   textColor = 'currentColor',
+  pageActive = true,
 }: BlockEditorProps) {
   const entry = getYDoc(docId)
   const fragment = entry.doc.getXmlFragment(blockFragmentName(blockId))
@@ -76,7 +77,7 @@ export const StaticBlockEditor = memo(function StaticBlockEditor({
     ranges: SyntaxStyleRange[]
   } | null>(null)
   const { elementRef: syntaxElementRef, priority: syntaxWorkPriority } =
-    useSyntaxPriority(kind === 'code' && document !== null)
+    useSyntaxPriority(pageActive && kind === 'code' && document !== null)
 
   const adapter = useMemo<StaticEditorAdapter>(() => ({
     getText: () => staticBlockText(fragment),
@@ -97,9 +98,10 @@ export const StaticBlockEditor = memo(function StaticBlockEditor({
   }), [docId, fragment])
 
   useEffect(() => {
+    if (!pageActive) return
     registry.registerStatic(blockId, adapter)
     return () => registry.unregisterStatic(blockId, adapter)
-  }, [adapter, blockId, registry])
+  }, [adapter, blockId, pageActive, registry])
 
   useEffect(() => {
     let cancelled = false
@@ -129,7 +131,7 @@ export const StaticBlockEditor = memo(function StaticBlockEditor({
   }, [kind])
 
   useEffect(() => {
-    if (kind !== 'code' || !document) return
+    if (!pageActive || kind !== 'code' || !document) return
     const text = plainTextFromDocument(document)
     const currentLanguage = language ?? 'plaintext'
     const currentTheme = resolveThemeArg(theme)
@@ -158,7 +160,7 @@ export const StaticBlockEditor = memo(function StaticBlockEditor({
       })
 
     return () => controller.abort()
-  }, [customThemeRevision, document, kind, language, syntaxWorkPriority, theme])
+  }, [customThemeRevision, document, kind, language, pageActive, syntaxWorkPriority, theme])
 
   if (!document) return <div className="scripture-editor-loading">Loading…</div>
 

@@ -94,14 +94,17 @@ function maximumPagesHeight(panel: HTMLElement): number {
 }
 
 function useStablePageMountOrder(pageIds: string[]): string[] {
-  const mountOrderRef = useRef<string[]>([])
-  const livePageIds = new Set(pageIds)
-  const nextMountOrder = mountOrderRef.current.filter((pageId) => livePageIds.has(pageId))
-  for (const pageId of pageIds) {
-    if (!nextMountOrder.includes(pageId)) nextMountOrder.push(pageId)
+  const [state, setState] = useState(() => ({ pageIds, mountOrder: pageIds }))
+  if (state.pageIds !== pageIds) {
+    const livePageIds = new Set(pageIds)
+    const nextMountOrder = state.mountOrder.filter((pageId) => livePageIds.has(pageId))
+    for (const pageId of pageIds) {
+      if (!nextMountOrder.includes(pageId)) nextMountOrder.push(pageId)
+    }
+    setState({ pageIds, mountOrder: nextMountOrder })
+    return nextMountOrder
   }
-  mountOrderRef.current = nextMountOrder
-  return nextMountOrder
+  return state.mountOrder
 }
 
 const PageThumbnail = memo(function PageThumbnail({

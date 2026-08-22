@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { ImagePlus, LoaderCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { uploadImageFile, isPdfFile } from '@/lib/images/client'
@@ -78,8 +78,12 @@ export function ImageBlock({
   // (uploading a fresh photo, or a PDF page's freshly-converted SVG) --
   // without this, the block just sits blank with no sign anything is
   // happening until the browser finishes loading it.
-  const [loaded, setLoaded] = useState(false)
-  useEffect(() => setLoaded(false), [resolvedSrc])
+  // Track which source completed instead of resetting a boolean in an
+  // effect. A keep-alive can preserve an already-loaded <img>, which does not
+  // emit another load event when revealed; resetting there left the loading
+  // overlay permanently covering images after page swaps.
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null)
+  const loaded = Boolean(resolvedSrc && loadedSrc === resolvedSrc)
 
   async function handleFile(file: File) {
     if (isPdfFile(file)) {
@@ -155,6 +159,7 @@ export function ImageBlock({
 
   return (
     <ImageVisual
+      key={resolvedSrc}
       src={resolvedSrc}
       alt={alt}
       radius={radius}
@@ -175,8 +180,8 @@ export function ImageBlock({
       hue={hue}
       grayscale={grayscale}
       blur={blur}
-      onLoad={() => setLoaded(true)}
-      onError={() => setLoaded(true)}
+      onLoad={() => setLoadedSrc(resolvedSrc)}
+      onError={() => setLoadedSrc(resolvedSrc)}
       overlay={overlay}
     />
   )

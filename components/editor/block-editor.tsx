@@ -84,6 +84,7 @@ export interface BlockEditorProps {
   textLineHeight?: number
   textLetterSpacing?: number
   textColor?: string
+  pageActive?: boolean
 }
 
 /**
@@ -121,13 +122,14 @@ function InteractiveBlockEditor({
   textLineHeight = 1.5,
   textLetterSpacing = 0,
   textColor = 'currentColor',
+  pageActive = true,
 }: BlockEditorProps) {
   const entry = getYDoc(docId)
   const [syncedDocId, setSyncedDocId] = useState<string | null>(() => entry.isSynced ? docId : null)
   const synced = syncedDocId === docId
   const [customThemeRevision, setCustomThemeRevision] = useState(0)
   const { elementRef: syntaxElementRef, priority: syntaxWorkPriority } =
-    useSyntaxPriority(kind === 'code' && synced)
+    useSyntaxPriority(pageActive && kind === 'code' && synced)
   const syntaxPriorityRef = useRef(syntaxWorkPriority)
   syntaxPriorityRef.current = syntaxWorkPriority
   const tabSize = useTabSize()
@@ -163,6 +165,16 @@ function InteractiveBlockEditor({
       generationRef.current++
     }
   }, [])
+
+  useEffect(() => {
+    if (pageActive) return
+    if (retokenizeTimerRef.current) {
+      clearTimeout(retokenizeTimerRef.current)
+      retokenizeTimerRef.current = null
+    }
+    retokenizeAbortRef.current?.abort()
+    retokenizeGenerationRef.current += 1
+  }, [pageActive])
 
   useEffect(() => {
     if (kind !== 'code') return
@@ -376,26 +388,26 @@ function InteractiveBlockEditor({
   // simultaneously, so the registry is always complete.
   const registry = useEditorRegistry()
   useEffect(() => {
-    if (!editor) return
+    if (!pageActive || !editor) return
     registry.register(blockId, editor)
     return () => registry.unregister(blockId, editor)
-  }, [editor, blockId, registry])
+  }, [editor, blockId, pageActive, registry])
 
   // useEditor's initial config value only applies on creation -- toggling
   // `editable` across renders (selected-not-editing <-> double-clicked into
   // edit mode) needs this explicit, imperative call to actually take effect
   // afterward.
   useEffect(() => {
-    editor?.setEditable(editable)
-  }, [editor, editable])
+    editor?.setEditable(pageActive && editable)
+  }, [editor, editable, pageActive])
 
   useEffect(() => {
     // Existing canvas blocks mount the interactive editor before the Yjs
     // sync promise settles. Until `synced` is true EditorContent is not in
     // the DOM, so an earlier focus() succeeds only internally and no caret
     // appears. Focus after the synced render has committed instead.
-    if (editor && synced && focusOnMount) editor.commands.focus()
-  }, [editor, focusOnMount, synced])
+    if (pageActive && editor && synced && focusOnMount) editor.commands.focus()
+  }, [editor, focusOnMount, pageActive, synced])
 
   // Seed initial content once synced, if this block's fragment is still empty.
   useEffect(() => {
@@ -438,7 +450,7 @@ function InteractiveBlockEditor({
   // Custom theme edits can keep the same stored id, so their storage revision
   // is also part of this trigger.
   useEffect(() => {
-    if (kind !== 'code' || !editor || !synced) return
+    if (!pageActive || kind !== 'code' || !editor || !synced) return
     const block = editor.state.doc.firstChild
     const currentLanguage = language ?? 'plaintext'
     if (
@@ -455,11 +467,12 @@ function InteractiveBlockEditor({
     retokenizeRetryRef.current = 0
     scheduleRetokenize(editor, 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor, synced, language, theme, customThemeRevision])
+  }, [editor, synced, language, theme, customThemeRevision, pageActive])
 
   useEffect(() => {
     if (
       kind === 'code' &&
+      pageActive &&
       editor &&
       synced &&
       syntaxWorkPriority === 'visible'
@@ -467,7 +480,7 @@ function InteractiveBlockEditor({
       scheduleRetokenize(editor, 0)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor, synced, kind, syntaxWorkPriority])
+  }, [editor, synced, kind, pageActive, syntaxWorkPriority])
 
   // Reactive line count for the line-number gutter -- one literal '\n' is
   // always exactly one visual line, since code renders with white-space: pre.

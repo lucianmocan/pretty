@@ -1,6 +1,13 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type CSSProperties,
+} from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { LoaderCircle, Plus } from 'lucide-react'
 import { select } from 'd3-selection'
@@ -67,6 +74,13 @@ import {
 import type { ImageEffectPreview } from '@/lib/layout/image-effects'
 import { calculateCanvasCentering } from '@/lib/layout/canvas-centering'
 import { clampCanvasZoom, MAX_CANVAS_ZOOM, MIN_CANVAS_ZOOM } from '@/lib/layout/canvas-zoom'
+import {
+  pagePreviewVariant,
+  peekPagePreview,
+  readPagePreview,
+  type PagePreviewSnapshot,
+} from '@/lib/documents/preview'
+import { removePageCanvas, retainPageCanvas } from '@/lib/page-canvas-cache'
 
 const ZOOM_STEP = 1.05
 
@@ -110,6 +124,128 @@ function applyCanvasOffset(scaleBox: HTMLElement, offset: { x: number; y: number
   scaleBox.style.translate = offset.x === 0 && offset.y === 0 ? '' : `${offset.x}px ${offset.y}px`
 }
 
+type SharedFrameNodeProps = Omit<
+  ComponentProps<typeof FrameNode>,
+  'node' | 'docId' | 'selectedIds' | 'editingId' | 'pageNumber' | 'imageEffectPreview' | 'pageActive'
+>
+
+function CachedCanvasPage({
+  pageId,
+  active,
+  selectedIds,
+  editingId,
+  pageNumber,
+  imageEffectPreview,
+  frameNodeProps,
+}: {
+  pageId: string
+  active: boolean
+  selectedIds: string[]
+  editingId: string | null
+  pageNumber?: ComponentProps<typeof FrameNode>['pageNumber']
+  imageEffectPreview: ImageEffectPreview | null
+  frameNodeProps: SharedFrameNodeProps
+}) {
+  const tree = useLayoutTree(pageId)
+
+  return (
+    <div
+      className="scripture-cached-canvas-page"
+      hidden={!active}
+      aria-hidden={!active}
+      inert={!active}
+    >
+      {tree ? (
+        <FrameNode
+          {...frameNodeProps}
+          node={tree}
+          docId={pageId}
+          selectedIds={active ? selectedIds : []}
+          editingId={active ? editingId : null}
+          pageNumber={pageNumber}
+          imageEffectPreview={active ? imageEffectPreview : null}
+          pageActive={active}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function CanvasPreviewHandoff({
+  pageId,
+  variant,
+  visible,
+}: {
+  pageId: string
+  variant: string
+  visible: boolean
+}) {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const previewKey = `${pageId}\u0000${variant}`
+  const [loadedPreview, setLoadedPreview] = useState<{
+    key: string
+    snapshot: PagePreviewSnapshot | null
+  } | null>(() => ({ key: previewKey, snapshot: peekPagePreview(pageId, variant) }))
+  const snapshot = loadedPreview?.key === previewKey
+    ? loadedPreview.snapshot
+    : peekPagePreview(pageId, variant)
+  const [scale, setScale] = useState(1)
+
+  useEffect(() => {
+    if (snapshot) return
+    let cancelled = false
+    void readPagePreview(pageId, variant).then((next) => {
+      if (!cancelled) setLoadedPreview({ key: previewKey, snapshot: next })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [pageId, previewKey, snapshot, variant])
+
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    if (!visible || !snapshot || !root) return
+    const update = () => {
+      const style = getComputedStyle(root)
+      const availableWidth = root.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+      const availableHeight = root.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
+      setScale(Math.min(1, availableWidth / snapshot.pageWidth, availableHeight / snapshot.pageHeight))
+    }
+    const observer = new ResizeObserver(update)
+    observer.observe(root)
+    update()
+    return () => observer.disconnect()
+  }, [snapshot, visible])
+
+  if (!visible) return null
+
+  return (
+    <div
+      ref={rootRef}
+      className="scripture-canvas-switch-preview"
+      aria-hidden={snapshot ? true : undefined}
+      aria-live={snapshot ? undefined : 'polite'}
+      aria-busy={snapshot ? undefined : true}
+      role={snapshot ? undefined : 'status'}
+      inert={Boolean(snapshot)}
+    >
+      {/* Serialized from the app's own escaped export DOM, shared with page thumbnails. */}
+      {snapshot ? (
+        <div
+          className="scripture-canvas-switch-preview-document"
+          style={{ '--scripture-canvas-switch-scale': scale } as CSSProperties}
+          dangerouslySetInnerHTML={{ __html: snapshot.html }}
+        />
+      ) : (
+        <span className="scripture-canvas-switch-loading">
+          <LoaderCircle aria-hidden="true" />
+          Opening page…
+        </span>
+      )}
+    </div>
+  )
+}
+
 export default function DocumentEditorPage() {
   const { docId } = useParams<{ docId: string }>()
   const router = useRouter()
@@ -118,6 +254,7 @@ export default function DocumentEditorPage() {
   const [pageNames, setPageNames] = useState<Record<string, string>>({})
   const [pageNumberSettings, setPageNumberSettings] = useState<PageNumberSettings>(DEFAULT_PAGE_NUMBER_SETTINGS)
   const [activePageId, setActivePageId] = useState<string | null>(null)
+  const [cachedPageIds, setCachedPageIds] = useState<string[]>([])
   const activePageNumber = activePageId
     ? resolvePageNumber(pageIds, activePageId, pageNumberSettings)
     : null
@@ -148,6 +285,12 @@ export default function DocumentEditorPage() {
   const [zoom, setZoom] = useState(1)
   const zoomRef = useRef(1)
   const previousZoomRef = useRef(1)
+  // Set right before a setZoom call that isn't the user directly zooming in
+  // (page-switch restore, auto-fit, recenter) -- lets the zoom-increase
+  // effect below tell "the user zoomed in" apart from "the zoom level just
+  // changed because we switched/fit pages" so the pan hint doesn't pop on
+  // every switch back to a page the user had zoomed in on.
+  const programmaticZoomRef = useRef(false)
   const pendingZoomAnchorRef = useRef<{ x: number; y: number; canvasX: number; canvasY: number } | null>(null)
   const [customizeOpen, setCustomizeOpen] = useState(false)
   const [showStarterPicker, setShowStarterPicker] = useState(false)
@@ -186,6 +329,14 @@ export default function DocumentEditorPage() {
   const canvasOverflowsRef = useRef(false)
   const [canvasOverflows, setCanvasOverflows] = useState(false)
   const [panHintVisible, setPanHintVisible] = useState(false)
+  // Per-page camera memory -- each page remembers the zoom/fit-mode/scroll/pan
+  // it was left at, so switching back to a page restores exactly how it
+  // looked instead of replaying the fit-to-viewport animation every time.
+  // Never trimmed: bounded by the document's own page count.
+  const pageViewRef = useRef(
+    new Map<string, { zoom: number; fitMode: boolean; scrollLeft: number; scrollTop: number; offset: { x: number; y: number } }>()
+  )
+  const pendingRestoreViewRef = useRef<{ scrollLeft: number; scrollTop: number; offset: { x: number; y: number } } | null>(null)
 
   useEffect(() => {
     zoomRef.current = zoom
@@ -203,6 +354,8 @@ export default function DocumentEditorPage() {
     setPageNames(getPageNames(docId))
     setPageNumberSettings(getPageNumberSettings(docId))
     setActivePageId(ids[0])
+    setCachedPageIds(ids[0] ? [ids[0]] : [])
+    setSelectedIds(ids[0] ? [ROOT_ID] : [])
   }, [docId])
 
   useEffect(() => {
@@ -252,9 +405,9 @@ export default function DocumentEditorPage() {
   // Bump "last updated" and expose local persistence feedback on any change
   // to the active page -- layout tree or any block's content.
   // any block's content -- doc.on('update') fires for every transaction on
-  // the whole Y.Doc regardless of which shared type changed. Only one
-  // page's components are ever mounted/edited at a time, so watching just
-  // that page's doc is sufficient.
+  // the whole Y.Doc regardless of which shared type changed. Recent page DOM
+  // stays warm, but only the visible page drives document-level save state,
+  // so watching that page's doc is sufficient.
   useEffect(() => {
     if (!activePageId) return
     const { doc, synced } = getYDoc(activePageId)
@@ -287,23 +440,23 @@ export default function DocumentEditorPage() {
     }
   }, [docId, activePageId])
 
-  useEffect(() => {
-    if (tree && selectedIds.length === 0) setSelectedIds([ROOT_ID])
-  }, [tree, selectedIds])
-
   // Track the canvas content's natural (unscaled) size -- read from the
   // inner .scripture-canvas-viewport, which is never itself transformed by
   // its own scale, so offsetWidth/offsetHeight are always true content
   // units regardless of the current zoom.
   useEffect(() => {
+    if (!treeMounted) return
     const el = viewportRef.current
     if (!el) return
-    const observer = new ResizeObserver(() => {
+    const update = () => {
       const size = { width: el.offsetWidth, height: el.offsetHeight }
+      if (size.width <= 0 || size.height <= 0) return
       naturalSizeRef.current = size
       setNaturalSize(size)
-    })
+    }
+    const observer = new ResizeObserver(update)
     observer.observe(el)
+    update()
     return () => observer.disconnect()
   }, [activePageId, treeMounted])
 
@@ -462,7 +615,11 @@ export default function DocumentEditorPage() {
       if (next === canvasOverflowsRef.current) return
       canvasOverflowsRef.current = next
       setCanvasOverflows(next)
-      setPanHintVisible(next)
+      // Only auto-*hide* the hint here. Showing it is the zoom-increase
+      // effect's job -- this effect also fires on every page switch (a
+      // restored zoom/pan can legitimately overflow), and popping the hint
+      // there would read as "why is this showing, I didn't do anything".
+      if (!next) setPanHintVisible(false)
     }
     updateOverflow()
     const observer = new ResizeObserver(updateOverflow)
@@ -483,6 +640,10 @@ export default function DocumentEditorPage() {
   useEffect(() => {
     const previousZoom = previousZoomRef.current
     previousZoomRef.current = zoom
+    if (programmaticZoomRef.current) {
+      programmaticZoomRef.current = false
+      return
+    }
     if (zoom <= previousZoom) return
     const frame = requestAnimationFrame(() => {
       const area = canvasAreaRef.current
@@ -620,18 +781,53 @@ export default function DocumentEditorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIds, activePageId, tree, editingId])
 
-  // Switching pages: the new page's tree hasn't loaded yet, so clear
-  // selection now -- the effect above re-selects ROOT_ID once it has.
+  // Switching pages promotes the target canvas into a bounded MRU cache.
+  // Inactive canvases use a CSS keep-alive so their DOM and editor instances
+  // survive, while the oldest entry is still evicted to bound memory use.
   function handleSwitchPage(pageId: string) {
     if (pageId === activePageId) return
     void preloadLayoutTree(pageId)
     activePanCleanupRef.current?.()
-    autoFitDoneRef.current = false
-    fitModeRef.current = true
+
+    // Remember exactly how the page we're leaving was framed, so coming back
+    // to it later restores that view instead of re-running auto-fit.
+    if (activePageId) {
+      const area = canvasAreaRef.current
+      pageViewRef.current.set(activePageId, {
+        zoom: zoomRef.current,
+        fitMode: fitModeRef.current,
+        scrollLeft: area?.scrollLeft ?? 0,
+        scrollTop: area?.scrollTop ?? 0,
+        offset: { ...canvasOffsetRef.current },
+      })
+    }
+
+    const savedView = pageViewRef.current.get(pageId)
+    pendingZoomAnchorRef.current = null
     naturalSizeRef.current = null
     setNaturalSize(null)
+
+    if (savedView) {
+      autoFitDoneRef.current = true
+      fitModeRef.current = savedView.fitMode
+      zoomRef.current = savedView.zoom
+      programmaticZoomRef.current = true
+      setZoom(savedView.zoom)
+      pendingRestoreViewRef.current = {
+        scrollLeft: savedView.scrollLeft,
+        scrollTop: savedView.scrollTop,
+        offset: savedView.offset,
+      }
+    } else {
+      autoFitDoneRef.current = false
+      fitModeRef.current = true
+      pendingRestoreViewRef.current = null
+      resetCanvasOffset()
+    }
+
+    setCachedPageIds((current) => retainPageCanvas(current, pageId))
     setActivePageId(pageId)
-    setSelectedIds([])
+    setSelectedIds([ROOT_ID])
     setEditingId(null)
   }
 
@@ -643,6 +839,7 @@ export default function DocumentEditorPage() {
 
   async function handleRemovePage(pageId: string) {
     await deletePage(docId, pageId)
+    setCachedPageIds((current) => removePageCanvas(current, pageId))
     const next = pageIds.filter((id) => id !== pageId)
     setPageIds(next)
     setPageNames((current) => {
@@ -652,6 +849,7 @@ export default function DocumentEditorPage() {
     })
     setPageNumberSettings(getPageNumberSettings(docId))
     if (activePageId === pageId) handleSwitchPage(next[Math.max(0, pageIds.indexOf(pageId) - 1)])
+    pageViewRef.current.delete(pageId)
   }
 
   async function handleDuplicatePage(pageId: string) {
@@ -1054,6 +1252,7 @@ export default function DocumentEditorPage() {
     // "Fit" may shrink an oversized canvas, but it must never silently turn
     // into magnification. Authored dimensions should be shown at 100% on a
     // roomy viewport; zooming above that is always an explicit user action.
+    programmaticZoomRef.current = true
     setZoom(clampCanvasZoom(Math.min(1, availableWidth / size.width, availableHeight / size.height)))
     // Wait for the new scale-box dimensions before centering. A fitting item
     // uses zero-offset `safe center`; any residual rounding overflow is
@@ -1071,17 +1270,25 @@ export default function DocumentEditorPage() {
     fitCanvasToViewport()
   }
 
-  // Auto-fit once per page, the first time its natural size becomes known.
-  // Large canvases shrink to remain visible; smaller ones stay at their
-  // authored 100% size rather than being unexpectedly magnified.
-  useEffect(() => {
-    autoFitDoneRef.current = false
-    fitModeRef.current = true
-    naturalSizeRef.current = null
-    pendingZoomAnchorRef.current = null
-    resetCanvasOffset()
-  }, [activePageId])
+  // Restore a previously-visited page's exact scroll/pan offset once its
+  // scale-box has (re)appeared at the restored zoom -- handleSwitchPage
+  // already restored the zoom itself and left the target here.
+  useLayoutEffect(() => {
+    const pending = pendingRestoreViewRef.current
+    if (!pending || !naturalSize) return
+    pendingRestoreViewRef.current = null
+    const area = canvasAreaRef.current
+    const scaleBox = area?.querySelector<HTMLElement>('.scripture-canvas-scale-box')
+    if (!area || !scaleBox) return
+    canvasOffsetRef.current = { ...pending.offset }
+    applyCanvasOffset(scaleBox, canvasOffsetRef.current)
+    area.scrollLeft = pending.scrollLeft
+    area.scrollTop = pending.scrollTop
+  }, [naturalSize])
 
+  // Auto-fit the first time a page (never visited before) has its natural
+  // size become known. Large canvases shrink to remain visible; smaller ones
+  // stay at their authored 100% size rather than being unexpectedly magnified.
   useEffect(() => {
     if (autoFitDoneRef.current || !naturalSizeRef.current) return
     fitModeRef.current = true
@@ -1139,6 +1346,30 @@ export default function DocumentEditorPage() {
   }
 
   if (notFound) return null
+
+  const sharedFrameNodeProps = {
+    onSelect: handleSelect,
+    onSelectionChange: handleSelectionChange,
+    onMove: handleMove,
+    onDuplicate: handleDuplicate,
+    onRemove: handleRemove,
+    onReorder: handleReorder,
+    onResizeNode: handleResizeNode,
+    onRepositionNode: handleRepositionNode,
+    parentChildLayout: 'flex' as const,
+    gutterClickMode,
+    onGutterClick: handleGutterClick,
+    zoom,
+    onSetEditing: setEditingId,
+    parentId: null,
+    onAddBlockToFrame: handleAddBlockToFrame,
+    onRequestPdfPicker: handleRequestPdfPicker,
+    onDropFiles: handleDropFiles,
+  } satisfies SharedFrameNodeProps
+  const activePreviewVariant = pagePreviewVariant(
+    activePageNumber?.number,
+    activePageNumber ? pageNumberSettings : undefined
+  )
 
   return (
     <div className="scripture-editor-shell">
@@ -1218,8 +1449,7 @@ export default function DocumentEditorPage() {
               onSetEditing={setEditingId}
               onReorderNode={handleReorder}
             />
-            {tree ? (
-              <>
+            <>
                 <div className="scripture-canvas-stage">
                   <div
                     ref={canvasAreaRef}
@@ -1250,38 +1480,33 @@ export default function DocumentEditorPage() {
                         }
                       >
                         <CanvasRoot>
-                          <FrameNode
-                            key={activePageId}
-                            node={tree}
-                            docId={activePageId as string}
-                            selectedIds={selectedIds}
-                            onSelect={handleSelect}
-                            onSelectionChange={handleSelectionChange}
-                            onMove={handleMove}
-                            onDuplicate={handleDuplicate}
-                            onRemove={handleRemove}
-                            onReorder={handleReorder}
-                            onResizeNode={handleResizeNode}
-                            onRepositionNode={handleRepositionNode}
-                            parentChildLayout="flex"
-                            gutterClickMode={gutterClickMode}
-                            onGutterClick={handleGutterClick}
-                            zoom={zoom}
-                            editingId={editingId}
-                            onSetEditing={setEditingId}
-                            parentId={null}
-                            onAddBlockToFrame={handleAddBlockToFrame}
-                            onRequestPdfPicker={handleRequestPdfPicker}
-                            onDropFiles={handleDropFiles}
-                            pageNumber={activePageNumber
-                              ? { number: activePageNumber.number, settings: pageNumberSettings }
-                              : undefined}
-                            imageEffectPreview={imageEffectPreview}
-                          />
+                          {cachedPageIds.map((pageId) => {
+                            const pageNumber = resolvePageNumber(pageIds, pageId, pageNumberSettings)
+                            return (
+                              <CachedCanvasPage
+                                key={pageId}
+                                pageId={pageId}
+                                active={pageId === activePageId}
+                                selectedIds={selectedIds}
+                                editingId={editingId}
+                                pageNumber={pageNumber
+                                  ? { number: pageNumber.number, settings: pageNumberSettings }
+                                  : undefined}
+                                imageEffectPreview={imageEffectPreview}
+                                frameNodeProps={sharedFrameNodeProps}
+                              />
+                            )
+                          })}
                         </CanvasRoot>
                       </div>
                     </div>
                   </div>
+                  <CanvasPreviewHandoff
+                    key={activePageId}
+                    pageId={activePageId}
+                    variant={activePreviewVariant}
+                    visible={!tree || naturalSize === null}
+                  />
                   <ZoomControls
                     zoom={zoom}
                     onZoomIn={handleZoomIn}
@@ -1289,13 +1514,15 @@ export default function DocumentEditorPage() {
                     onZoomChange={handleZoomChange}
                     onRecenter={handleRecenter}
                   />
-                  <CanvasToolbar
-                    docId={activePageId as string}
-                    tree={tree}
-                    selectedIds={selectedIds}
-                    onSelectionChange={handleSelectionChange}
-                    onSetEditing={setEditingId}
-                  />
+                  {tree && (
+                    <CanvasToolbar
+                      docId={activePageId as string}
+                      tree={tree}
+                      selectedIds={selectedIds}
+                      onSelectionChange={handleSelectionChange}
+                      onSetEditing={setEditingId}
+                    />
+                  )}
                   <div id="scripture-notification-host" className="scripture-canvas-notices">
                     {backgroundRemovalOperations.map((operation) => (
                       <NotificationChip
@@ -1347,29 +1574,28 @@ export default function DocumentEditorPage() {
                     )}
                   </div>
                 </div>
-                <InspectorPanel
-                  key={`${activePageId}:${selectedIds.join(',')}`}
-                  docId={activePageId as string}
-                  tree={tree}
-                  selectedIds={selectedIds}
-                  onSelectionChange={handleSelectionChange}
-                  gutterClickMode={gutterClickMode}
-                  onGutterClickModeChange={setGutterClickMode}
-                  onOpenCustomize={handleOpenCustomize}
-                  onExportPdf={() => handleExport('pdf')}
-                  onExportPng={() => handleExport('png')}
-                  exporting={exporting}
-                  exportError={exportError}
-                  pageNumberSettings={pageNumberSettings}
-                  onPageNumberSettingsChange={handlePageNumberSettingsChange}
-                  pageIds={pageIds}
-                  pageNames={pageNames}
-                  onImageEffectPreviewChange={setImageEffectPreview}
-                />
+                {tree && (
+                  <InspectorPanel
+                    key={`${activePageId}:${selectedIds.join(',')}`}
+                    docId={activePageId as string}
+                    tree={tree}
+                    selectedIds={selectedIds}
+                    onSelectionChange={handleSelectionChange}
+                    gutterClickMode={gutterClickMode}
+                    onGutterClickModeChange={setGutterClickMode}
+                    onOpenCustomize={handleOpenCustomize}
+                    onExportPdf={() => handleExport('pdf')}
+                    onExportPng={() => handleExport('png')}
+                    exporting={exporting}
+                    exportError={exportError}
+                    pageNumberSettings={pageNumberSettings}
+                    onPageNumberSettingsChange={handlePageNumberSettingsChange}
+                    pageIds={pageIds}
+                    pageNames={pageNames}
+                    onImageEffectPreviewChange={setImageEffectPreview}
+                  />
+                )}
               </>
-            ) : (
-              <RouteLoadingScreen label="Opening page…" />
-            )}
           </div>
         ) : (
           <RouteLoadingScreen label="Opening project…" />

@@ -82,6 +82,10 @@ interface FrameNodeProps {
   onDropFiles: (frameId: string, files: File[]) => void
   pageNumber?: { number: number; settings: PageNumberSettings }
   imageEffectPreview?: ImageEffectPreview | null
+  // False for a CSS-kept-alive page. Its DOM/editor instances remain warm,
+  // but page-global registries and gesture work must belong only to the
+  // visible page because node ids are scoped to a page document.
+  pageActive?: boolean
 }
 
 function classNames(...parts: Array<string | false | undefined>) {
@@ -489,6 +493,7 @@ export function FrameNode({
   onDropFiles,
   pageNumber,
   imageEffectPreview,
+  pageActive = true,
 }: FrameNodeProps) {
   const isRoot = node.id === ROOT_ID
   const resolvedCodeBackground = node.kind === 'code' ? resolveThemeBackground(node.theme) : undefined
@@ -577,6 +582,13 @@ export function FrameNode({
   }, [])
 
   useEffect(() => {
+    if (pageActive) return
+    activeDragCleanupRef.current?.()
+    activeMarqueeCleanupRef.current?.()
+  }, [pageActive])
+
+  useEffect(() => {
+    if (!pageActive) return
     const element = elementRef.current
     if (!element) return
     return observeGeometry(node.id, parentId, element, element.parentElement, zoom)
@@ -589,6 +601,7 @@ export function FrameNode({
     node.width,
     node.height,
     observeGeometry,
+    pageActive,
   ])
 
   const isAutoWidth = renderedNode.width == null
@@ -639,6 +652,7 @@ export function FrameNode({
         setLivePosition(null)
       }}
       zoom={zoom}
+      active={pageActive}
       position={isCanvasChild ? { x: node.x ?? 0, y: node.y ?? 0 } : undefined}
       preserveAspectRatio={
         node.kind === 'image' && Boolean(node.src) && (node.aspectRatioLocked ?? true)
@@ -775,7 +789,7 @@ export function FrameNode({
       delete document.documentElement.dataset.scriptureMoving
       activeDragCleanupRef.current = null
     }
-    activeDragCleanupRef.current = cleanup
+    activeDragCleanupRef.current = cancel
     window.addEventListener('pointermove', onMovePointer, { passive: false })
     window.addEventListener('pointerup', onUpPointer)
     window.addEventListener('pointercancel', onPointerCancel)
@@ -880,7 +894,7 @@ export function FrameNode({
       window.removeEventListener('keydown', onKeyDown)
       activeMarqueeCleanupRef.current = null
     }
-    activeMarqueeCleanupRef.current = cleanup
+    activeMarqueeCleanupRef.current = cancel
     window.addEventListener('pointermove', onMove, { passive: false })
     window.addEventListener('pointerup', finish)
     window.addEventListener('pointercancel', onCancel)
@@ -1104,6 +1118,7 @@ export function FrameNode({
               onRequestPdfPicker={onRequestPdfPicker}
               onDropFiles={onDropFiles}
               imageEffectPreview={imageEffectPreview}
+              pageActive={pageActive}
             />
           ))}
           {marquee && (
@@ -1130,6 +1145,7 @@ export function FrameNode({
             onChange={(patch) => updateCallout(getYDoc(docId).doc, node.id, callout.id, patch)}
             onRemove={() => removeCallout(getYDoc(docId).doc, node.id, callout.id)}
             zoom={zoom}
+            active={pageActive}
           />
         ))}
         {resizeHandles}
@@ -1265,6 +1281,7 @@ export function FrameNode({
             textLineHeight={node.textLineHeight}
             textLetterSpacing={node.textLetterSpacing}
             textColor={node.textColor}
+            pageActive={pageActive}
           />
         )}
       </div>
